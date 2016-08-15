@@ -1,0 +1,10 @@
+hash: 73430f5f120c347159e8ac260c04159646e1c3b03ace878119ad6a84d82879c4
+updated: 2016-08-15T16:34:12.942646055-04:00
+imports:
+- name: github.com/cactus/go-statsd-client
+  version: 91c326c3f7bd20f0226d3d1c289dd9f8ce28d33d
+  subpackages:
+  - statsd
+- name: github.com/facebookgo/clock
+  version: 600d898af40aa09a7a93ecb9265d87b0504b6f03
+devImports: []
