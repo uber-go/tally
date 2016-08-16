@@ -22,6 +22,7 @@ package tally
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/facebookgo/clock"
 )
@@ -45,7 +46,8 @@ type Scope interface {
 	// // Tagged returns a new scope with the given tags
 	// Tagged(tags map[string]string) Scope
 
-	report(r StatsReporter)
+	Report(r StatsReporter)
+
 	scopedName(name string) string
 }
 
@@ -57,24 +59,34 @@ func NewScope(prefix string, reporter StatsReporter) Scope {
 	return &scope{
 		prefix:   prefix,
 		tags:     make(map[string]string),
-		stats:    newStats(),
 		reporter: reporter,
+
+		counters: make(map[string]Counter),
+		gauges:   make(map[string]Gauge),
+		timers:   make(map[string]Timer),
 	}
 }
 
 type scope struct {
 	prefix   string
 	tags     map[string]string
-	stats    *stats
 	reporter StatsReporter
+
+	cm sync.RWMutex
+	gm sync.RWMutex
+	tm sync.RWMutex
+
+	counters map[string]Counter
+	gauges   map[string]Gauge
+	timers   map[string]Timer
 }
 
-func (s *scope) report(r StatsReporter) {
-	for name, counter := range s.stats.counters {
+func (s *scope) Report(r StatsReporter) {
+	for name, counter := range s.counters {
 		counter.report(s.scopedName(name), s.tags, r)
 	}
 
-	for name, gauge := range s.stats.gauges {
+	for name, gauge := range s.gauges {
 		gauge.report(s.scopedName(name), s.tags, r)
 	}
 
@@ -83,46 +95,46 @@ func (s *scope) report(r StatsReporter) {
 
 // Counter returns the counter identified by the scope and the provided name, creating it if it does not already exist
 func (s *scope) Counter(name string) Counter {
-	s.stats.cm.RLock()
-	val, ok := s.stats.counters[name]
-	s.stats.cm.RUnlock()
+	s.cm.RLock()
+	val, ok := s.counters[name]
+	s.cm.RUnlock()
 	if !ok {
 		val = &counter{}
-		s.stats.cm.Lock()
-		s.stats.counters[name] = val
-		s.stats.cm.Unlock()
+		s.cm.Lock()
+		s.counters[name] = val
+		s.cm.Unlock()
 	}
 	return val
 }
 
 // Gauge returns the gauge identified by the scope and the provided name, creating it if it does not already exist
 func (s *scope) Gauge(name string) Gauge {
-	s.stats.gm.RLock()
-	val, ok := s.stats.gauges[name]
-	s.stats.gm.RUnlock()
+	s.gm.RLock()
+	val, ok := s.gauges[name]
+	s.gm.RUnlock()
 	if !ok {
 		val = &gauge{}
-		s.stats.gm.Lock()
-		s.stats.gauges[name] = val
-		s.stats.gm.Unlock()
+		s.gm.Lock()
+		s.gauges[name] = val
+		s.gm.Unlock()
 	}
 	return val
 }
 
 // Timer returns the timer identified by the scope and the provided name, creating it if it does not already exist
 func (s *scope) Timer(name string) Timer {
-	s.stats.tm.RLock()
-	val, ok := s.stats.timers[name]
-	s.stats.tm.RUnlock()
+	s.tm.RLock()
+	val, ok := s.timers[name]
+	s.tm.RUnlock()
 	if !ok {
 		val = &timer{
 			name:     s.scopedName(name),
 			tags:     s.tags,
 			reporter: s.reporter,
 		}
-		s.stats.tm.Lock()
-		s.stats.timers[name] = val
-		s.stats.tm.Unlock()
+		s.tm.Lock()
+		s.timers[name] = val
+		s.tm.Unlock()
 	}
 	return val
 }
@@ -131,8 +143,11 @@ func (s *scope) SubScope(prefix string) Scope {
 	return &scope{
 		prefix:   s.scopedName(prefix),
 		tags:     s.tags,
-		stats:    newStats(),
 		reporter: s.reporter,
+
+		counters: make(map[string]Counter),
+		gauges:   make(map[string]Gauge),
+		timers:   make(map[string]Timer),
 	}
 }
 

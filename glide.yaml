@@ -5,7 +5,6 @@ import:
   subpackages:
   - statsd
 - package: github.com/facebookgo/clock
-
 - package: github.com/axw/gocov
   subpackages:
   - gocov
@@ -21,3 +20,10 @@ import:
   subpackages:
   - assert
   - require
+- package: github.com/davecgh/go-spew
+  subpackages:
+  - spew
+- package: github.com/pmezard/go-difflib
+  version: ~1.0.0
+  subpackages:
+  - difflib
