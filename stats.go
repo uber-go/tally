@@ -95,10 +95,8 @@ func (g *gauge) Update(v int64) {
 }
 
 func (g *gauge) report(name string, tags map[string]string, r StatsReporter) error {
-	updated := atomic.SwapInt64(&g.updated, 0)
-	if updated > 0 {
-		curr := atomic.LoadInt64(&g.curr)
-		r.ReportGauge(name, tags, curr)
+	if atomic.SwapInt64(&g.updated, 0) == 1 {
+		r.ReportGauge(name, tags, atomic.LoadInt64(&g.curr))
 		return nil
 	}
 	return errNoData
