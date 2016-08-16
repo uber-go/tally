@@ -5,3 +5,19 @@ import:
   subpackages:
   - statsd
 - package: github.com/facebookgo/clock
+
+- package: github.com/axw/gocov
+  subpackages:
+  - gocov
+- package: github.com/mattn/goveralls
+- package: golang.org/x/tools
+  subpackages:
+  - cover
+- package: github.com/golang/lint
+  subpackages:
+  - golint
+- package: github.com/pborman/uuid
+- package: github.com/stretchr/testify
+  subpackages:
+  - assert
+  - require

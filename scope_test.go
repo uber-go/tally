@@ -21,14 +21,50 @@
 package tally
 
 import (
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
+type testStatsReporter struct {
+	sync.RWMutex
+
+	scope Scope
+
+	counters map[string]int64
+	gauges   map[string]int64
+	timers   map[string]time.Duration
+}
+
+func (r *testStatsReporter) registerScope(s Scope) {
+	r.scope = s
+}
+
+func (r *testStatsReporter) reportCounter(name string, tags map[string]string, value int64) {
+	r.counters[name] = value
+}
+
+func (r *testStatsReporter) reportGauge(name string, tags map[string]string, value int64) {
+	r.gauges[name] = value
+}
+
+func (r *testStatsReporter) reportTimer(name string, tags map[string]string, interval time.Duration) {
+	r.timers[name] = interval
+}
+
+// newTestStatsReporter returns a new TestStatsReporter
+func newTestStatsReporter() *testStatsReporter {
+	return &testStatsReporter{
+		counters: make(map[string]int64),
+		gauges:   make(map[string]int64),
+		timers:   make(map[string]time.Duration),
+	}
+}
+
 func TestWriteOnce(t *testing.T) {
-	r := NewTestStatsReporter()
+	r := newTestStatsReporter()
 	scope := NewScope("", r)
 	scope.Counter("bar").Inc(1)
 	scope.Gauge("zed").Update(1)
@@ -39,7 +75,7 @@ func TestWriteOnce(t *testing.T) {
 	assert.EqualValues(t, 1, r.gauges["zed"])
 	assert.EqualValues(t, time.Millisecond*175, r.timers["ticky"])
 
-	r = NewTestStatsReporter()
+	r = newTestStatsReporter()
 	scope.report(r)
 	assert.EqualValues(t, 0, r.counters["bar"])
 	assert.EqualValues(t, 0, r.gauges["zed"])
@@ -47,7 +83,7 @@ func TestWriteOnce(t *testing.T) {
 }
 
 func TestRootScopeWithoutPrefix(t *testing.T) {
-	r := NewTestStatsReporter()
+	r := newTestStatsReporter()
 	scope := NewScope("", r)
 	scope.Counter("bar").Inc(1)
 	scope.Counter("bar").Inc(20)
@@ -61,7 +97,7 @@ func TestRootScopeWithoutPrefix(t *testing.T) {
 }
 
 func TestRootScopeWithPrefix(t *testing.T) {
-	r := NewTestStatsReporter()
+	r := newTestStatsReporter()
 	scope := NewScope("foo", r)
 	scope.Counter("bar").Inc(1)
 	scope.Counter("bar").Inc(20)
@@ -75,7 +111,7 @@ func TestRootScopeWithPrefix(t *testing.T) {
 }
 
 func TestSubScope(t *testing.T) {
-	r := NewTestStatsReporter()
+	r := newTestStatsReporter()
 	scope := NewScope("foo", r).SubScope("mork")
 	scope.Counter("bar").Inc(1)
 	scope.Counter("bar").Inc(20)
