@@ -43,8 +43,8 @@ type Scope interface {
 	// SubScope returns a new child scope with the given name
 	SubScope(name string) Scope
 
-	// // Tagged returns a new scope with the given tags
-	// Tagged(tags map[string]string) Scope
+	// Tagged returns a new scope with the given tags
+	Tagged(tags map[string]string) Scope
 
 	Report(r StatsReporter)
 
@@ -52,13 +52,16 @@ type Scope interface {
 }
 
 // NoopScope is a scope that does nothing
-var NoopScope = NewScope("", NullStatsReporter)
+var NoopScope = NewScope("", nil, NullStatsReporter)
 
 // NewScope creates a new Scope around a given stats reporter with the given prefix
-func NewScope(prefix string, reporter StatsReporter) Scope {
+func NewScope(prefix string, tags map[string]string, reporter StatsReporter) Scope {
+	if tags == nil {
+		tags = make(map[string]string)
+	}
 	return &scope{
 		prefix:   prefix,
-		tags:     make(map[string]string),
+		tags:     tags,
 		reporter: reporter,
 
 		counters: make(map[string]Counter),
@@ -137,6 +140,34 @@ func (s *scope) Timer(name string) Timer {
 		s.tm.Unlock()
 	}
 	return val
+}
+
+// mergeRightTags merges 2 sets of tags with the tags from tagsRight overriding values from tagsLeft
+func mergeRightTags(tagsLeft, tagsRight map[string]string) map[string]string {
+	if tagsLeft == nil && tagsRight == nil {
+		return nil
+	}
+
+	result := make(map[string]string, len(tagsLeft)+len(tagsRight))
+	for k, v := range tagsLeft {
+		result[k] = v
+	}
+	for k, v := range tagsRight {
+		result[k] = v
+	}
+	return result
+}
+
+func (s *scope) Tagged(tags map[string]string) Scope {
+	return &scope{
+		prefix:   s.prefix,
+		tags:     mergeRightTags(s.tags, tags),
+		reporter: s.reporter,
+
+		counters: make(map[string]Counter),
+		gauges:   make(map[string]Gauge),
+		timers:   make(map[string]Timer),
+	}
 }
 
 func (s *scope) SubScope(prefix string) Scope {

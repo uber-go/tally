@@ -61,7 +61,7 @@ func newTestStatsReporter() *testStatsReporter {
 
 func TestWriteOnce(t *testing.T) {
 	r := newTestStatsReporter()
-	scope := NewScope("", r)
+	scope := NewScope("", nil, r)
 	scope.Counter("bar").Inc(1)
 	scope.Gauge("zed").Update(1)
 	scope.Timer("ticky").Record(time.Millisecond * 175)
@@ -80,7 +80,7 @@ func TestWriteOnce(t *testing.T) {
 
 func TestRootScopeWithoutPrefix(t *testing.T) {
 	r := newTestStatsReporter()
-	scope := NewScope("", r)
+	scope := NewScope("", nil, r)
 	scope.Counter("bar").Inc(1)
 	scope.Counter("bar").Inc(20)
 	scope.Gauge("zed").Update(1)
@@ -94,7 +94,7 @@ func TestRootScopeWithoutPrefix(t *testing.T) {
 
 func TestRootScopeWithPrefix(t *testing.T) {
 	r := newTestStatsReporter()
-	scope := NewScope("foo", r)
+	scope := NewScope("foo", nil, r)
 	scope.Counter("bar").Inc(1)
 	scope.Counter("bar").Inc(20)
 	scope.Gauge("zed").Update(1)
@@ -108,7 +108,7 @@ func TestRootScopeWithPrefix(t *testing.T) {
 
 func TestSubScope(t *testing.T) {
 	r := newTestStatsReporter()
-	scope := NewScope("foo", r).SubScope("mork")
+	scope := NewScope("foo", nil, r).SubScope("mork")
 	scope.Counter("bar").Inc(1)
 	scope.Counter("bar").Inc(20)
 	scope.Gauge("zed").Update(1)
@@ -119,49 +119,3 @@ func TestSubScope(t *testing.T) {
 	assert.EqualValues(t, 1, r.gauges["foo.mork.zed"])
 	assert.EqualValues(t, time.Millisecond*175, r.timers["foo.mork.blork"])
 }
-
-// func TestTaggedScope(t *testing.T) {
-// 	l1Tags := map[string]string{
-// 		"my-key":    "my-val",
-// 		"other-key": "to-replace",
-// 	}
-
-// 	l2Tags := map[string]string{
-// 		"other-key": "override",
-// 	}
-
-// 	tags := map[string]string{
-// 		"my-key":    "my-val",
-// 		"other-key": "override",
-// 	}
-
-// 	stats := NewTestStatsReporter()
-// 	scope := NewScope("foo", stats).Tagged(l1Tags).Tagged(l2Tags)
-// 	scope.IncCounter("bar", 1)
-// 	scope.IncCounter("bar", 20)
-// 	scope.UpdateGauge("zed", 1)
-// 	scope.RecordTimer("blork", time.Millisecond*175)
-
-// 	assert.EqualValues(t, 21, stats.Counter("foo.bar", tags))
-// 	assert.EqualValues(t, 1, stats.Gauge("foo.zed", tags))
-// 	assert.EqualValues(t, 175.0, stats.Timer("foo.blork", tags).Quantile(0.5))
-// 	assert.Nil(t, stats.Timer("foo.blork", nil))
-// }
-
-// func TestScopeCall(t *testing.T) {
-// 	clock := clock.NewMock()
-// 	stats := NewTestStatsReporter()
-// 	scope := NewScope("", stats)
-
-// 	call := scope.StartCall("my-call", clock)
-// 	clock.Add(time.Millisecond * 10)
-// 	call(true)
-
-// 	call = scope.StartCall("my-call", clock)
-// 	clock.Add(time.Second * 1000)
-// 	call(false) // did not succeed
-
-// 	assert.EqualValues(t, 1, stats.Counter("my-call.success", nil))
-// 	assert.EqualValues(t, 1, stats.Counter("my-call.errors", nil))
-// 	assert.EqualValues(t, 10, stats.Timer("my-call", nil).Quantile(0.999)) // only success is tracked
-// }
