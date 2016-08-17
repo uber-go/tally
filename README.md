@@ -5,30 +5,62 @@ Fast, buffered, heirarchical stats collection in Go.
 ## Installation
 `go get -u github.com/uber-go/tally`
 
-## Structure
+## Abstract
 
 Tally provides a common interface for tracking metrics, while letting
 you not worry about the velocity of logging.
 
+## Structure
+
+- Scope Keeps track of metrics, and their common metadata.
+- Metrics: Counters, Gauges, Timers
+- Reporter: Implemented by you. Accepts aggregated values from the scope. Forwards the aggregated values on the your analytics DB.
+
+### Acquire a Scope ###
+```golang
+reporter = MyStatsReporter()  // Implement as you will
+tags := map[string]string{
+	"dc": "east-1",
+	"type": "master",
+}
+scope := tally.NewScope("coolserver", tags, reporter)
 ```
-Code example...
+
+### Get/Create a metric, use it ###
+```golang
+// Get a counter, increment a counter
+reqCounter := scope.Counter('requests')  // cache me
+reqCounter.Inc(1)
+
+memGauge := scope.Gauge('mem_usage')  // cache me
+memGauge.Update(42)
+```
+
+### Report your metrics ###
+``` golang
+func (r *myStatsReporter) start(scope) {
+	ticker := time.NewTicker(r.interval)
+	for {
+		select {
+		case <-ticker.C:
+			scope.Report(r)
+		case <-r.quit:
+			return
+		}
+	}
+}
 ```
 
 ## Performance
 
 Something, something, something, dark side
 
-## Development Status: Beta
-Ready for adventurous users, but we're planning several breaking changes before
-releasing version 1.0. [This milestone][v1] tracks our progress toward a stable
-release.
+## Development Status: Pre-Beta
+
+Not quite ready yet. You probably don't want to use this just yet.
 
 <hr>
 Released under the [MIT License](LICENSE).
-
-<sup id="footnote-versions">1</sup> In particular, keep in mind that we may be
-benchmarking against slightly older versions of other libraries. Versions are
-pinned in tally [glide.lock][] file. [↩](#anchor-versions)
 
 [doc-img]: https://godoc.org/github.com/uber-go/tally?status.svg
 [doc]: https://godoc.org/github.com/uber-go/tally
