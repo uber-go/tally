@@ -2,7 +2,7 @@ export GO15VENDOREXPERIMENT=1
 
 BENCH_FLAGS ?= -cpuprofile=cpu.pprof -memprofile=mem.pprof -benchmem
 PKGS ?= $(shell glide novendor)
-PKG_FILES ?= *.go
+PKG_FILES ?= *.go example/*.go
 
 # The linting tools evolve with each Go version, so run them only on the latest
 # stable release.

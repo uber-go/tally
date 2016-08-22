@@ -21,13 +21,8 @@
 package tally
 
 import (
-	"errors"
 	"sync/atomic"
 	"time"
-)
-
-var (
-	errNoData = errors.New("No data")
 )
 
 // StatsReporter is the bridge between Scopes/metrics and the system where the metrics get sent in the end.
@@ -38,16 +33,22 @@ type StatsReporter interface {
 	ReportTimer(name string, tags map[string]string, interval time.Duration)
 }
 
+type reportableMetric interface {
+	report(name string, tags map[string]string, r StatsReporter)
+}
+
 // Counter is the interface for logging statsd-counter-type metrics
 type Counter interface {
+	reportableMetric
+
 	Inc(int64)
-	report(name string, tags map[string]string, r StatsReporter) error
 }
 
 // Gauge is the interface for logging statsd-gauge-type metrics
 type Gauge interface {
+	reportableMetric
+
 	Update(int64)
-	report(name string, tags map[string]string, r StatsReporter) error
 }
 
 // Timer is the interface for logging statsd-timer-type metrics
@@ -78,15 +79,15 @@ func (c *counter) Inc(v int64) {
 	atomic.AddInt64(&c.curr, v)
 }
 
-func (c *counter) report(name string, tags map[string]string, r StatsReporter) error {
+func (c *counter) report(name string, tags map[string]string, r StatsReporter) {
 	curr := atomic.LoadInt64(&c.curr)
+
 	prev := c.prev
 	if prev == curr {
-		return errNoData
+		return
 	}
 	atomic.StoreInt64(&c.prev, curr)
 	r.ReportCounter(name, tags, curr-prev)
-	return nil
 }
 
 func (g *gauge) Update(v int64) {
@@ -94,13 +95,10 @@ func (g *gauge) Update(v int64) {
 	atomic.StoreInt64(&g.updated, 1)
 }
 
-func (g *gauge) report(name string, tags map[string]string, r StatsReporter) error {
+func (g *gauge) report(name string, tags map[string]string, r StatsReporter) {
 	if atomic.SwapInt64(&g.updated, 0) == 1 {
 		r.ReportGauge(name, tags, atomic.LoadInt64(&g.curr))
-		return nil
 	}
-	return errNoData
-
 }
 
 func (t *timer) Begin() func() {

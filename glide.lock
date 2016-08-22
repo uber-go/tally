@@ -1,5 +1,5 @@
-hash: fa148cc107461297cd20b9b79f406971bdc32820cc91ae1120e6c652cafda451
-updated: 2016-08-16T11:49:54.638378441-04:00
+hash: 52a7b1928e71a6c9beae78e54679bb5af2c142b84c9cf4aeff88d56edb945da6
+updated: 2016-08-22T11:34:36.697405431-04:00
 imports:
 - name: github.com/axw/gocov
   version: 54b98cfcac0c63fb3f9bd8e7ad241b724d4e985b

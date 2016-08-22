@@ -27,9 +27,14 @@ import (
 	"github.com/facebookgo/clock"
 )
 
+type scope interface {
+	fullyQualifiedName(name string) string
+}
+
 // A Scope is a namespace wrapper around a stats reporter, ensuring that
 // all emitted values have a given prefix or set of tags
 type Scope interface {
+	scope
 
 	// Counter returns the Counter object corresponding to the name
 	Counter(name string) Counter
@@ -47,8 +52,6 @@ type Scope interface {
 	Tagged(tags map[string]string) Scope
 
 	Report(r StatsReporter)
-
-	scopedName(name string) string
 }
 
 // NoopScope is a scope that does nothing
@@ -59,7 +62,7 @@ func NewScope(prefix string, tags map[string]string, reporter StatsReporter) Sco
 	if tags == nil {
 		tags = make(map[string]string)
 	}
-	return &scope{
+	return &standardScope{
 		prefix:   prefix,
 		tags:     tags,
 		reporter: reporter,
@@ -70,7 +73,7 @@ func NewScope(prefix string, tags map[string]string, reporter StatsReporter) Sco
 	}
 }
 
-type scope struct {
+type standardScope struct {
 	prefix   string
 	tags     map[string]string
 	reporter StatsReporter
@@ -84,59 +87,72 @@ type scope struct {
 	timers   map[string]Timer
 }
 
-func (s *scope) Report(r StatsReporter) {
+func (s *standardScope) Report(r StatsReporter) {
+	s.cm.RLock()
 	for name, counter := range s.counters {
-		counter.report(s.scopedName(name), s.tags, r)
+		counter.report(s.fullyQualifiedName(name), s.tags, r)
 	}
+	s.cm.RUnlock()
 
+	s.gm.RLock()
 	for name, gauge := range s.gauges {
-		gauge.report(s.scopedName(name), s.tags, r)
+		gauge.report(s.fullyQualifiedName(name), s.tags, r)
 	}
+	s.gm.RUnlock()
 
 	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
 }
 
 // Counter returns the counter identified by the scope and the provided name, creating it if it does not already exist
-func (s *scope) Counter(name string) Counter {
+func (s *standardScope) Counter(name string) Counter {
 	s.cm.RLock()
 	val, ok := s.counters[name]
 	s.cm.RUnlock()
 	if !ok {
-		val = &counter{}
 		s.cm.Lock()
-		s.counters[name] = val
+		val, ok = s.counters[name]
+		if !ok {
+			val = &counter{}
+			s.counters[name] = val
+		}
 		s.cm.Unlock()
 	}
 	return val
 }
 
 // Gauge returns the gauge identified by the scope and the provided name, creating it if it does not already exist
-func (s *scope) Gauge(name string) Gauge {
+func (s *standardScope) Gauge(name string) Gauge {
 	s.gm.RLock()
 	val, ok := s.gauges[name]
 	s.gm.RUnlock()
 	if !ok {
-		val = &gauge{}
 		s.gm.Lock()
-		s.gauges[name] = val
+		val, ok = s.gauges[name]
+		if !ok {
+			val = &gauge{}
+			s.gauges[name] = val
+		}
 		s.gm.Unlock()
 	}
 	return val
 }
 
 // Timer returns the timer identified by the scope and the provided name, creating it if it does not already exist
-func (s *scope) Timer(name string) Timer {
+func (s *standardScope) Timer(name string) Timer {
 	s.tm.RLock()
 	val, ok := s.timers[name]
 	s.tm.RUnlock()
 	if !ok {
-		val = &timer{
-			name:     s.scopedName(name),
-			tags:     s.tags,
-			reporter: s.reporter,
-		}
 		s.tm.Lock()
-		s.timers[name] = val
+		val, ok = s.timers[name]
+		if !ok {
+			val = &timer{
+				name:     s.fullyQualifiedName(name),
+				tags:     s.tags,
+				reporter: s.reporter,
+			}
+			s.timers[name] = val
+		}
 		s.tm.Unlock()
 	}
 	return val
@@ -158,8 +174,8 @@ func mergeRightTags(tagsLeft, tagsRight map[string]string) map[string]string {
 	return result
 }
 
-func (s *scope) Tagged(tags map[string]string) Scope {
-	return &scope{
+func (s *standardScope) Tagged(tags map[string]string) Scope {
+	return &standardScope{
 		prefix:   s.prefix,
 		tags:     mergeRightTags(s.tags, tags),
 		reporter: s.reporter,
@@ -170,9 +186,9 @@ func (s *scope) Tagged(tags map[string]string) Scope {
 	}
 }
 
-func (s *scope) SubScope(prefix string) Scope {
-	return &scope{
-		prefix:   s.scopedName(prefix),
+func (s *standardScope) SubScope(prefix string) Scope {
+	return &standardScope{
+		prefix:   s.fullyQualifiedName(prefix),
 		tags:     s.tags,
 		reporter: s.reporter,
 
@@ -182,7 +198,7 @@ func (s *scope) SubScope(prefix string) Scope {
 	}
 }
 
-func (s *scope) scopedName(name string) string {
+func (s *standardScope) fullyQualifiedName(name string) string {
 	// TODO(mmihic): Consider maintaining a map[string]string for common names so we
 	// avoid the cost of continual allocations
 	if len(s.prefix) == 0 {

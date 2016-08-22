@@ -22,10 +22,20 @@ func NewCactusStatsReporter(statsd statsd.Statter, interval time.Duration) tally
 		quit:     make(chan struct{}),
 		statter:  statsd,
 		interval: interval,
-		scopes:   make([]tally.Scope, 0),
+		scopes:   make([]tally.Scope, 4),
 	}
 }
 
+// RegisterScope should be called at setup. The reporter will periodically tell any registered
+// Scopes to dump their collected stats the the cactusStatsReporter. Scopes must be registered
+// before running Start()
+func (r *cactusStatsReporter) RegisterScope(s tally.Scope) {
+	r.sm.Lock()
+	r.scopes = append(r.scopes, s)
+	r.sm.Unlock()
+}
+
+// Start begins the stats reporter loop. Run this after registering one or more scopes.
 func (r *cactusStatsReporter) Start() {
 	ticker := time.NewTicker(r.interval)
 	for {
@@ -38,12 +48,6 @@ func (r *cactusStatsReporter) Start() {
 			return
 		}
 	}
-}
-
-func (r *cactusStatsReporter) registerScope(s tally.Scope) {
-	r.sm.Lock()
-	r.scopes = append(r.scopes, s)
-	r.sm.Unlock()
 }
 
 func (r *cactusStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
