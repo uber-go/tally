@@ -21,7 +21,6 @@
 package tally
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -29,21 +28,14 @@ import (
 	"github.com/facebookgo/clock"
 )
 
-var (
-	errCloneNonRoot = errors.New("Called Close on non-root Scope")
-)
-
 type scope interface {
 	fullyQualifiedName(name string) string
 }
 
-// A Scope is a namespace wrapper around a stats reporter, ensuring that
+// Scope is a namespace wrapper around a stats reporter, ensuring that
 // all emitted values have a given prefix or set of tags
 type Scope interface {
 	scope
-
-	// Close Ceases reporting of the scope and subscopes
-	Close() error
 
 	// Counter returns the Counter object corresponding to the name
 	Counter(name string) Counter
@@ -61,6 +53,14 @@ type Scope interface {
 	Tagged(tags map[string]string) Scope
 
 	Report(r StatsReporter)
+}
+
+// RootScope is a scope that manages itself and other Scopes
+type RootScope interface {
+	Scope
+
+	// Close Ceases periodic reporting of the root scope and subscopes
+	Close()
 }
 
 // NoopScope is a scope that does nothing
@@ -95,7 +95,7 @@ type standardScope struct {
 }
 
 // NewRootScope creates a new Scope around a given stats reporter with the given prefix
-func NewRootScope(prefix string, tags map[string]string, reporter StatsReporter, interval time.Duration) Scope {
+func NewRootScope(prefix string, tags map[string]string, reporter StatsReporter, interval time.Duration) RootScope {
 	if tags == nil {
 		tags = make(map[string]string)
 	}
@@ -156,12 +156,8 @@ func (s *standardScope) reportLoop(interval time.Duration) {
 	}
 }
 
-func (s *standardScope) Close() error {
-	if s.quit == nil {
-		return errCloneNonRoot
-	}
+func (s *standardScope) Close() {
 	close(s.quit)
-	return nil
 }
 
 // Counter returns the counter identified by the scope and the provided name, creating it if it does not already exist
