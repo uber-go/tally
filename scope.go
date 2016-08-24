@@ -35,7 +35,6 @@ var (
 
 type scope interface {
 	fullyQualifiedName(name string) string
-	report(r StatsReporter)
 }
 
 // A Scope is a namespace wrapper around a stats reporter, ensuring that
@@ -60,6 +59,8 @@ type Scope interface {
 
 	// Tagged returns a new scope with the given tags
 	Tagged(tags map[string]string) Scope
+
+	Report(r StatsReporter)
 }
 
 // NoopScope is a scope that does nothing
@@ -121,7 +122,8 @@ func NewRootScope(prefix string, tags map[string]string, reporter StatsReporter,
 	return scope
 }
 
-func (s *standardScope) report(r StatsReporter) {
+// Report dumps all aggregated stats into the reporter. Should be called automatically by the root scope periodically.
+func (s *standardScope) Report(r StatsReporter) {
 	s.cm.RLock()
 	for name, counter := range s.counters {
 		counter.report(s.fullyQualifiedName(name), s.tags, r)
@@ -145,7 +147,7 @@ func (s *standardScope) reportLoop(interval time.Duration) {
 		case <-ticker.C:
 			s.registry.sm.Lock()
 			for _, ss := range s.registry.subscopes {
-				ss.report(s.reporter)
+				ss.Report(s.reporter)
 			}
 			s.registry.sm.Unlock()
 		case <-s.quit:

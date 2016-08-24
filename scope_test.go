@@ -66,13 +66,13 @@ func TestWriteOnce(t *testing.T) {
 	scope.Gauge("zed").Update(1)
 	scope.Timer("ticky").Record(time.Millisecond * 175)
 
-	scope.report(r)
+	scope.Report(r)
 	assert.EqualValues(t, 1, r.counters["bar"])
 	assert.EqualValues(t, 1, r.gauges["zed"])
 	assert.EqualValues(t, time.Millisecond*175, r.timers["ticky"])
 
 	r = newTestStatsReporter()
-	scope.report(r)
+	scope.Report(r)
 	assert.EqualValues(t, 0, r.counters["bar"])
 	assert.EqualValues(t, 0, r.gauges["zed"])
 	assert.EqualValues(t, 0, r.timers["ticky"])
@@ -86,7 +86,7 @@ func TestRootScopeWithoutPrefix(t *testing.T) {
 	scope.Gauge("zed").Update(1)
 	scope.Timer("blork").Record(time.Millisecond * 175)
 
-	scope.report(r)
+	scope.Report(r)
 	assert.EqualValues(t, 21, r.counters["bar"])
 	assert.EqualValues(t, 1, r.gauges["zed"])
 	assert.EqualValues(t, time.Millisecond*175, r.timers["blork"])
@@ -100,7 +100,7 @@ func TestRootScopeWithPrefix(t *testing.T) {
 	scope.Gauge("zed").Update(1)
 	scope.Timer("blork").Record(time.Millisecond * 175)
 
-	scope.report(r)
+	scope.Report(r)
 	assert.EqualValues(t, 21, r.counters["foo.bar"])
 	assert.EqualValues(t, 1, r.gauges["foo.zed"])
 	assert.EqualValues(t, time.Millisecond*175, r.timers["foo.blork"])
@@ -114,7 +114,7 @@ func TestSubScope(t *testing.T) {
 	scope.Gauge("zed").Update(1)
 	scope.Timer("blork").Record(time.Millisecond * 175)
 
-	scope.report(r)
+	scope.Report(r)
 	assert.EqualValues(t, 21, r.counters["foo.mork.bar"])
 	assert.EqualValues(t, 1, r.gauges["foo.mork.zed"])
 	assert.EqualValues(t, time.Millisecond*175, r.timers["foo.mork.blork"])
