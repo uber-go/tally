@@ -23,6 +23,7 @@ package tally
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/facebookgo/clock"
 )
@@ -31,7 +32,7 @@ type scope interface {
 	fullyQualifiedName(name string) string
 }
 
-// A Scope is a namespace wrapper around a stats reporter, ensuring that
+// Scope is a namespace wrapper around a stats reporter, ensuring that
 // all emitted values have a given prefix or set of tags
 type Scope interface {
 	scope
@@ -54,29 +55,35 @@ type Scope interface {
 	Report(r StatsReporter)
 }
 
+// RootScope is a scope that manages itself and other Scopes
+type RootScope interface {
+	Scope
+
+	// Close Ceases periodic reporting of the root scope and subscopes
+	Close()
+}
+
 // NoopScope is a scope that does nothing
-var NoopScope = NewScope("", nil, NullStatsReporter)
+var NoopScope = NewRootScope("", nil, NullStatsReporter, 0)
 
-// NewScope creates a new Scope around a given stats reporter with the given prefix
-func NewScope(prefix string, tags map[string]string, reporter StatsReporter) Scope {
-	if tags == nil {
-		tags = make(map[string]string)
-	}
-	return &standardScope{
-		prefix:   prefix,
-		tags:     tags,
-		reporter: reporter,
+type scopeRegistry struct {
+	sm        sync.Mutex
+	subscopes []Scope
+}
 
-		counters: make(map[string]Counter),
-		gauges:   make(map[string]Gauge),
-		timers:   make(map[string]Timer),
-	}
+func (r *scopeRegistry) add(subscope *standardScope) {
+	r.sm.Lock()
+	r.subscopes = append(r.subscopes, subscope)
+	r.sm.Unlock()
 }
 
 type standardScope struct {
 	prefix   string
 	tags     map[string]string
 	reporter StatsReporter
+
+	registry *scopeRegistry
+	quit     chan struct{}
 
 	cm sync.RWMutex
 	gm sync.RWMutex
@@ -87,6 +94,35 @@ type standardScope struct {
 	timers   map[string]Timer
 }
 
+// NewRootScope creates a new Scope around a given stats reporter with the given prefix
+func NewRootScope(prefix string, tags map[string]string, reporter StatsReporter, interval time.Duration) RootScope {
+	if tags == nil {
+		tags = make(map[string]string)
+	}
+
+	scope := &standardScope{
+		prefix:   prefix,
+		tags:     tags,
+		reporter: reporter,
+
+		registry: &scopeRegistry{},
+		quit:     make(chan struct{}),
+
+		counters: make(map[string]Counter),
+		gauges:   make(map[string]Gauge),
+		timers:   make(map[string]Timer),
+	}
+
+	scope.registry.add(scope)
+
+	if interval > 0 {
+		go scope.reportLoop(interval)
+	}
+
+	return scope
+}
+
+// Report dumps all aggregated stats into the reporter. Should be called automatically by the root scope periodically.
 func (s *standardScope) Report(r StatsReporter) {
 	s.cm.RLock()
 	for name, counter := range s.counters {
@@ -101,6 +137,27 @@ func (s *standardScope) Report(r StatsReporter) {
 	s.gm.RUnlock()
 
 	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
+}
+
+// reportLoop is used by the root scope for periodic reporting
+func (s *standardScope) reportLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	for {
+		select {
+		case <-ticker.C:
+			s.registry.sm.Lock()
+			for _, ss := range s.registry.subscopes {
+				ss.Report(s.reporter)
+			}
+			s.registry.sm.Unlock()
+		case <-s.quit:
+			return
+		}
+	}
+}
+
+func (s *standardScope) Close() {
+	close(s.quit)
 }
 
 // Counter returns the counter identified by the scope and the provided name, creating it if it does not already exist
@@ -175,27 +232,35 @@ func mergeRightTags(tagsLeft, tagsRight map[string]string) map[string]string {
 }
 
 func (s *standardScope) Tagged(tags map[string]string) Scope {
-	return &standardScope{
+	subscope := &standardScope{
 		prefix:   s.prefix,
 		tags:     mergeRightTags(s.tags, tags),
 		reporter: s.reporter,
+		registry: s.registry,
 
 		counters: make(map[string]Counter),
 		gauges:   make(map[string]Gauge),
 		timers:   make(map[string]Timer),
 	}
+
+	subscope.registry.add(subscope)
+	return subscope
 }
 
 func (s *standardScope) SubScope(prefix string) Scope {
-	return &standardScope{
+	subscope := &standardScope{
 		prefix:   s.fullyQualifiedName(prefix),
 		tags:     s.tags,
 		reporter: s.reporter,
+		registry: s.registry,
 
 		counters: make(map[string]Counter),
 		gauges:   make(map[string]Gauge),
 		timers:   make(map[string]Timer),
 	}
+
+	subscope.registry.add(subscope)
+	return subscope
 }
 
 func (s *standardScope) fullyQualifiedName(name string) string {
