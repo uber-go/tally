@@ -29,7 +29,6 @@ import (
 
 type printStatsReporter struct{}
 
-// NewCactusStatsReporter returns a new StatsReporter
 func newPrintStatsReporter() tally.StatsReporter {
 	return &printStatsReporter{}
 }
@@ -48,7 +47,7 @@ func (r *printStatsReporter) ReportTimer(name string, tags map[string]string, in
 
 func main() {
 	reporter := newPrintStatsReporter()
-	rootScope := tally.NewScope("", nil, reporter, time.Second)
+	rootScope := tally.NewRootScope("", nil, reporter, time.Second)
 	subScope := rootScope.SubScope("requests")
 
 	bighand := time.NewTicker(time.Millisecond * 2300)

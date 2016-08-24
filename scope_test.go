@@ -61,7 +61,7 @@ func newTestStatsReporter() *testStatsReporter {
 
 func TestWriteOnce(t *testing.T) {
 	r := newTestStatsReporter()
-	scope := NewScope("", nil, r, 0)
+	scope := NewRootScope("", nil, r, 0)
 	scope.Counter("bar").Inc(1)
 	scope.Gauge("zed").Update(1)
 	scope.Timer("ticky").Record(time.Millisecond * 175)
@@ -80,7 +80,7 @@ func TestWriteOnce(t *testing.T) {
 
 func TestRootScopeWithoutPrefix(t *testing.T) {
 	r := newTestStatsReporter()
-	scope := NewScope("", nil, r, 0)
+	scope := NewRootScope("", nil, r, 0)
 	scope.Counter("bar").Inc(1)
 	scope.Counter("bar").Inc(20)
 	scope.Gauge("zed").Update(1)
@@ -94,7 +94,7 @@ func TestRootScopeWithoutPrefix(t *testing.T) {
 
 func TestRootScopeWithPrefix(t *testing.T) {
 	r := newTestStatsReporter()
-	scope := NewScope("foo", nil, r, 0)
+	scope := NewRootScope("foo", nil, r, 0)
 	scope.Counter("bar").Inc(1)
 	scope.Counter("bar").Inc(20)
 	scope.Gauge("zed").Update(1)
@@ -108,7 +108,7 @@ func TestRootScopeWithPrefix(t *testing.T) {
 
 func TestSubScope(t *testing.T) {
 	r := newTestStatsReporter()
-	scope := NewScope("foo", nil, r, 0).SubScope("mork")
+	scope := NewRootScope("foo", nil, r, 0).SubScope("mork")
 	scope.Counter("bar").Inc(1)
 	scope.Counter("bar").Inc(20)
 	scope.Gauge("zed").Update(1)

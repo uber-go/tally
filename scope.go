@@ -21,11 +21,16 @@
 package tally
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/facebookgo/clock"
+)
+
+var (
+	errCloneNonRoot = errors.New("Called Close on non-root Scope")
 )
 
 type scope interface {
@@ -37,6 +42,9 @@ type scope interface {
 // all emitted values have a given prefix or set of tags
 type Scope interface {
 	scope
+
+	// Close Ceases reporting of the scope and subscopes
+	Close() error
 
 	// Counter returns the Counter object corresponding to the name
 	Counter(name string) Counter
@@ -55,7 +63,7 @@ type Scope interface {
 }
 
 // NoopScope is a scope that does nothing
-var NoopScope = NewScope("", nil, NullStatsReporter, 0)
+var NoopScope = NewRootScope("", nil, NullStatsReporter, 0)
 
 type scopeRegistry struct {
 	sm        sync.Mutex
@@ -74,6 +82,7 @@ type standardScope struct {
 	reporter StatsReporter
 
 	registry *scopeRegistry
+	quit     chan struct{}
 
 	cm sync.RWMutex
 	gm sync.RWMutex
@@ -84,8 +93,8 @@ type standardScope struct {
 	timers   map[string]Timer
 }
 
-// NewScope creates a new Scope around a given stats reporter with the given prefix
-func NewScope(prefix string, tags map[string]string, reporter StatsReporter, interval time.Duration) Scope {
+// NewRootScope creates a new Scope around a given stats reporter with the given prefix
+func NewRootScope(prefix string, tags map[string]string, reporter StatsReporter, interval time.Duration) Scope {
 	if tags == nil {
 		tags = make(map[string]string)
 	}
@@ -95,9 +104,8 @@ func NewScope(prefix string, tags map[string]string, reporter StatsReporter, int
 		tags:     tags,
 		reporter: reporter,
 
-		registry: &scopeRegistry{
-			subscopes: make([]Scope, 0, 5),
-		},
+		registry: &scopeRegistry{},
+		quit:     make(chan struct{}),
 
 		counters: make(map[string]Counter),
 		gauges:   make(map[string]Gauge),
@@ -140,8 +148,18 @@ func (s *standardScope) reportLoop(interval time.Duration) {
 				ss.report(s.reporter)
 			}
 			s.registry.sm.Unlock()
+		case <-s.quit:
+			return
 		}
 	}
+}
+
+func (s *standardScope) Close() error {
+	if s.quit == nil {
+		return errCloneNonRoot
+	}
+	close(s.quit)
+	return nil
 }
 
 // Counter returns the counter identified by the scope and the provided name, creating it if it does not already exist
