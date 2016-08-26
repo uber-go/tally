@@ -28,6 +28,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+type testValue struct {
+	val  int64
+	tags map[string]string
+}
+
 type testStatsReporter struct {
 	cg sync.WaitGroup
 	gg sync.WaitGroup
@@ -35,23 +40,32 @@ type testStatsReporter struct {
 
 	scope Scope
 
-	counters map[string]int64
-	gauges   map[string]int64
-	timers   map[string]time.Duration
+	counters map[string]*testValue
+	gauges   map[string]*testValue
+	timers   map[string]*testValue
 }
 
 func (r *testStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
-	r.counters[name] = value
+	r.counters[name] = &testValue{
+		val:  value,
+		tags: tags,
+	}
 	r.cg.Done()
 }
 
 func (r *testStatsReporter) ReportGauge(name string, tags map[string]string, value int64) {
-	r.gauges[name] = value
+	r.gauges[name] = &testValue{
+		val:  value,
+		tags: tags,
+	}
 	r.gg.Done()
 }
 
 func (r *testStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
-	r.timers[name] = interval
+	r.timers[name] = &testValue{
+		val:  int64(interval),
+		tags: tags,
+	}
 	r.tg.Done()
 }
 
@@ -60,9 +74,9 @@ func (r *testStatsReporter) Flush() {}
 // newTestStatsReporter returns a new TestStatsReporter
 func newTestStatsReporter() *testStatsReporter {
 	return &testStatsReporter{
-		counters: make(map[string]int64),
-		gauges:   make(map[string]int64),
-		timers:   make(map[string]time.Duration),
+		counters: make(map[string]*testValue),
+		gauges:   make(map[string]*testValue),
+		timers:   make(map[string]*testValue),
 	}
 }
 
@@ -71,6 +85,14 @@ func TestWriteTimerImmediately(t *testing.T) {
 	scope := NewRootScope("", nil, r, 0)
 	r.tg.Add(1)
 	scope.Timer("ticky").Record(time.Millisecond * 175)
+	r.tg.Wait()
+}
+
+func TestWriteTimerClosureImmediately(t *testing.T) {
+	r := newTestStatsReporter()
+	scope := NewRootScope("", nil, r, 0)
+	r.tg.Add(1)
+	scope.Timer("ticky").Begin()()
 	r.tg.Wait()
 }
 
@@ -108,16 +130,16 @@ func TestWriteOnce(t *testing.T) {
 	r.gg.Wait()
 	r.tg.Wait()
 
-	assert.EqualValues(t, 1, r.counters["bar"])
-	assert.EqualValues(t, 1, r.gauges["zed"])
-	assert.EqualValues(t, time.Millisecond*175, r.timers["ticky"])
+	assert.EqualValues(t, 1, r.counters["bar"].val)
+	assert.EqualValues(t, 1, r.gauges["zed"].val)
+	assert.EqualValues(t, time.Millisecond*175, r.timers["ticky"].val)
 
 	r = newTestStatsReporter()
 	scope.Report(r)
 
-	assert.EqualValues(t, 0, r.counters["bar"])
-	assert.EqualValues(t, 0, r.gauges["zed"])
-	assert.EqualValues(t, 0, r.timers["ticky"])
+	assert.Nil(t, r.counters["bar"])
+	assert.Nil(t, r.gauges["zed"])
+	assert.Nil(t, r.timers["ticky"])
 }
 
 func TestRootScopeWithoutPrefix(t *testing.T) {
@@ -137,9 +159,9 @@ func TestRootScopeWithoutPrefix(t *testing.T) {
 	r.gg.Wait()
 	r.tg.Wait()
 
-	assert.EqualValues(t, 21, r.counters["bar"])
-	assert.EqualValues(t, 1, r.gauges["zed"])
-	assert.EqualValues(t, time.Millisecond*175, r.timers["blork"])
+	assert.EqualValues(t, 21, r.counters["bar"].val)
+	assert.EqualValues(t, 1, r.gauges["zed"].val)
+	assert.EqualValues(t, time.Millisecond*175, r.timers["blork"].val)
 }
 
 func TestRootScopeWithPrefix(t *testing.T) {
@@ -159,9 +181,9 @@ func TestRootScopeWithPrefix(t *testing.T) {
 	r.gg.Wait()
 	r.tg.Wait()
 
-	assert.EqualValues(t, 21, r.counters["foo.bar"])
-	assert.EqualValues(t, 1, r.gauges["foo.zed"])
-	assert.EqualValues(t, time.Millisecond*175, r.timers["foo.blork"])
+	assert.EqualValues(t, 21, r.counters["foo.bar"].val)
+	assert.EqualValues(t, 1, r.gauges["foo.zed"].val)
+	assert.EqualValues(t, time.Millisecond*175, r.timers["foo.blork"].val)
 }
 
 func TestSubScope(t *testing.T) {
@@ -181,7 +203,31 @@ func TestSubScope(t *testing.T) {
 	r.gg.Wait()
 	r.tg.Wait()
 
-	assert.EqualValues(t, 21, r.counters["foo.mork.bar"])
-	assert.EqualValues(t, 1, r.gauges["foo.mork.zed"])
-	assert.EqualValues(t, time.Millisecond*175, r.timers["foo.mork.blork"])
+	assert.EqualValues(t, 21, r.counters["foo.mork.bar"].val)
+	assert.EqualValues(t, 1, r.gauges["foo.mork.zed"].val)
+	assert.EqualValues(t, time.Millisecond*175, r.timers["foo.mork.blork"].val)
+}
+
+func TestTaggedSubScope(t *testing.T) {
+	r := newTestStatsReporter()
+
+	scope := NewRootScope("foo", nil, r, 0)
+
+	ts := map[string]string{"service": "test"}
+	tscope := scope.Tagged(ts)
+
+	r.cg.Add(1)
+	scope.Counter("beep").Inc(1)
+	r.cg.Add(1)
+	tscope.Counter("boop").Inc(1)
+
+	scope.Report(r)
+	tscope.Report(r)
+	r.cg.Wait()
+
+	assert.EqualValues(t, 1, r.counters["foo.beep"].val)
+	assert.Empty(t, r.counters["foo.beep"].tags)
+
+	assert.EqualValues(t, 1, r.counters["foo.boop"].val)
+	assert.EqualValues(t, ts, r.counters["foo.boop"].tags)
 }
