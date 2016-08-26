@@ -29,7 +29,9 @@ import (
 )
 
 type testStatsReporter struct {
-	sync.RWMutex
+	cg sync.WaitGroup
+	gg sync.WaitGroup
+	tg sync.WaitGroup
 
 	scope Scope
 
@@ -40,14 +42,17 @@ type testStatsReporter struct {
 
 func (r *testStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
 	r.counters[name] = value
+	r.cg.Done()
 }
 
 func (r *testStatsReporter) ReportGauge(name string, tags map[string]string, value int64) {
 	r.gauges[name] = value
+	r.gg.Done()
 }
 
 func (r *testStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
 	r.timers[name] = interval
+	r.tg.Done()
 }
 
 func (r *testStatsReporter) Flush() {}
@@ -61,20 +66,55 @@ func newTestStatsReporter() *testStatsReporter {
 	}
 }
 
-func TestWriteOnce(t *testing.T) {
+func TestWriteTimerImmediately(t *testing.T) {
 	r := newTestStatsReporter()
 	scope := NewRootScope("", nil, r, 0)
+	r.tg.Add(1)
+	scope.Timer("ticky").Record(time.Millisecond * 175)
+	r.tg.Wait()
+}
+
+func TestWriteReportLoop(t *testing.T) {
+	r := newTestStatsReporter()
+	scope := NewRootScope("", nil, r, 10)
+	defer scope.Close()
+
+	r.cg.Add(1)
 	scope.Counter("bar").Inc(1)
+	r.gg.Add(1)
 	scope.Gauge("zed").Update(1)
+	r.tg.Add(1)
+	scope.Timer("ticky").Record(time.Millisecond * 175)
+
+	r.cg.Wait()
+	r.gg.Wait()
+	r.tg.Wait()
+}
+
+func TestWriteOnce(t *testing.T) {
+	r := newTestStatsReporter()
+
+	scope := NewRootScope("", nil, r, 0)
+
+	r.cg.Add(1)
+	scope.Counter("bar").Inc(1)
+	r.gg.Add(1)
+	scope.Gauge("zed").Update(1)
+	r.tg.Add(1)
 	scope.Timer("ticky").Record(time.Millisecond * 175)
 
 	scope.Report(r)
+	r.cg.Wait()
+	r.gg.Wait()
+	r.tg.Wait()
+
 	assert.EqualValues(t, 1, r.counters["bar"])
 	assert.EqualValues(t, 1, r.gauges["zed"])
 	assert.EqualValues(t, time.Millisecond*175, r.timers["ticky"])
 
 	r = newTestStatsReporter()
 	scope.Report(r)
+
 	assert.EqualValues(t, 0, r.counters["bar"])
 	assert.EqualValues(t, 0, r.gauges["zed"])
 	assert.EqualValues(t, 0, r.timers["ticky"])
@@ -82,13 +122,21 @@ func TestWriteOnce(t *testing.T) {
 
 func TestRootScopeWithoutPrefix(t *testing.T) {
 	r := newTestStatsReporter()
+
 	scope := NewRootScope("", nil, r, 0)
+	r.cg.Add(1)
 	scope.Counter("bar").Inc(1)
 	scope.Counter("bar").Inc(20)
+	r.gg.Add(1)
 	scope.Gauge("zed").Update(1)
+	r.tg.Add(1)
 	scope.Timer("blork").Record(time.Millisecond * 175)
 
 	scope.Report(r)
+	r.cg.Wait()
+	r.gg.Wait()
+	r.tg.Wait()
+
 	assert.EqualValues(t, 21, r.counters["bar"])
 	assert.EqualValues(t, 1, r.gauges["zed"])
 	assert.EqualValues(t, time.Millisecond*175, r.timers["blork"])
@@ -96,13 +144,21 @@ func TestRootScopeWithoutPrefix(t *testing.T) {
 
 func TestRootScopeWithPrefix(t *testing.T) {
 	r := newTestStatsReporter()
+
 	scope := NewRootScope("foo", nil, r, 0)
+	r.cg.Add(1)
 	scope.Counter("bar").Inc(1)
 	scope.Counter("bar").Inc(20)
+	r.gg.Add(1)
 	scope.Gauge("zed").Update(1)
+	r.tg.Add(1)
 	scope.Timer("blork").Record(time.Millisecond * 175)
 
 	scope.Report(r)
+	r.cg.Wait()
+	r.gg.Wait()
+	r.tg.Wait()
+
 	assert.EqualValues(t, 21, r.counters["foo.bar"])
 	assert.EqualValues(t, 1, r.gauges["foo.zed"])
 	assert.EqualValues(t, time.Millisecond*175, r.timers["foo.blork"])
@@ -110,13 +166,21 @@ func TestRootScopeWithPrefix(t *testing.T) {
 
 func TestSubScope(t *testing.T) {
 	r := newTestStatsReporter()
+
 	scope := NewRootScope("foo", nil, r, 0).SubScope("mork")
+	r.cg.Add(1)
 	scope.Counter("bar").Inc(1)
 	scope.Counter("bar").Inc(20)
+	r.gg.Add(1)
 	scope.Gauge("zed").Update(1)
+	r.tg.Add(1)
 	scope.Timer("blork").Record(time.Millisecond * 175)
 
 	scope.Report(r)
+	r.cg.Wait()
+	r.gg.Wait()
+	r.tg.Wait()
+
 	assert.EqualValues(t, 21, r.counters["foo.mork.bar"])
 	assert.EqualValues(t, 1, r.gauges["foo.mork.zed"])
 	assert.EqualValues(t, time.Millisecond*175, r.timers["foo.mork.blork"])
