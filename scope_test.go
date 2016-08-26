@@ -211,10 +211,10 @@ func TestSubScope(t *testing.T) {
 func TestTaggedSubScope(t *testing.T) {
 	r := newTestStatsReporter()
 
-	scope := NewRootScope("foo", nil, r, 0)
+	ts := map[string]string{"env": "test"}
+	scope := NewRootScope("foo", ts, r, 0)
 
-	ts := map[string]string{"service": "test"}
-	tscope := scope.Tagged(ts)
+	tscope := scope.Tagged(map[string]string{"service": "test"})
 
 	r.cg.Add(1)
 	scope.Counter("beep").Inc(1)
@@ -226,8 +226,15 @@ func TestTaggedSubScope(t *testing.T) {
 	r.cg.Wait()
 
 	assert.EqualValues(t, 1, r.counters["foo.beep"].val)
-	assert.Empty(t, r.counters["foo.beep"].tags)
+	assert.EqualValues(t, ts, r.counters["foo.beep"].tags)
 
 	assert.EqualValues(t, 1, r.counters["foo.boop"].val)
-	assert.EqualValues(t, ts, r.counters["foo.boop"].tags)
+	assert.EqualValues(t, map[string]string{
+		"env":     "test",
+		"service": "test",
+	}, r.counters["foo.boop"].tags)
+}
+
+func TestNilTagMerge(t *testing.T) {
+	assert.Nil(t, nil, mergeRightTags(nil, nil))
 }
