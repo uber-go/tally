@@ -52,6 +52,7 @@ type Scope interface {
 	// Tagged returns a new scope with the given tags
 	Tagged(tags map[string]string) Scope
 
+	// Report is the method that dumps a snapshot of all of the aggregated metrics into the StatsReporter via its Report* methods
 	Report(r StatsReporter)
 }
 
@@ -137,6 +138,8 @@ func (s *standardScope) Report(r StatsReporter) {
 	s.gm.RUnlock()
 
 	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
+
+	r.Flush()
 }
 
 // reportLoop is used by the root scope for periodic reporting

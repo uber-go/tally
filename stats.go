@@ -31,6 +31,9 @@ type StatsReporter interface {
 	ReportCounter(name string, tags map[string]string, value int64)
 	ReportGauge(name string, tags map[string]string, value int64)
 	ReportTimer(name string, tags map[string]string, interval time.Duration)
+
+	// Flush is expected to be called by the Scope when it finishes a round or reporting
+	Flush()
 }
 
 type reportableMetric interface {
@@ -118,5 +121,6 @@ var NullStatsReporter StatsReporter = nullStatsReporter{}
 func (r nullStatsReporter) ReportCounter(name string, tags map[string]string, value int64)          {}
 func (r nullStatsReporter) ReportGauge(name string, tags map[string]string, value int64)            {}
 func (r nullStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {}
+func (r nullStatsReporter) Flush()                                                                  {}
 
 type nullStatsReporter struct{}

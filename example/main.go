@@ -45,6 +45,10 @@ func (r *printStatsReporter) ReportTimer(name string, tags map[string]string, in
 	fmt.Printf("%s %d\n", name, interval)
 }
 
+func (r *printStatsReporter) Flush() {
+	fmt.Printf("Flush\n")
+}
+
 func main() {
 	reporter := newPrintStatsReporter()
 	rootScope := tally.NewRootScope("", nil, reporter, time.Second)
