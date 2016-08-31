@@ -54,6 +54,7 @@ type Gauge interface {
 	Update(int64)
 }
 
+// StopwatchStart is returned by Timer.Start, and should be passed back to Timer.Stop() at the end of the interval
 type StopwatchStart time.Time
 
 // Timer is the interface for logging statsd-timer-type metrics
