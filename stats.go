@@ -54,9 +54,7 @@ type Gauge interface {
 	Update(int64)
 }
 
-type stopwatch struct {
-	startTime time.Time
-}
+type StopwatchStart time.Time
 
 // Timer is the interface for logging statsd-timer-type metrics
 type Timer interface {
@@ -65,10 +63,10 @@ type Timer interface {
 	Record(time.Duration)
 
 	// Start gives you back a specific point in time to report via Stop()
-	Start() stopwatch
+	Start() StopwatchStart
 
 	// Stop records the difference between the current clock and startTime
-	Stop(startTime stopwatch)
+	Stop(startTime StopwatchStart)
 }
 
 type counter struct {
@@ -115,12 +113,12 @@ func (g *gauge) report(name string, tags map[string]string, r StatsReporter) {
 	}
 }
 
-func (t *timer) Start() stopwatch {
-	return stopwatch{globalClock.Now()}
+func (t *timer) Start() StopwatchStart {
+	return StopwatchStart(globalClock.Now())
 }
 
-func (t *timer) Stop(sw stopwatch) {
-	t.reporter.ReportTimer(t.name, t.tags, globalClock.Now().Sub(sw.startTime))
+func (t *timer) Stop(sw StopwatchStart) {
+	t.reporter.ReportTimer(t.name, t.tags, globalClock.Now().Sub(time.Time(sw)))
 }
 
 func (t *timer) Record(interval time.Duration) {
