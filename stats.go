@@ -54,10 +54,20 @@ type Gauge interface {
 	Update(int64)
 }
 
+// StopwatchStart is returned by Timer.Start, and should be passed back to Timer.Stop() at the end of the interval
+type StopwatchStart time.Time
+
 // Timer is the interface for logging statsd-timer-type metrics
 type Timer interface {
+
+	// Record Record a specific duration directly
 	Record(time.Duration)
-	Begin() func()
+
+	// Start gives you back a specific point in time to report via Stop()
+	Start() StopwatchStart
+
+	// Stop records the difference between the current clock and startTime
+	Stop(startTime StopwatchStart)
 }
 
 type counter struct {
@@ -104,11 +114,12 @@ func (g *gauge) report(name string, tags map[string]string, r StatsReporter) {
 	}
 }
 
-func (t *timer) Begin() func() {
-	start := globalClock.Now()
-	return func() {
-		t.Record(globalClock.Now().Sub(start))
-	}
+func (t *timer) Start() StopwatchStart {
+	return StopwatchStart(globalClock.Now())
+}
+
+func (t *timer) Stop(sw StopwatchStart) {
+	t.reporter.ReportTimer(t.name, t.tags, globalClock.Now().Sub(time.Time(sw)))
 }
 
 func (t *timer) Record(interval time.Duration) {

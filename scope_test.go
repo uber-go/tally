@@ -92,7 +92,8 @@ func TestWriteTimerClosureImmediately(t *testing.T) {
 	r := newTestStatsReporter()
 	scope := NewRootScope("", nil, r, 0)
 	r.tg.Add(1)
-	scope.Timer("ticky").Begin()()
+	tm := scope.Timer("ticky")
+	tm.Stop(tm.Start())
 	r.tg.Wait()
 }
 
