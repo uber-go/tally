@@ -53,11 +53,16 @@ func (r *myStatsReporter) start(scope) {
 
 ## Performance
 
-Something, something, something, dark side
+This stuff needs to be fast. With that in mind, we avoid locks and unnecessary memory allocations.
 
-## Development Status: Pre-Beta
-
-Not quite ready yet. You probably don't want to use this just yet.
+BenchmarkCounterInc-8               	200000000	         7.68 ns/op
+BenchmarkReportCounterNoData-8      	300000000	         4.88 ns/op
+BenchmarkReportCounterWithData-8    	100000000	        21.6 ns/op
+BenchmarkGaugeSet-8                 	100000000	        16.0 ns/op
+BenchmarkReportGaugeNoData-8        	100000000	        10.4 ns/op
+BenchmarkReportGaugeWithData-8      	50000000	        27.6 ns/op
+BenchmarkTimerInterval-8            	50000000	        37.7 ns/op
+BenchmarkTimerReport-8              	300000000	         5.69 ns/op
 
 <hr>
 Released under the [MIT License](LICENSE).
