@@ -16,7 +16,7 @@ type cactusStatsReporter struct {
 	quit     chan struct{}
 }
 
-// NewStatsdReporter wraps a statsd.Statter for use with tally
+// NewStatsdReporter wraps a statsd.Statter for use with tally. Use either statsd.NewClient or statsd.NewBufferedClient.
 func NewStatsdReporter(statsd statsd.Statter, interval time.Duration) tally.StatsReporter {
 	return &cactusStatsReporter{
 		quit:     make(chan struct{}),
