@@ -239,3 +239,27 @@ func TestTaggedSubScope(t *testing.T) {
 func TestNilTagMerge(t *testing.T) {
 	assert.Nil(t, nil, mergeRightTags(nil, nil))
 }
+
+type testMets struct {
+	c Counter
+}
+
+func newTestMets(scope Scope) testMets {
+	return testMets{
+		c: scope.Counter("honk"),
+	}
+}
+
+func TestReturnByValue(t *testing.T) {
+	r := newTestStatsReporter()
+
+	scope := NewRootScope("", nil, r, 0)
+	mets := newTestMets(scope)
+
+	r.cg.Add(1)
+	mets.c.Inc(3)
+	scope.Report(r)
+	r.cg.Wait()
+
+	assert.EqualValues(t, 3, r.counters["honk"].val)
+}
