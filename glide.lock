@@ -1,20 +1,21 @@
-hash: 52a7b1928e71a6c9beae78e54679bb5af2c142b84c9cf4aeff88d56edb945da6
-updated: 2016-08-22T11:34:36.697405431-04:00
+hash: 31fe24e56ca2f9d4b7adf1e039cda071aea42db95c0cfb7e81654456bfabefb6
+updated: 2016-10-21T14:09:29.39810001-07:00
 imports:
-- name: github.com/axw/gocov
-  version: 54b98cfcac0c63fb3f9bd8e7ad241b724d4e985b
-  subpackages:
-  - gocov
 - name: github.com/cactus/go-statsd-client
   version: 91c326c3f7bd20f0226d3d1c289dd9f8ce28d33d
   subpackages:
   - statsd
-- name: github.com/davecgh/go-spew
-  version: 5215b55f46b2b919f50a1df0eaa5886afe4e3b3d
-  subpackages:
-  - spew
 - name: github.com/facebookgo/clock
   version: 600d898af40aa09a7a93ecb9265d87b0504b6f03
+testImports:
+- name: github.com/axw/gocov
+  version: 54b98cfcac0c63fb3f9bd8e7ad241b724d4e985b
+  subpackages:
+  - gocov
+- name: github.com/davecgh/go-spew
+  version: 6d212800a42e8ab5c146b8ace3490ee17e5225f9
+  subpackages:
+  - spew
 - name: github.com/golang/lint
   version: c7bacac2b21ca01afa1dee0acf64df3ce047c28f
   subpackages:
@@ -36,4 +37,3 @@ imports:
   version: 3fe2afc9e626f32e91aff6eddb78b14743446865
   subpackages:
   - cover
-devImports: []
