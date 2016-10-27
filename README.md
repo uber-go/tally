@@ -17,7 +17,7 @@ you not worry about the velocity of logging.
 - Reporter: Implemented by you. Accepts aggregated values from the scope. Forwards the aggregated values on the your analytics DB.
 
 ### Acquire a Scope ###
-```golang
+```go
 reporter = MyStatsReporter()  // Implement as you will
 tags := map[string]string{
 	"dc": "east-1",
@@ -27,7 +27,7 @@ scope := tally.NewScope("coolserver", tags, reporter)
 ```
 
 ### Get/Create a metric, use it ###
-```golang
+```go
 // Get a counter, increment a counter
 reqCounter := scope.Counter('requests')  // cache me
 reqCounter.Inc(1)
@@ -37,7 +37,7 @@ memGauge.Update(42)
 ```
 
 ### Report your metrics ###
-``` golang
+```go
 func (r *myStatsReporter) start(scope) {
 	ticker := time.NewTicker(r.interval)
 	for {
