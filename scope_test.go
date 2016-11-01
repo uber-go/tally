@@ -236,6 +236,12 @@ func TestTaggedSubScope(t *testing.T) {
 	}, r.counters["foo.boop"].tags)
 }
 
+func TestReporter(t *testing.T) {
+	r := newTestStatsReporter()
+	scope := NewRootScope("prefix", nil, r, 0)
+	assert.Equal(t, r, scope.Reporter())
+}
+
 func TestNilTagMerge(t *testing.T) {
 	assert.Nil(t, nil, mergeRightTags(nil, nil))
 }
