@@ -54,6 +54,9 @@ type Scope interface {
 
 	// Report is the method that dumps a snapshot of all of the aggregated metrics into the StatsReporter via its Report* methods
 	Report(r StatsReporter)
+
+	// Reporter returns the underlying stats reporter which was used to initiate the Scope
+	Reporter() StatsReporter
 }
 
 // RootScope is a scope that manages itself and other Scopes
@@ -264,6 +267,10 @@ func (s *standardScope) SubScope(prefix string) Scope {
 
 	subscope.registry.add(subscope)
 	return subscope
+}
+
+func (s *standardScope) Reporter() StatsReporter {
+	return s.reporter
 }
 
 func (s *standardScope) fullyQualifiedName(name string) string {
