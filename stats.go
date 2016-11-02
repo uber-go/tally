@@ -71,7 +71,6 @@ type Timer interface {
 }
 
 type counter struct {
-	prev int64
 	curr int64
 }
 
@@ -93,14 +92,12 @@ func (c *counter) Inc(v int64) {
 }
 
 func (c *counter) report(name string, tags map[string]string, r StatsReporter) {
-	curr := atomic.LoadInt64(&c.curr)
+	curr := atomic.SwapInt64(&c.curr, 0)
 
-	prev := c.prev
-	if prev == curr {
+	if curr == 0 {
 		return
 	}
-	atomic.StoreInt64(&c.prev, curr)
-	r.ReportCounter(name, tags, curr-prev)
+	r.ReportCounter(name, tags, curr)
 }
 
 func (g *gauge) Update(v int64) {
