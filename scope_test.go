@@ -238,8 +238,21 @@ func TestTaggedSubScope(t *testing.T) {
 
 func TestReporter(t *testing.T) {
 	r := newTestStatsReporter()
-	scope := NewRootScope("prefix", nil, r, 0)
+	scope := NewRootScope("", nil, r, 0)
 	assert.Equal(t, r, scope.Reporter())
+}
+
+func TestTags(t *testing.T) {
+	tags := map[string]string{
+		"foo": "bar",
+	}
+	scope := NewRootScope("", tags, newTestStatsReporter(), 0)
+	assert.Equal(t, tags, scope.Tags())
+}
+
+func TestPrefix(t *testing.T) {
+	scope := NewRootScope("prefix", nil, newTestStatsReporter(), 0)
+	assert.Equal(t, "prefix", scope.Prefix())
 }
 
 func TestNilTagMerge(t *testing.T) {

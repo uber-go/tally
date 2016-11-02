@@ -57,6 +57,12 @@ type Scope interface {
 
 	// Reporter returns the underlying stats reporter which was used to initiate the Scope
 	Reporter() StatsReporter
+
+	// Tags returns the map of tags usef in Scope creation
+	Tags() map[string]string
+
+	// Prefix returns the prefix stirng used in Scope creation
+	Prefix() string
 }
 
 // RootScope is a scope that manages itself and other Scopes
@@ -271,6 +277,14 @@ func (s *standardScope) SubScope(prefix string) Scope {
 
 func (s *standardScope) Reporter() StatsReporter {
 	return s.reporter
+}
+
+func (s *standardScope) Tags() map[string]string {
+	return s.tags
+}
+
+func (s *standardScope) Prefix() string {
+	return s.prefix
 }
 
 func (s *standardScope) fullyQualifiedName(name string) string {
