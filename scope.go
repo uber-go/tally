@@ -217,20 +217,20 @@ func (s *scope) Capabilities() Capabilities {
 func (s *scope) Snapshot() Snapshot {
 	snap := newSnapshot()
 
-	// NB(r): tags are immutable, no lock required to read.
-	tags := make(map[string]string, len(s.tags))
-	for k, v := range s.tags {
-		tags[k] = v
-	}
-
 	s.registry.sm.RLock()
 	for _, ss := range s.registry.subscopes {
+		// NB(r): tags are immutable, no lock required to read.
+		tags := make(map[string]string, len(s.tags))
+		for k, v := range ss.tags {
+			tags[k] = v
+		}
+
 		ss.cm.RLock()
 		for key, c := range ss.counters {
 			name := ss.fullyQualifiedName(key)
 			snap.counters[name] = &counterSnapshot{
 				name:  name,
-				tags:  ss.tags,
+				tags:  tags,
 				value: c.snapshot(),
 			}
 		}
@@ -240,7 +240,7 @@ func (s *scope) Snapshot() Snapshot {
 			name := ss.fullyQualifiedName(key)
 			snap.gauges[name] = &gaugeSnapshot{
 				name:  name,
-				tags:  ss.tags,
+				tags:  tags,
 				value: g.snapshot(),
 			}
 		}
@@ -250,7 +250,7 @@ func (s *scope) Snapshot() Snapshot {
 			name := ss.fullyQualifiedName(key)
 			snap.timers[name] = &timerSnapshot{
 				name:   name,
-				tags:   ss.tags,
+				tags:   tags,
 				values: t.snapshot(),
 			}
 		}
