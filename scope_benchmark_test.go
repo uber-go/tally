@@ -3,9 +3,10 @@ package tally
 import "testing"
 
 func BenchmarkNameGeneration(b *testing.B) {
-	scope := NewRootScope("funkytown", nil, NullStatsReporter, 0).(*scope)
+	root, _ := NewRootScope("funkytown", nil, NullStatsReporter, 0)
+	s := root.(*scope)
 	for n := 0; n < b.N; n++ {
-		scope.fullyQualifiedName("take.me.to")
+		s.fullyQualifiedName("take.me.to")
 	}
 }
 
@@ -15,15 +16,17 @@ func BenchmarkNameGenerationTagged(b *testing.B) {
 		"hair":      "wavy",
 		"jefferson": "starship",
 	}
-	scope := NewRootScope("funkytown", tags, NullStatsReporter, 0).(*scope)
+	root, _ := NewRootScope("funkytown", tags, NullStatsReporter, 0)
+	s := root.(*scope)
 	for n := 0; n < b.N; n++ {
-		scope.fullyQualifiedName("take.me.to")
+		s.fullyQualifiedName("take.me.to")
 	}
 }
 
 func BenchmarkNameGenerationNoPrefix(b *testing.B) {
-	scope := NewRootScope("", nil, NullStatsReporter, 0).(*scope)
+	root, _ := NewRootScope("", nil, NullStatsReporter, 0)
+	s := root.(*scope)
 	for n := 0; n < b.N; n++ {
-		scope.fullyQualifiedName("im.all.alone")
+		s.fullyQualifiedName("im.all.alone")
 	}
 }

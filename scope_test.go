@@ -86,32 +86,32 @@ func (r *testStatsReporter) Flush() {}
 
 func TestWriteTimerImmediately(t *testing.T) {
 	r := newTestStatsReporter()
-	scope := NewRootScope("", nil, r, 0)
+	s, _ := NewRootScope("", nil, r, 0)
 	r.tg.Add(1)
-	scope.Timer("ticky").Record(time.Millisecond * 175)
+	s.Timer("ticky").Record(time.Millisecond * 175)
 	r.tg.Wait()
 }
 
 func TestWriteTimerClosureImmediately(t *testing.T) {
 	r := newTestStatsReporter()
-	scope := NewRootScope("", nil, r, 0)
+	s, _ := NewRootScope("", nil, r, 0)
 	r.tg.Add(1)
-	tm := scope.Timer("ticky")
+	tm := s.Timer("ticky")
 	tm.Stop(tm.Start())
 	r.tg.Wait()
 }
 
 func TestWriteReportLoop(t *testing.T) {
 	r := newTestStatsReporter()
-	scope := NewRootScope("", nil, r, 10)
-	defer scope.Close()
+	s, close := NewRootScope("", nil, r, 10)
+	defer close.Close()
 
 	r.cg.Add(1)
-	scope.Counter("bar").Inc(1)
+	s.Counter("bar").Inc(1)
 	r.gg.Add(1)
-	scope.Gauge("zed").Update(1)
+	s.Gauge("zed").Update(1)
 	r.tg.Add(1)
-	scope.Timer("ticky").Record(time.Millisecond * 175)
+	s.Timer("ticky").Record(time.Millisecond * 175)
 
 	r.cg.Wait()
 	r.gg.Wait()
@@ -121,16 +121,17 @@ func TestWriteReportLoop(t *testing.T) {
 func TestWriteOnce(t *testing.T) {
 	r := newTestStatsReporter()
 
-	scope := NewRootScope("", nil, r, 0).(*scope)
+	root, _ := NewRootScope("", nil, r, 0)
+	s := root.(*scope)
 
 	r.cg.Add(1)
-	scope.Counter("bar").Inc(1)
+	s.Counter("bar").Inc(1)
 	r.gg.Add(1)
-	scope.Gauge("zed").Update(1)
+	s.Gauge("zed").Update(1)
 	r.tg.Add(1)
-	scope.Timer("ticky").Record(time.Millisecond * 175)
+	s.Timer("ticky").Record(time.Millisecond * 175)
 
-	scope.report(r)
+	s.report(r)
 	r.cg.Wait()
 	r.gg.Wait()
 	r.tg.Wait()
@@ -140,7 +141,7 @@ func TestWriteOnce(t *testing.T) {
 	assert.EqualValues(t, time.Millisecond*175, r.timers["ticky"].val)
 
 	r = newTestStatsReporter()
-	scope.report(r)
+	s.report(r)
 
 	assert.Nil(t, r.counters["bar"])
 	assert.Nil(t, r.gauges["zed"])
@@ -150,16 +151,17 @@ func TestWriteOnce(t *testing.T) {
 func TestRootScopeWithoutPrefix(t *testing.T) {
 	r := newTestStatsReporter()
 
-	scope := NewRootScope("", nil, r, 0).(*scope)
+	root, _ := NewRootScope("", nil, r, 0)
+	s := root.(*scope)
 	r.cg.Add(1)
-	scope.Counter("bar").Inc(1)
-	scope.Counter("bar").Inc(20)
+	s.Counter("bar").Inc(1)
+	s.Counter("bar").Inc(20)
 	r.gg.Add(1)
-	scope.Gauge("zed").Update(1)
+	s.Gauge("zed").Update(1)
 	r.tg.Add(1)
-	scope.Timer("blork").Record(time.Millisecond * 175)
+	s.Timer("blork").Record(time.Millisecond * 175)
 
-	scope.report(r)
+	s.report(r)
 	r.cg.Wait()
 	r.gg.Wait()
 	r.tg.Wait()
@@ -172,16 +174,17 @@ func TestRootScopeWithoutPrefix(t *testing.T) {
 func TestRootScopeWithPrefix(t *testing.T) {
 	r := newTestStatsReporter()
 
-	scope := NewRootScope("foo", nil, r, 0).(*scope)
+	root, _ := NewRootScope("foo", nil, r, 0)
+	s := root.(*scope)
 	r.cg.Add(1)
-	scope.Counter("bar").Inc(1)
-	scope.Counter("bar").Inc(20)
+	s.Counter("bar").Inc(1)
+	s.Counter("bar").Inc(20)
 	r.gg.Add(1)
-	scope.Gauge("zed").Update(1)
+	s.Gauge("zed").Update(1)
 	r.tg.Add(1)
-	scope.Timer("blork").Record(time.Millisecond * 175)
+	s.Timer("blork").Record(time.Millisecond * 175)
 
-	scope.report(r)
+	s.report(r)
 	r.cg.Wait()
 	r.gg.Wait()
 	r.tg.Wait()
@@ -194,16 +197,17 @@ func TestRootScopeWithPrefix(t *testing.T) {
 func TestSubScope(t *testing.T) {
 	r := newTestStatsReporter()
 
-	scope := NewRootScope("foo", nil, r, 0).SubScope("mork").(*scope)
+	root, _ := NewRootScope("foo", nil, r, 0)
+	s := root.SubScope("mork").(*scope)
 	r.cg.Add(1)
-	scope.Counter("bar").Inc(1)
-	scope.Counter("bar").Inc(20)
+	s.Counter("bar").Inc(1)
+	s.Counter("bar").Inc(20)
 	r.gg.Add(1)
-	scope.Gauge("zed").Update(1)
+	s.Gauge("zed").Update(1)
 	r.tg.Add(1)
-	scope.Timer("blork").Record(time.Millisecond * 175)
+	s.Timer("blork").Record(time.Millisecond * 175)
 
-	scope.report(r)
+	s.report(r)
 	r.cg.Wait()
 	r.gg.Wait()
 	r.tg.Wait()
@@ -217,7 +221,8 @@ func TestTaggedSubScope(t *testing.T) {
 	r := newTestStatsReporter()
 
 	ts := map[string]string{"env": "test"}
-	root := NewRootScope("foo", ts, r, 0).(*scope)
+	root, _ := NewRootScope("foo", ts, r, 0)
+	s := root.(*scope)
 
 	tscope := root.Tagged(map[string]string{"service": "test"}).(*scope)
 	scope := root
@@ -227,7 +232,7 @@ func TestTaggedSubScope(t *testing.T) {
 	r.cg.Add(1)
 	tscope.Counter("boop").Inc(1)
 
-	scope.report(r)
+	s.report(r)
 	tscope.report(r)
 	r.cg.Wait()
 
@@ -242,30 +247,30 @@ func TestTaggedSubScope(t *testing.T) {
 }
 
 func TestSnapshot(t *testing.T) {
-	ts := map[string]string{"env": "test"}
-	scope := NewRootScope("foo", ts, nil, 0)
-	tscope := scope.Tagged(map[string]string{"service": "test"})
+	commonTags := map[string]string{"env": "test"}
+	s := NewTestScope("foo", map[string]string{"env": "test"})
+	child := s.Tagged(map[string]string{"service": "test"})
 
-	scope.Counter("beep").Inc(1)
-	scope.Gauge("bzzt").Update(2)
-	scope.Timer("brrr").Record(1 * time.Second)
-	scope.Timer("brrr").Record(2 * time.Second)
-	tscope.Counter("boop").Inc(1)
+	s.Counter("beep").Inc(1)
+	s.Gauge("bzzt").Update(2)
+	s.Timer("brrr").Record(1 * time.Second)
+	s.Timer("brrr").Record(2 * time.Second)
+	child.Counter("boop").Inc(1)
 
-	s := scope.Snapshot()
-	counters, gauges, timers := s.Counters(), s.Gauges(), s.Timers()
+	snap := s.Snapshot()
+	counters, gauges, timers := snap.Counters(), snap.Gauges(), snap.Timers()
 
 	assert.EqualValues(t, 1, counters["foo.beep"].Value())
-	assert.EqualValues(t, ts, counters["foo.beep"].Tags())
+	assert.EqualValues(t, commonTags, counters["foo.beep"].Tags())
 
 	assert.EqualValues(t, 2, gauges["foo.bzzt"].Value())
-	assert.EqualValues(t, ts, gauges["foo.bzzt"].Tags())
+	assert.EqualValues(t, commonTags, gauges["foo.bzzt"].Tags())
 
 	assert.EqualValues(t, []time.Duration{
 		1 * time.Second,
 		2 * time.Second,
 	}, timers["foo.brrr"].Values())
-	assert.EqualValues(t, ts, timers["foo.brrr"].Tags())
+	assert.EqualValues(t, commonTags, timers["foo.brrr"].Tags())
 
 	assert.EqualValues(t, 1, counters["foo.boop"].Value())
 	assert.EqualValues(t, map[string]string{
@@ -276,15 +281,15 @@ func TestSnapshot(t *testing.T) {
 
 func TestCapabilities(t *testing.T) {
 	r := newTestStatsReporter()
-	scope := NewRootScope("prefix", nil, r, 0)
-	assert.True(t, scope.Capabilities().Reporting())
-	assert.False(t, scope.Capabilities().Tagging())
+	s, _ := NewRootScope("prefix", nil, r, 0)
+	assert.True(t, s.Capabilities().Reporting())
+	assert.False(t, s.Capabilities().Tagging())
 }
 
 func TestCapabilitiesNoReporter(t *testing.T) {
-	scope := NewRootScope("prefix", nil, nil, 0)
-	assert.False(t, scope.Capabilities().Reporting())
-	assert.False(t, scope.Capabilities().Tagging())
+	s, _ := NewRootScope("prefix", nil, nil, 0)
+	assert.False(t, s.Capabilities().Reporting())
+	assert.False(t, s.Capabilities().Tagging())
 }
 
 func TestNilTagMerge(t *testing.T) {
@@ -304,12 +309,13 @@ func newTestMets(scope Scope) testMets {
 func TestReturnByValue(t *testing.T) {
 	r := newTestStatsReporter()
 
-	scope := NewRootScope("", nil, r, 0).(*scope)
-	mets := newTestMets(scope)
+	root, _ := NewRootScope("", nil, r, 0)
+	s := root.(*scope)
+	mets := newTestMets(s)
 
 	r.cg.Add(1)
 	mets.c.Inc(3)
-	scope.report(r)
+	s.report(r)
 	r.cg.Wait()
 
 	assert.EqualValues(t, 3, r.counters["honk"].val)

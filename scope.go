@@ -22,6 +22,7 @@ package tally
 
 import (
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -30,7 +31,7 @@ import (
 
 var (
 	// NoopScope is a scope that does nothing
-	NoopScope = NewRootScope("", nil, NullStatsReporter, 0)
+	NoopScope, _ = NewRootScope("", nil, NullStatsReporter, 0)
 
 	globalClock = clock.New()
 )
@@ -63,8 +64,56 @@ type scope struct {
 	timers   map[string]*timer
 }
 
-// NewRootScope creates a new Scope around a given stats reporter with the given prefix
-func NewRootScope(prefix string, tags map[string]string, reporter StatsReporter, interval time.Duration) RootScope {
+// NewRootScope creates a new Scope around a given stats reporter with the
+// given prefix
+func NewRootScope(
+	prefix string,
+	tags map[string]string,
+	reporter StatsReporter,
+	interval time.Duration,
+) (Scope, io.Closer) {
+	if tags == nil {
+		tags = make(map[string]string)
+	}
+
+	s := &scope{
+		prefix:   prefix,
+		tags:     tags,
+		reporter: reporter,
+
+		registry: &scopeRegistry{},
+		quit:     make(chan struct{}),
+
+		counters: make(map[string]*counter),
+		gauges:   make(map[string]*gauge),
+		timers:   make(map[string]*timer),
+	}
+
+	s.registry.add(s)
+
+	if interval > 0 {
+		go s.reportLoop(interval)
+	}
+
+	return s, s
+}
+
+// NewTestScope creates a new Scope without a stats reporter with the
+// given prefix and adds the ability to take snapshots of metrics emitted
+// to it
+func NewTestScope(
+	prefix string,
+	tags map[string]string,
+) TestScope {
+	return newRootScope(prefix, tags, nil, 0)
+}
+
+func newRootScope(
+	prefix string,
+	tags map[string]string,
+	reporter StatsReporter,
+	interval time.Duration,
+) *scope {
 	if tags == nil {
 		tags = make(map[string]string)
 	}
@@ -261,8 +310,12 @@ func (s *scope) Snapshot() Snapshot {
 	return snap
 }
 
-func (s *scope) Close() {
+func (s *scope) Close() error {
 	close(s.quit)
+	if closer, ok := s.reporter.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
 }
 
 func (s *scope) fullyQualifiedName(name string) string {

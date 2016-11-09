@@ -42,18 +42,16 @@ type Scope interface {
 
 	// Capabilities returns a description of metrics reporting capabilities
 	Capabilities() Capabilities
+}
+
+// TestScope is a metrics collector that has no reporting, ensuring that
+// all emitted values have a given prefix or set of tags
+type TestScope interface {
+	Scope
 
 	// Snapshot returns a copy of all values since the last report execution,
 	// this is an expensive operation and should only be use for testing purposes
 	Snapshot() Snapshot
-}
-
-// RootScope is a scope that manages itself and other Scopes
-type RootScope interface {
-	Scope
-
-	// Close Ceases periodic reporting of the root scope and subscopes
-	Close()
 }
 
 // Capabilities is a description of metrics reporting capabilities

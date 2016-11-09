@@ -63,7 +63,8 @@ func (r *printStatsReporter) Flush() {
 
 func main() {
 	reporter := newPrintStatsReporter()
-	rootScope := tally.NewRootScope("", nil, reporter, time.Second)
+	rootScope, closer := tally.NewRootScope("", nil, reporter, time.Second)
+	defer closer.Close()
 	subScope := rootScope.SubScope("requests")
 
 	bighand := time.NewTicker(time.Millisecond * 2300)
