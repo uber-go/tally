@@ -45,6 +45,18 @@ func (r *printStatsReporter) ReportTimer(name string, tags map[string]string, in
 	fmt.Printf("%s %d\n", name, interval)
 }
 
+func (r *printStatsReporter) Capabilities() tally.Capabilities {
+	return r
+}
+
+func (r *printStatsReporter) Reporting() bool {
+	return true
+}
+
+func (r *printStatsReporter) Tagging() bool {
+	return false
+}
+
 func (r *printStatsReporter) Flush() {
 	fmt.Printf("Flush\n")
 }

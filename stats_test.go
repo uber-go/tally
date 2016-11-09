@@ -43,6 +43,10 @@ func (r *statsTestReporter) ReportTimer(name string, tags map[string]string, int
 	r.last = int64(interval)
 }
 
+func (r *statsTestReporter) Capabilities() Capabilities {
+	return capabilitiesNoTagging
+}
+
 func (r *statsTestReporter) Flush() {}
 
 func TestCounter(t *testing.T) {

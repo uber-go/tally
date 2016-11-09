@@ -29,10 +29,10 @@ scope := tally.NewScope("coolserver", tags, reporter)
 ### Get/Create a metric, use it ###
 ```go
 // Get a counter, increment a counter
-reqCounter := scope.Counter('requests')  // cache me
+reqCounter := scope.Counter("requests")  // cache me
 reqCounter.Inc(1)
 
-memGauge := scope.Gauge('mem_usage')  // cache me
+memGauge := scope.Gauge("mem_usage")  // cache me
 memGauge.Update(42)
 ```
 

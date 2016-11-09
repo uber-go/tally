@@ -28,60 +28,25 @@ import (
 	"github.com/facebookgo/clock"
 )
 
-type scope interface {
-	fullyQualifiedName(name string) string
-}
+var (
+	// NoopScope is a scope that does nothing
+	NoopScope = NewRootScope("", nil, NullStatsReporter, 0)
 
-// Scope is a namespace wrapper around a stats reporter, ensuring that
-// all emitted values have a given prefix or set of tags
-type Scope interface {
-	scope
-
-	// Counter returns the Counter object corresponding to the name
-	Counter(name string) Counter
-
-	// Gauge returns the Gauge object corresponding to the name
-	Gauge(name string) Gauge
-
-	// Timer returns the Timer object corresponding to the name
-	Timer(name string) Timer
-
-	// SubScope returns a new child scope with the given name
-	SubScope(name string) Scope
-
-	// Tagged returns a new scope with the given tags
-	Tagged(tags map[string]string) Scope
-
-	// Report is the method that dumps a snapshot of all of the aggregated metrics into the StatsReporter via its Report* methods
-	Report(r StatsReporter)
-
-	// Reporter returns the underlying stats reporter which was used to initiate the Scope
-	Reporter() StatsReporter
-}
-
-// RootScope is a scope that manages itself and other Scopes
-type RootScope interface {
-	Scope
-
-	// Close Ceases periodic reporting of the root scope and subscopes
-	Close()
-}
-
-// NoopScope is a scope that does nothing
-var NoopScope = NewRootScope("", nil, NullStatsReporter, 0)
+	globalClock = clock.New()
+)
 
 type scopeRegistry struct {
-	sm        sync.Mutex
-	subscopes []Scope
+	sm        sync.RWMutex
+	subscopes []*scope
 }
 
-func (r *scopeRegistry) add(subscope *standardScope) {
+func (r *scopeRegistry) add(subscope *scope) {
 	r.sm.Lock()
 	r.subscopes = append(r.subscopes, subscope)
 	r.sm.Unlock()
 }
 
-type standardScope struct {
+type scope struct {
 	prefix   string
 	tags     map[string]string
 	reporter StatsReporter
@@ -93,9 +58,9 @@ type standardScope struct {
 	gm sync.RWMutex
 	tm sync.RWMutex
 
-	counters map[string]Counter
-	gauges   map[string]Gauge
-	timers   map[string]Timer
+	counters map[string]*counter
+	gauges   map[string]*gauge
+	timers   map[string]*timer
 }
 
 // NewRootScope creates a new Scope around a given stats reporter with the given prefix
@@ -104,7 +69,7 @@ func NewRootScope(prefix string, tags map[string]string, reporter StatsReporter,
 		tags = make(map[string]string)
 	}
 
-	scope := &standardScope{
+	s := &scope{
 		prefix:   prefix,
 		tags:     tags,
 		reporter: reporter,
@@ -112,22 +77,22 @@ func NewRootScope(prefix string, tags map[string]string, reporter StatsReporter,
 		registry: &scopeRegistry{},
 		quit:     make(chan struct{}),
 
-		counters: make(map[string]Counter),
-		gauges:   make(map[string]Gauge),
-		timers:   make(map[string]Timer),
+		counters: make(map[string]*counter),
+		gauges:   make(map[string]*gauge),
+		timers:   make(map[string]*timer),
 	}
 
-	scope.registry.add(scope)
+	s.registry.add(s)
 
 	if interval > 0 {
-		go scope.reportLoop(interval)
+		go s.reportLoop(interval)
 	}
 
-	return scope
+	return s
 }
 
-// Report dumps all aggregated stats into the reporter. Should be called automatically by the root scope periodically.
-func (s *standardScope) Report(r StatsReporter) {
+// report dumps all aggregated stats into the reporter. Should be called automatically by the root scope periodically.
+func (s *scope) report(r StatsReporter) {
 	s.cm.RLock()
 	for name, counter := range s.counters {
 		counter.report(s.fullyQualifiedName(name), s.tags, r)
@@ -146,14 +111,14 @@ func (s *standardScope) Report(r StatsReporter) {
 }
 
 // reportLoop is used by the root scope for periodic reporting
-func (s *standardScope) reportLoop(interval time.Duration) {
+func (s *scope) reportLoop(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	for {
 		select {
 		case <-ticker.C:
 			s.registry.sm.Lock()
 			for _, ss := range s.registry.subscopes {
-				ss.Report(s.reporter)
+				ss.report(s.reporter)
 			}
 			s.registry.sm.Unlock()
 		case <-s.quit:
@@ -162,12 +127,7 @@ func (s *standardScope) reportLoop(interval time.Duration) {
 	}
 }
 
-func (s *standardScope) Close() {
-	close(s.quit)
-}
-
-// Counter returns the counter identified by the scope and the provided name, creating it if it does not already exist
-func (s *standardScope) Counter(name string) Counter {
+func (s *scope) Counter(name string) Counter {
 	s.cm.RLock()
 	val, ok := s.counters[name]
 	s.cm.RUnlock()
@@ -175,7 +135,7 @@ func (s *standardScope) Counter(name string) Counter {
 		s.cm.Lock()
 		val, ok = s.counters[name]
 		if !ok {
-			val = &counter{}
+			val = newCounter()
 			s.counters[name] = val
 		}
 		s.cm.Unlock()
@@ -183,8 +143,7 @@ func (s *standardScope) Counter(name string) Counter {
 	return val
 }
 
-// Gauge returns the gauge identified by the scope and the provided name, creating it if it does not already exist
-func (s *standardScope) Gauge(name string) Gauge {
+func (s *scope) Gauge(name string) Gauge {
 	s.gm.RLock()
 	val, ok := s.gauges[name]
 	s.gm.RUnlock()
@@ -192,7 +151,7 @@ func (s *standardScope) Gauge(name string) Gauge {
 		s.gm.Lock()
 		val, ok = s.gauges[name]
 		if !ok {
-			val = &gauge{}
+			val = newGauge()
 			s.gauges[name] = val
 		}
 		s.gm.Unlock()
@@ -200,8 +159,7 @@ func (s *standardScope) Gauge(name string) Gauge {
 	return val
 }
 
-// Timer returns the timer identified by the scope and the provided name, creating it if it does not already exist
-func (s *standardScope) Timer(name string) Timer {
+func (s *scope) Timer(name string) Timer {
 	s.tm.RLock()
 	val, ok := s.timers[name]
 	s.tm.RUnlock()
@@ -209,16 +167,112 @@ func (s *standardScope) Timer(name string) Timer {
 		s.tm.Lock()
 		val, ok = s.timers[name]
 		if !ok {
-			val = &timer{
-				name:     s.fullyQualifiedName(name),
-				tags:     s.tags,
-				reporter: s.reporter,
-			}
+			val = newTimer(s.fullyQualifiedName(name), s.tags, s.reporter)
 			s.timers[name] = val
 		}
 		s.tm.Unlock()
 	}
 	return val
+}
+
+func (s *scope) Tagged(tags map[string]string) Scope {
+	subscope := &scope{
+		prefix:   s.prefix,
+		tags:     mergeRightTags(s.tags, tags),
+		reporter: s.reporter,
+		registry: s.registry,
+
+		counters: make(map[string]*counter),
+		gauges:   make(map[string]*gauge),
+		timers:   make(map[string]*timer),
+	}
+
+	subscope.registry.add(subscope)
+	return subscope
+}
+
+func (s *scope) SubScope(prefix string) Scope {
+	subscope := &scope{
+		prefix:   s.fullyQualifiedName(prefix),
+		tags:     s.tags,
+		reporter: s.reporter,
+		registry: s.registry,
+
+		counters: make(map[string]*counter),
+		gauges:   make(map[string]*gauge),
+		timers:   make(map[string]*timer),
+	}
+
+	subscope.registry.add(subscope)
+	return subscope
+}
+
+func (s *scope) Capabilities() Capabilities {
+	if s.reporter == nil {
+		return capabilitiesNone
+	}
+	return s.reporter.Capabilities()
+}
+
+func (s *scope) Snapshot() Snapshot {
+	snap := newSnapshot()
+
+	// NB(r): tags are immutable, no lock required to read.
+	tags := make(map[string]string, len(s.tags))
+	for k, v := range s.tags {
+		tags[k] = v
+	}
+
+	s.registry.sm.RLock()
+	for _, ss := range s.registry.subscopes {
+		ss.cm.RLock()
+		for key, c := range ss.counters {
+			name := ss.fullyQualifiedName(key)
+			snap.counters[name] = &counterSnapshot{
+				name:  name,
+				tags:  ss.tags,
+				value: c.snapshot(),
+			}
+		}
+		ss.cm.RUnlock()
+		ss.gm.RLock()
+		for key, g := range ss.gauges {
+			name := ss.fullyQualifiedName(key)
+			snap.gauges[name] = &gaugeSnapshot{
+				name:  name,
+				tags:  ss.tags,
+				value: g.snapshot(),
+			}
+		}
+		ss.gm.RUnlock()
+		ss.tm.RLock()
+		for key, t := range ss.timers {
+			name := ss.fullyQualifiedName(key)
+			snap.timers[name] = &timerSnapshot{
+				name:   name,
+				tags:   ss.tags,
+				values: t.snapshot(),
+			}
+		}
+		ss.tm.RUnlock()
+	}
+	s.registry.sm.RUnlock()
+
+	return snap
+}
+
+func (s *scope) Close() {
+	close(s.quit)
+}
+
+func (s *scope) fullyQualifiedName(name string) string {
+	// TODO(mmihic): Consider maintaining a map[string]string for common names so we
+	// avoid the cost of continual allocations
+	if len(s.prefix) == 0 {
+		return name
+	}
+
+	return fmt.Sprintf("%s.%s", s.prefix, name)
 }
 
 // mergeRightTags merges 2 sets of tags with the tags from tagsRight overriding values from tagsLeft
@@ -237,50 +291,82 @@ func mergeRightTags(tagsLeft, tagsRight map[string]string) map[string]string {
 	return result
 }
 
-func (s *standardScope) Tagged(tags map[string]string) Scope {
-	subscope := &standardScope{
-		prefix:   s.prefix,
-		tags:     mergeRightTags(s.tags, tags),
-		reporter: s.reporter,
-		registry: s.registry,
+type snapshot struct {
+	counters map[string]CounterSnapshot
+	gauges   map[string]GaugeSnapshot
+	timers   map[string]TimerSnapshot
+}
 
-		counters: make(map[string]Counter),
-		gauges:   make(map[string]Gauge),
-		timers:   make(map[string]Timer),
+func newSnapshot() *snapshot {
+	return &snapshot{
+		counters: make(map[string]CounterSnapshot),
+		gauges:   make(map[string]GaugeSnapshot),
+		timers:   make(map[string]TimerSnapshot),
 	}
-
-	subscope.registry.add(subscope)
-	return subscope
 }
 
-func (s *standardScope) SubScope(prefix string) Scope {
-	subscope := &standardScope{
-		prefix:   s.fullyQualifiedName(prefix),
-		tags:     s.tags,
-		reporter: s.reporter,
-		registry: s.registry,
-
-		counters: make(map[string]Counter),
-		gauges:   make(map[string]Gauge),
-		timers:   make(map[string]Timer),
-	}
-
-	subscope.registry.add(subscope)
-	return subscope
+func (s *snapshot) Counters() map[string]CounterSnapshot {
+	return s.counters
 }
 
-func (s *standardScope) Reporter() StatsReporter {
-	return s.reporter
+func (s *snapshot) Gauges() map[string]GaugeSnapshot {
+	return s.gauges
 }
 
-func (s *standardScope) fullyQualifiedName(name string) string {
-	// TODO(mmihic): Consider maintaining a map[string]string for common names so we
-	// avoid the cost of continual allocations
-	if len(s.prefix) == 0 {
-		return name
-	}
-
-	return fmt.Sprintf("%s.%s", s.prefix, name)
+func (s *snapshot) Timers() map[string]TimerSnapshot {
+	return s.timers
 }
 
-var globalClock = clock.New()
+type counterSnapshot struct {
+	name  string
+	tags  map[string]string
+	value int64
+}
+
+func (s *counterSnapshot) Name() string {
+	return s.name
+}
+
+func (s *counterSnapshot) Tags() map[string]string {
+	return s.tags
+}
+
+func (s *counterSnapshot) Value() int64 {
+	return s.value
+}
+
+type gaugeSnapshot struct {
+	name  string
+	tags  map[string]string
+	value int64
+}
+
+func (s *gaugeSnapshot) Name() string {
+	return s.name
+}
+
+func (s *gaugeSnapshot) Tags() map[string]string {
+	return s.tags
+}
+
+func (s *gaugeSnapshot) Value() int64 {
+	return s.value
+}
+
+type timerSnapshot struct {
+	name   string
+	tags   map[string]string
+	values []time.Duration
+}
+
+func (s *timerSnapshot) Name() string {
+	return s.name
+}
+
+func (s *timerSnapshot) Tags() map[string]string {
+	return s.tags
+}
+
+func (s *timerSnapshot) Values() []time.Duration {
+	return s.values
+}
