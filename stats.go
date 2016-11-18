@@ -21,6 +21,7 @@
 package tally
 
 import (
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -64,8 +65,8 @@ func newCounter() *counter {
 }
 
 type gauge struct {
-	updated int64
-	curr    int64
+	updated uint64
+	curr    uint64
 }
 
 func newGauge() *gauge {
@@ -118,19 +119,19 @@ func (c *counter) snapshot() int64 {
 	return atomic.LoadInt64(&c.curr) - atomic.LoadInt64(&c.prev)
 }
 
-func (g *gauge) Update(v int64) {
-	atomic.StoreInt64(&g.curr, v)
-	atomic.StoreInt64(&g.updated, 1)
+func (g *gauge) Update(v float64) {
+	atomic.StoreUint64(&g.curr, math.Float64bits(v))
+	atomic.StoreUint64(&g.updated, 1)
 }
 
 func (g *gauge) report(name string, tags map[string]string, r StatsReporter) {
-	if atomic.SwapInt64(&g.updated, 0) == 1 {
-		r.ReportGauge(name, tags, atomic.LoadInt64(&g.curr))
+	if atomic.SwapUint64(&g.updated, 0) == 1 {
+		r.ReportGauge(name, tags, math.Float64frombits(atomic.LoadUint64(&g.curr)))
 	}
 }
 
-func (g *gauge) snapshot() int64 {
-	return atomic.LoadInt64(&g.curr)
+func (g *gauge) snapshot() float64 {
+	return math.Float64frombits(atomic.LoadUint64(&g.curr))
 }
 
 func (t *timer) Start() StopwatchStart {
@@ -162,7 +163,7 @@ type timerNoReporterSink struct {
 
 func (r *timerNoReporterSink) ReportCounter(name string, tags map[string]string, value int64) {
 }
-func (r *timerNoReporterSink) ReportGauge(name string, tags map[string]string, value int64) {
+func (r *timerNoReporterSink) ReportGauge(name string, tags map[string]string, value float64) {
 }
 func (r *timerNoReporterSink) ReportTimer(name string, tags map[string]string, interval time.Duration) {
 	r.timer.unreported.Lock()
@@ -180,7 +181,7 @@ var NullStatsReporter StatsReporter = nullStatsReporter{}
 
 func (r nullStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
 }
-func (r nullStatsReporter) ReportGauge(name string, tags map[string]string, value int64) {
+func (r nullStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
 }
 func (r nullStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
 }

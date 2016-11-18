@@ -20,14 +20,36 @@
 
 package statsd
 
-import (
-	"testing"
-
-	"github.com/stretchr/testify/assert"
+const (
+	defaultSampleRate = 1.0
 )
 
-func TestCapabilities(t *testing.T) {
-	r := NewStatsdReporter(nil, nil)
-	assert.True(t, r.Capabilities().Reporting())
-	assert.False(t, r.Capabilities().Tagging())
+// Options represents a set of statsd stats reporter options
+type Options interface {
+	// SampleRate returns the sample rate
+	SampleRate() float32
+
+	// SetSampleRate sets the sample rate and returns new options with the value set
+	SetSampleRate(value float32) Options
+}
+
+// NewOptions creates a new set of statsd stats reporter options
+func NewOptions() Options {
+	return &options{
+		sampleRate: defaultSampleRate,
+	}
+}
+
+type options struct {
+	sampleRate float32
+}
+
+func (o *options) SampleRate() float32 {
+	return o.sampleRate
+}
+
+func (o *options) SetSampleRate(value float32) Options {
+	opts := *o
+	opts.sampleRate = value
+	return &opts
 }

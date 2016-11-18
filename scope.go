@@ -391,7 +391,7 @@ func (s *counterSnapshot) Value() int64 {
 type gaugeSnapshot struct {
 	name  string
 	tags  map[string]string
-	value int64
+	value float64
 }
 
 func (s *gaugeSnapshot) Name() string {
@@ -402,7 +402,7 @@ func (s *gaugeSnapshot) Tags() map[string]string {
 	return s.tags
 }
 
-func (s *gaugeSnapshot) Value() int64 {
+func (s *gaugeSnapshot) Value() float64 {
 	return s.value
 }
 

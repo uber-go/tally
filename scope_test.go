@@ -28,8 +28,13 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type testValue struct {
+type testIntValue struct {
 	val  int64
+	tags map[string]string
+}
+
+type testFloatValue struct {
+	val  float64
 	tags map[string]string
 }
 
@@ -40,30 +45,30 @@ type testStatsReporter struct {
 
 	scope Scope
 
-	counters map[string]*testValue
-	gauges   map[string]*testValue
-	timers   map[string]*testValue
+	counters map[string]*testIntValue
+	gauges   map[string]*testFloatValue
+	timers   map[string]*testIntValue
 }
 
 // newTestStatsReporter returns a new TestStatsReporter
 func newTestStatsReporter() *testStatsReporter {
 	return &testStatsReporter{
-		counters: make(map[string]*testValue),
-		gauges:   make(map[string]*testValue),
-		timers:   make(map[string]*testValue),
+		counters: make(map[string]*testIntValue),
+		gauges:   make(map[string]*testFloatValue),
+		timers:   make(map[string]*testIntValue),
 	}
 }
 
 func (r *testStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
-	r.counters[name] = &testValue{
+	r.counters[name] = &testIntValue{
 		val:  value,
 		tags: tags,
 	}
 	r.cg.Done()
 }
 
-func (r *testStatsReporter) ReportGauge(name string, tags map[string]string, value int64) {
-	r.gauges[name] = &testValue{
+func (r *testStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
+	r.gauges[name] = &testFloatValue{
 		val:  value,
 		tags: tags,
 	}
@@ -71,7 +76,7 @@ func (r *testStatsReporter) ReportGauge(name string, tags map[string]string, val
 }
 
 func (r *testStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
-	r.timers[name] = &testValue{
+	r.timers[name] = &testIntValue{
 		val:  int64(interval),
 		tags: tags,
 	}

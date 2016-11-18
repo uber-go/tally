@@ -96,7 +96,7 @@ type GaugeSnapshot interface {
 	Tags() map[string]string
 
 	// Value returns the value
-	Value() int64
+	Value() float64
 }
 
 // TimerSnapshot is a snapshot of a counter
@@ -117,7 +117,7 @@ type StatsReporter interface {
 	ReportCounter(name string, tags map[string]string, value int64)
 
 	// ReportGauge reports a gauge value
-	ReportGauge(name string, tags map[string]string, value int64)
+	ReportGauge(name string, tags map[string]string, value float64)
 
 	// ReportTimer reports a timer value
 	ReportTimer(name string, tags map[string]string, interval time.Duration)
@@ -138,7 +138,7 @@ type Counter interface {
 // Gauge is the interface for logging statsd-gauge-type metrics
 type Gauge interface {
 	// Update sets the gauges absolute value
-	Update(value int64)
+	Update(value float64)
 }
 
 // StopwatchStart is returned by a timer's start method, and should be passed

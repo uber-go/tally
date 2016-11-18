@@ -28,14 +28,14 @@ import (
 )
 
 type statsTestReporter struct {
-	last int64
+	last interface{}
 }
 
 func (r *statsTestReporter) ReportCounter(name string, tags map[string]string, value int64) {
 	r.last = value
 }
 
-func (r *statsTestReporter) ReportGauge(name string, tags map[string]string, value int64) {
+func (r *statsTestReporter) ReportGauge(name string, tags map[string]string, value float64) {
 	r.last = value
 }
 
@@ -72,10 +72,10 @@ func TestGauge(t *testing.T) {
 
 	gauge.Update(42)
 	gauge.report("", nil, r)
-	assert.Equal(t, int64(42), r.last)
+	assert.Equal(t, float64(42), r.last)
 
 	gauge.Update(1234)
 	gauge.Update(5678)
 	gauge.report("", nil, r)
-	assert.Equal(t, int64(5678), r.last)
+	assert.Equal(t, float64(5678), r.last)
 }

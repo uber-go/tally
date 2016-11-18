@@ -37,7 +37,7 @@ func (r *printStatsReporter) ReportCounter(name string, tags map[string]string, 
 	fmt.Printf("%s %d\n", name, value)
 }
 
-func (r *printStatsReporter) ReportGauge(name string, tags map[string]string, value int64) {
+func (r *printStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
 	fmt.Printf("%s %d\n", name, value)
 }
 
