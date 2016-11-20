@@ -7,23 +7,25 @@ Fast, buffered, heirarchical stats collection in Go.
 
 ## Abstract
 
-Tally provides a common interface for tracking metrics, while letting
-you not worry about the velocity of logging.
+Tally provides a common interface for emitting metrics, while letting you not worry about the velocity of metrics emission.  
+
+By default it buffers counters and gauges at a specified interval but does not buffer timer values.  This is primarily so timer values can have all their values sampled if desired and if not they can be sampled as histograms.
 
 ## Structure
 
-- Scope Keeps track of metrics, and their common metadata.
-- Metrics: Counters, Gauges, Timers
-- Reporter: Implemented by you. Accepts aggregated values from the scope. Forwards the aggregated values on the your analytics DB.
+- Scope: Keeps track of metrics, and their common metadata.
+- Metrics: Counters, Gauges, Timers.
+- Reporter: Implemented by you. Accepts aggregated values from the scope. Forwards the aggregated values to your metrics ingestion pipeline.
 
 ### Acquire a Scope ###
 ```go
-reporter = MyStatsReporter()  // Implement as you will
+reporter = NewMyStatsReporter()  // Implement as you will
 tags := map[string]string{
 	"dc": "east-1",
 	"type": "master",
 }
-scope := tally.NewScope("coolserver", tags, reporter)
+reportEvery := 1 * time.Second
+scope := tally.NewRootScope("some_prefix", tags, reporter, reportEvery)
 ```
 
 ### Get/Create a metric, use it ###
@@ -32,22 +34,76 @@ scope := tally.NewScope("coolserver", tags, reporter)
 reqCounter := scope.Counter("requests")  // cache me
 reqCounter.Inc(1)
 
-memGauge := scope.Gauge("mem_usage")  // cache me
-memGauge.Update(42)
+queueGauge := scope.Gauge("queue_length")  // cache me
+queueGauge.Update(42)
 ```
 
 ### Report your metrics ###
+Use the inbuilt statsd reporter:
+
 ```go
-func (r *myStatsReporter) start(scope) {
-	ticker := time.NewTicker(r.interval)
-	for {
-		select {
-		case <-ticker.C:
-			scope.Report(r)
-		case <-r.quit:
-			return
-		}
-	}
+import (
+	"github.com/cactus/go-statsd-client/statsd"
+	"github.com/uber-go/tally"
+	tallystatsd "github.com/uber-go/tally/statsd"
+	// ...
+)
+
+client, err := statsd.NewClient("statsd.aggregator.local:1234", "")
+// ...
+
+opts := tallystatsd.NewOptions().SetSampleRate(1.0)
+reporter = tallystatsd.NewStatsdReporter(client, opts)
+tags := map[string]string{
+	"dc": "east-1",
+	"type": "master",
+}
+reportEvery := 1 * time.Second
+scope := tally.NewRootScope("some_prefix", tags, reporter, reportEvery)
+```
+
+Implement your own reporter using the `StatsReporter` interface:
+
+```go
+type StatsReporter interface {
+	// ReportCounter reports a counter value
+	ReportCounter(name string, tags map[string]string, value int64)
+
+	// ReportGauge reports a gauge value
+	ReportGauge(name string, tags map[string]string, value float64)
+
+	// ReportTimer reports a timer value
+	ReportTimer(name string, tags map[string]string, interval time.Duration)
+
+	// Capabilities returns a description of metrics reporting capabilities
+	Capabilities() Capabilities
+
+	// Flush is expected to be called by a Scope when it completes a round or reporting
+	Flush()
+}
+```
+
+Or implement your own metrics implementation that matches the tally `Scope` interface to use different buffering semantics:
+
+```go
+type Scope interface {
+	// Counter returns the Counter object corresponding to the name
+	Counter(name string) Counter
+
+	// Gauge returns the Gauge object corresponding to the name
+	Gauge(name string) Gauge
+
+	// Timer returns the Timer object corresponding to the name
+	Timer(name string) Timer
+
+	// Tagged returns a new child scope with the given tags and current tags
+	Tagged(tags map[string]string) Scope
+
+	// SubScope returns a new child scope appending a further name prefix
+	SubScope(name string) Scope
+
+	// Capabilities returns a description of metrics reporting capabilities
+	Capabilities() Capabilities
 }
 ```
 

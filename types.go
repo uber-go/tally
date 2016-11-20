@@ -34,10 +34,10 @@ type Scope interface {
 	// Timer returns the Timer object corresponding to the name
 	Timer(name string) Timer
 
-	// Tagged returns a new scope with the given tags
+	// Tagged returns a new child scope with the given tags and current tags
 	Tagged(tags map[string]string) Scope
 
-	// SubScope returns a new child scope with the given name
+	// SubScope returns a new child scope appending a further name prefix
 	SubScope(name string) Scope
 
 	// Capabilities returns a description of metrics reporting capabilities
