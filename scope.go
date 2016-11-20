@@ -72,29 +72,7 @@ func NewRootScope(
 	reporter StatsReporter,
 	interval time.Duration,
 ) (Scope, io.Closer) {
-	if tags == nil {
-		tags = make(map[string]string)
-	}
-
-	s := &scope{
-		prefix:   prefix,
-		tags:     tags,
-		reporter: reporter,
-
-		registry: &scopeRegistry{},
-		quit:     make(chan struct{}),
-
-		counters: make(map[string]*counter),
-		gauges:   make(map[string]*gauge),
-		timers:   make(map[string]*timer),
-	}
-
-	s.registry.add(s)
-
-	if interval > 0 {
-		go s.reportLoop(interval)
-	}
-
+	s := newRootScope(prefix, tags, reporter, interval)
 	return s, s
 }
 
@@ -326,6 +304,64 @@ func (s *scope) fullyQualifiedName(name string) string {
 	}
 
 	return fmt.Sprintf("%s.%s", s.prefix, name)
+}
+
+// TestScope is a metrics collector that has no reporting, ensuring that
+// all emitted values have a given prefix or set of tags
+type TestScope interface {
+	Scope
+
+	// Snapshot returns a copy of all values since the last report execution,
+	// this is an expensive operation and should only be use for testing purposes
+	Snapshot() Snapshot
+}
+
+// Snapshot is a snapshot of values since last report execution
+type Snapshot interface {
+	// Counters returns a snapshot of all counters since last report execution
+	Counters() map[string]CounterSnapshot
+
+	// Gauges returns a snapshot of all counters since last report execution
+	Gauges() map[string]GaugeSnapshot
+
+	// Timers returns a snapshot of all counters since last report execution
+	Timers() map[string]TimerSnapshot
+}
+
+// CounterSnapshot is a snapshot of a counter
+type CounterSnapshot interface {
+	// Name returns the name
+	Name() string
+
+	// Tags returns the tags
+	Tags() map[string]string
+
+	// Value returns the value
+	Value() int64
+}
+
+// GaugeSnapshot is a snapshot of a counter
+type GaugeSnapshot interface {
+	// Name returns the name
+	Name() string
+
+	// Tags returns the tags
+	Tags() map[string]string
+
+	// Value returns the value
+	Value() float64
+}
+
+// TimerSnapshot is a snapshot of a counter
+type TimerSnapshot interface {
+	// Name returns the name
+	Name() string
+
+	// Tags returns the tags
+	Tags() map[string]string
+
+	// Values returns the values
+	Values() []time.Duration
 }
 
 // mergeRightTags merges 2 sets of tags with the tags from tagsRight overriding values from tagsLeft

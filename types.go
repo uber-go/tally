@@ -44,91 +44,6 @@ type Scope interface {
 	Capabilities() Capabilities
 }
 
-// TestScope is a metrics collector that has no reporting, ensuring that
-// all emitted values have a given prefix or set of tags
-type TestScope interface {
-	Scope
-
-	// Snapshot returns a copy of all values since the last report execution,
-	// this is an expensive operation and should only be use for testing purposes
-	Snapshot() Snapshot
-}
-
-// Capabilities is a description of metrics reporting capabilities
-type Capabilities interface {
-	// Reporting returns whether the reporter has the ability to actively report
-	Reporting() bool
-
-	// Tagging returns whether the reporter has the capability for tagged metrics
-	Tagging() bool
-}
-
-// Snapshot is a snapshot of values since last report execution
-type Snapshot interface {
-	// Counters returns a snapshot of all counters since last report execution
-	Counters() map[string]CounterSnapshot
-
-	// Gauges returns a snapshot of all counters since last report execution
-	Gauges() map[string]GaugeSnapshot
-
-	// Timers returns a snapshot of all counters since last report execution
-	Timers() map[string]TimerSnapshot
-}
-
-// CounterSnapshot is a snapshot of a counter
-type CounterSnapshot interface {
-	// Name returns the name
-	Name() string
-
-	// Tags returns the tags
-	Tags() map[string]string
-
-	// Value returns the value
-	Value() int64
-}
-
-// GaugeSnapshot is a snapshot of a counter
-type GaugeSnapshot interface {
-	// Name returns the name
-	Name() string
-
-	// Tags returns the tags
-	Tags() map[string]string
-
-	// Value returns the value
-	Value() float64
-}
-
-// TimerSnapshot is a snapshot of a counter
-type TimerSnapshot interface {
-	// Name returns the name
-	Name() string
-
-	// Tags returns the tags
-	Tags() map[string]string
-
-	// Values returns the values
-	Values() []time.Duration
-}
-
-// StatsReporter is a backend for Scopes to report metrics to
-type StatsReporter interface {
-	// ReportCounter reports a counter value
-	ReportCounter(name string, tags map[string]string, value int64)
-
-	// ReportGauge reports a gauge value
-	ReportGauge(name string, tags map[string]string, value float64)
-
-	// ReportTimer reports a timer value
-	ReportTimer(name string, tags map[string]string, interval time.Duration)
-
-	// Capabilities returns a description of metrics reporting capabilities
-	Capabilities() Capabilities
-
-	// Flush is expected to be called by a Scope when it completes a round or reporting
-	Flush()
-}
-
 // Counter is the interface for logging statsd-counter-type metrics
 type Counter interface {
 	// Inc increments the counter by a delta
@@ -141,10 +56,6 @@ type Gauge interface {
 	Update(value float64)
 }
 
-// StopwatchStart is returned by a timer's start method, and should be passed
-// back to the timer's stop method at the end of the interval
-type StopwatchStart time.Time
-
 // Timer is the interface for logging statsd-timer-type metrics
 type Timer interface {
 	// Record Record a specific duration directly
@@ -155,4 +66,17 @@ type Timer interface {
 
 	// Stop records the difference between the current clock and startTime
 	Stop(startTime StopwatchStart)
+}
+
+// StopwatchStart is returned by a timer's start method, and should be passed
+// back to the timer's stop method at the end of the interval
+type StopwatchStart time.Time
+
+// Capabilities is a description of metrics reporting capabilities
+type Capabilities interface {
+	// Reporting returns whether the reporter has the ability to actively report
+	Reporting() bool
+
+	// Tagging returns whether the reporter has the capability for tagged metrics
+	Tagging() bool
 }
