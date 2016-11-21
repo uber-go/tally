@@ -38,11 +38,11 @@ func (r *printStatsReporter) ReportCounter(name string, tags map[string]string, 
 }
 
 func (r *printStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
-	fmt.Printf("%s %d\n", name, value)
+	fmt.Printf("%s %f\n", name, value)
 }
 
 func (r *printStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
-	fmt.Printf("%s %d\n", name, interval)
+	fmt.Printf("%s %s\n", name, interval.String())
 }
 
 func (r *printStatsReporter) Capabilities() tally.Capabilities {
