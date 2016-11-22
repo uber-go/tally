@@ -31,6 +31,9 @@ type Scope interface {
 	// Gauge returns the Gauge object corresponding to the name
 	Gauge(name string) Gauge
 
+	// Histogram returns the Histogram object corresponding to the name
+	Histogram(name string) Histogram
+
 	// Timer returns the Timer object corresponding to the name
 	Timer(name string) Timer
 
@@ -44,21 +47,27 @@ type Scope interface {
 	Capabilities() Capabilities
 }
 
-// Counter is the interface for logging statsd-counter-type metrics
+// Counter is the interface for emitting counter type metrics
 type Counter interface {
 	// Inc increments the counter by a delta
 	Inc(delta int64)
 }
 
-// Gauge is the interface for logging statsd-gauge-type metrics
+// Gauge is the interface for emitting gauge metrics
 type Gauge interface {
 	// Update sets the gauges absolute value
 	Update(value float64)
 }
 
-// Timer is the interface for logging statsd-timer-type metrics
+// Histogram is the interface for emitting histogram metrics
+type Histogram interface {
+	// Record a value for a histogram
+	Record(value float64)
+}
+
+// Timer is the interface for emitting timer metrics
 type Timer interface {
-	// Record Record a specific duration directly
+	// Record a specific duration directly
 	Record(time.Duration)
 
 	// Start gives you back a specific point in time to report via Stop()

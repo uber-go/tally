@@ -32,11 +32,11 @@ var (
 		reporting: false,
 		tagging:   false,
 	}
-	capabilitiesNoTagging = &capabilities{
+	capabilitiesReportingNoTagging = &capabilities{
 		reporting: true,
 		tagging:   false,
 	}
-	capabilitiesTagging = &capabilities{
+	capabilitiesReportingTagging = &capabilities{
 		reporting: true,
 		tagging:   true,
 	}
@@ -64,6 +64,25 @@ func newCounter() *counter {
 	return &counter{}
 }
 
+func (c *counter) Inc(v int64) {
+	atomic.AddInt64(&c.curr, v)
+}
+
+func (c *counter) report(name string, tags map[string]string, r StatsReporter) {
+	curr := atomic.LoadInt64(&c.curr)
+
+	prev := atomic.LoadInt64(&c.prev)
+	if prev == curr {
+		return
+	}
+	atomic.StoreInt64(&c.prev, curr)
+	r.ReportCounter(name, tags, curr-prev)
+}
+
+func (c *counter) snapshot() int64 {
+	return atomic.LoadInt64(&c.curr) - atomic.LoadInt64(&c.prev)
+}
+
 type gauge struct {
 	updated uint64
 	curr    uint64
@@ -71,6 +90,81 @@ type gauge struct {
 
 func newGauge() *gauge {
 	return &gauge{}
+}
+
+func (g *gauge) Update(v float64) {
+	atomic.StoreUint64(&g.curr, math.Float64bits(v))
+	atomic.StoreUint64(&g.updated, 1)
+}
+
+func (g *gauge) report(name string, tags map[string]string, r StatsReporter) {
+	if atomic.SwapUint64(&g.updated, 0) == 1 {
+		r.ReportGauge(name, tags, math.Float64frombits(atomic.LoadUint64(&g.curr)))
+	}
+}
+
+func (g *gauge) snapshot() float64 {
+	return math.Float64frombits(atomic.LoadUint64(&g.curr))
+}
+
+type histogram struct {
+	name       string
+	tags       map[string]string
+	reporter   StatsReporter
+	unreported histogramValues
+}
+
+type histogramValues struct {
+	sync.RWMutex
+	values []float64
+}
+
+func newHistogram(name string, tags map[string]string, r StatsReporter) *histogram {
+	h := &histogram{
+		name:     name,
+		tags:     tags,
+		reporter: r,
+	}
+	if r == nil {
+		h.reporter = &histogramNoReporterSink{histogram: h}
+	}
+	return h
+}
+
+func (t *histogram) Record(value float64) {
+	t.reporter.ReportHistogram(t.name, t.tags, value)
+}
+
+func (t *histogram) snapshot() []float64 {
+	t.unreported.RLock()
+	snap := make([]float64, len(t.unreported.values))
+	for i := range t.unreported.values {
+		snap[i] = t.unreported.values[i]
+	}
+	t.unreported.RUnlock()
+	return snap
+}
+
+type histogramNoReporterSink struct {
+	sync.RWMutex
+	histogram *histogram
+}
+
+func (r *histogramNoReporterSink) ReportCounter(name string, tags map[string]string, value int64) {
+}
+func (r *histogramNoReporterSink) ReportGauge(name string, tags map[string]string, value float64) {
+}
+func (r *histogramNoReporterSink) ReportTimer(name string, tags map[string]string, interval time.Duration) {
+}
+func (r *histogramNoReporterSink) ReportHistogram(name string, tags map[string]string, value float64) {
+	r.histogram.unreported.Lock()
+	r.histogram.unreported.values = append(r.histogram.unreported.values, value)
+	r.histogram.unreported.Unlock()
+}
+func (r *histogramNoReporterSink) Capabilities() Capabilities {
+	return capabilitiesReportingTagging
+}
+func (r *histogramNoReporterSink) Flush() {
 }
 
 // NB(jra3): timers are a little special because they do no aggregate any data
@@ -98,40 +192,6 @@ func newTimer(name string, tags map[string]string, r StatsReporter) *timer {
 		t.reporter = &timerNoReporterSink{timer: t}
 	}
 	return t
-}
-
-func (c *counter) Inc(v int64) {
-	atomic.AddInt64(&c.curr, v)
-}
-
-func (c *counter) report(name string, tags map[string]string, r StatsReporter) {
-	curr := atomic.LoadInt64(&c.curr)
-
-	prev := c.prev
-	if prev == curr {
-		return
-	}
-	atomic.StoreInt64(&c.prev, curr)
-	r.ReportCounter(name, tags, curr-prev)
-}
-
-func (c *counter) snapshot() int64 {
-	return atomic.LoadInt64(&c.curr) - atomic.LoadInt64(&c.prev)
-}
-
-func (g *gauge) Update(v float64) {
-	atomic.StoreUint64(&g.curr, math.Float64bits(v))
-	atomic.StoreUint64(&g.updated, 1)
-}
-
-func (g *gauge) report(name string, tags map[string]string, r StatsReporter) {
-	if atomic.SwapUint64(&g.updated, 0) == 1 {
-		r.ReportGauge(name, tags, math.Float64frombits(atomic.LoadUint64(&g.curr)))
-	}
-}
-
-func (g *gauge) snapshot() float64 {
-	return math.Float64frombits(atomic.LoadUint64(&g.curr))
 }
 
 func (t *timer) Start() StopwatchStart {
@@ -170,8 +230,10 @@ func (r *timerNoReporterSink) ReportTimer(name string, tags map[string]string, i
 	r.timer.unreported.values = append(r.timer.unreported.values, interval)
 	r.timer.unreported.Unlock()
 }
+func (r *timerNoReporterSink) ReportHistogram(name string, tags map[string]string, value float64) {
+}
 func (r *timerNoReporterSink) Capabilities() Capabilities {
-	return capabilitiesTagging
+	return capabilitiesReportingTagging
 }
 func (r *timerNoReporterSink) Flush() {
 }
@@ -185,8 +247,10 @@ func (r nullStatsReporter) ReportGauge(name string, tags map[string]string, valu
 }
 func (r nullStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
 }
+func (r nullStatsReporter) ReportHistogram(name string, tags map[string]string, value float64) {
+}
 func (r nullStatsReporter) Capabilities() Capabilities {
-	return capabilitiesNoTagging
+	return capabilitiesReportingNoTagging
 }
 func (r nullStatsReporter) Flush() {
 }
