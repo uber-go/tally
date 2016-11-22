@@ -102,7 +102,7 @@ func TestWriteTimerClosureImmediately(t *testing.T) {
 	s, _ := NewRootScope("", nil, r, 0)
 	r.tg.Add(1)
 	tm := s.Timer("ticky")
-	tm.Stop(tm.Start())
+	tm.Start().Stop()
 	r.tg.Wait()
 }
 
