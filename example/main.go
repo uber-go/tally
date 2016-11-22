@@ -41,10 +41,6 @@ func (r *printStatsReporter) ReportGauge(name string, tags map[string]string, va
 	fmt.Printf("gauge %s %f\n", name, value)
 }
 
-func (r *printStatsReporter) ReportHistogram(name string, tags map[string]string, value float64) {
-	fmt.Printf("histogram %s %f\n", name, value)
-}
-
 func (r *printStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
 	fmt.Printf("timer %s %s\n", name, interval.String())
 }
@@ -73,11 +69,9 @@ func main() {
 
 	bighand := time.NewTicker(time.Millisecond * 2300)
 	littlehand := time.NewTicker(time.Millisecond * 10)
-	mediumhand := time.NewTicker(time.Millisecond * 1500)
 	hugehand := time.NewTicker(time.Millisecond * 5100)
 
 	measureThing := rootScope.Gauge("thing")
-	samples := rootScope.Histogram("samples")
 	timings := rootScope.Timer("timings")
 	tickCounter := subScope.Counter("ticks")
 
@@ -89,8 +83,6 @@ func main() {
 				measureThing.Update(42.1)
 			case <-littlehand.C:
 				tickCounter.Inc(1)
-			case <-mediumhand.C:
-				samples.Record(13.2)
 			case <-hugehand.C:
 				timings.Record(3200 * time.Millisecond)
 			}

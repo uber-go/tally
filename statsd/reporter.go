@@ -21,7 +21,6 @@
 package statsd
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/cactus/go-statsd-client/statsd"
@@ -51,10 +50,6 @@ func (r *cactusStatsReporter) ReportCounter(name string, tags map[string]string,
 
 func (r *cactusStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
 	r.statter.Gauge(name, int64(value), r.sampleRate)
-}
-
-func (r *cactusStatsReporter) ReportHistogram(name string, tags map[string]string, value float64) {
-	panic(fmt.Errorf("statsd does not support native histograms, the best approximation is using timers"))
 }
 
 func (r *cactusStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {

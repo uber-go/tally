@@ -45,19 +45,17 @@ type testStatsReporter struct {
 
 	scope Scope
 
-	counters   map[string]*testIntValue
-	gauges     map[string]*testFloatValue
-	histograms map[string]*testFloatValue
-	timers     map[string]*testIntValue
+	counters map[string]*testIntValue
+	gauges   map[string]*testFloatValue
+	timers   map[string]*testIntValue
 }
 
 // newTestStatsReporter returns a new TestStatsReporter
 func newTestStatsReporter() *testStatsReporter {
 	return &testStatsReporter{
-		counters:   make(map[string]*testIntValue),
-		gauges:     make(map[string]*testFloatValue),
-		histograms: make(map[string]*testFloatValue),
-		timers:     make(map[string]*testIntValue),
+		counters: make(map[string]*testIntValue),
+		gauges:   make(map[string]*testFloatValue),
+		timers:   make(map[string]*testIntValue),
 	}
 }
 
@@ -71,14 +69,6 @@ func (r *testStatsReporter) ReportCounter(name string, tags map[string]string, v
 
 func (r *testStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
 	r.gauges[name] = &testFloatValue{
-		val:  value,
-		tags: tags,
-	}
-	r.gg.Done()
-}
-
-func (r *testStatsReporter) ReportHistogram(name string, tags map[string]string, value float64) {
-	r.histograms[name] = &testFloatValue{
 		val:  value,
 		tags: tags,
 	}
@@ -268,27 +258,19 @@ func TestSnapshot(t *testing.T) {
 
 	s.Counter("beep").Inc(1)
 	s.Gauge("bzzt").Update(2)
-	s.Histogram("bading").Record(3.1)
-	s.Histogram("bading").Record(4.2)
 	s.Timer("brrr").Record(1 * time.Second)
 	s.Timer("brrr").Record(2 * time.Second)
 	child.Counter("boop").Inc(1)
 
 	snap := s.Snapshot()
-	counters, gauges, histograms, timers :=
-		snap.Counters(), snap.Gauges(), snap.Histograms(), snap.Timers()
+	counters, gauges, timers :=
+		snap.Counters(), snap.Gauges(), snap.Timers()
 
 	assert.EqualValues(t, 1, counters["foo.beep"].Value())
 	assert.EqualValues(t, commonTags, counters["foo.beep"].Tags())
 
 	assert.EqualValues(t, 2, gauges["foo.bzzt"].Value())
 	assert.EqualValues(t, commonTags, gauges["foo.bzzt"].Tags())
-
-	assert.EqualValues(t, []float64{
-		3.1,
-		4.2,
-	}, histograms["foo.bading"].Values())
-	assert.EqualValues(t, commonTags, histograms["foo.bading"].Tags())
 
 	assert.EqualValues(t, []time.Duration{
 		1 * time.Second,

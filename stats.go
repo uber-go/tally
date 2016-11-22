@@ -107,66 +107,6 @@ func (g *gauge) snapshot() float64 {
 	return math.Float64frombits(atomic.LoadUint64(&g.curr))
 }
 
-type histogram struct {
-	name       string
-	tags       map[string]string
-	reporter   StatsReporter
-	unreported histogramValues
-}
-
-type histogramValues struct {
-	sync.RWMutex
-	values []float64
-}
-
-func newHistogram(name string, tags map[string]string, r StatsReporter) *histogram {
-	h := &histogram{
-		name:     name,
-		tags:     tags,
-		reporter: r,
-	}
-	if r == nil {
-		h.reporter = &histogramNoReporterSink{histogram: h}
-	}
-	return h
-}
-
-func (t *histogram) Record(value float64) {
-	t.reporter.ReportHistogram(t.name, t.tags, value)
-}
-
-func (t *histogram) snapshot() []float64 {
-	t.unreported.RLock()
-	snap := make([]float64, len(t.unreported.values))
-	for i := range t.unreported.values {
-		snap[i] = t.unreported.values[i]
-	}
-	t.unreported.RUnlock()
-	return snap
-}
-
-type histogramNoReporterSink struct {
-	sync.RWMutex
-	histogram *histogram
-}
-
-func (r *histogramNoReporterSink) ReportCounter(name string, tags map[string]string, value int64) {
-}
-func (r *histogramNoReporterSink) ReportGauge(name string, tags map[string]string, value float64) {
-}
-func (r *histogramNoReporterSink) ReportTimer(name string, tags map[string]string, interval time.Duration) {
-}
-func (r *histogramNoReporterSink) ReportHistogram(name string, tags map[string]string, value float64) {
-	r.histogram.unreported.Lock()
-	r.histogram.unreported.values = append(r.histogram.unreported.values, value)
-	r.histogram.unreported.Unlock()
-}
-func (r *histogramNoReporterSink) Capabilities() Capabilities {
-	return capabilitiesReportingTagging
-}
-func (r *histogramNoReporterSink) Flush() {
-}
-
 // NB(jra3): timers are a little special because they do no aggregate any data
 // at the timer level. The reporter buffers may timer entries and periodically
 // flushes.
@@ -230,8 +170,6 @@ func (r *timerNoReporterSink) ReportTimer(name string, tags map[string]string, i
 	r.timer.unreported.values = append(r.timer.unreported.values, interval)
 	r.timer.unreported.Unlock()
 }
-func (r *timerNoReporterSink) ReportHistogram(name string, tags map[string]string, value float64) {
-}
 func (r *timerNoReporterSink) Capabilities() Capabilities {
 	return capabilitiesReportingTagging
 }
@@ -246,8 +184,6 @@ func (r nullStatsReporter) ReportCounter(name string, tags map[string]string, va
 func (r nullStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
 }
 func (r nullStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
-}
-func (r nullStatsReporter) ReportHistogram(name string, tags map[string]string, value float64) {
 }
 func (r nullStatsReporter) Capabilities() Capabilities {
 	return capabilitiesReportingNoTagging

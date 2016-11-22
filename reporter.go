@@ -30,9 +30,6 @@ type StatsReporter interface {
 	// ReportGauge reports a gauge value
 	ReportGauge(name string, tags map[string]string, value float64)
 
-	// ReportHistogram reports a histogram value
-	ReportHistogram(name string, tags map[string]string, value float64)
-
 	// ReportTimer reports a timer value
 	ReportTimer(name string, tags map[string]string, interval time.Duration)
 

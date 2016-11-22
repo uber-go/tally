@@ -57,13 +57,11 @@ type scope struct {
 
 	cm sync.RWMutex
 	gm sync.RWMutex
-	hm sync.RWMutex
 	tm sync.RWMutex
 
-	counters   map[string]*counter
-	gauges     map[string]*gauge
-	histograms map[string]*histogram
-	timers     map[string]*timer
+	counters map[string]*counter
+	gauges   map[string]*gauge
+	timers   map[string]*timer
 }
 
 // NewRootScope creates a new Scope around a given stats reporter with the
@@ -106,10 +104,9 @@ func newRootScope(
 		registry: &scopeRegistry{},
 		quit:     make(chan struct{}),
 
-		counters:   make(map[string]*counter),
-		gauges:     make(map[string]*gauge),
-		histograms: make(map[string]*histogram),
-		timers:     make(map[string]*timer),
+		counters: make(map[string]*counter),
+		gauges:   make(map[string]*gauge),
+		timers:   make(map[string]*timer),
 	}
 
 	s.registry.add(s)
@@ -185,22 +182,6 @@ func (s *scope) Gauge(name string) Gauge {
 			s.gauges[name] = val
 		}
 		s.gm.Unlock()
-	}
-	return val
-}
-
-func (s *scope) Histogram(name string) Histogram {
-	s.hm.RLock()
-	val, ok := s.histograms[name]
-	s.hm.RUnlock()
-	if !ok {
-		s.hm.Lock()
-		val, ok = s.histograms[name]
-		if !ok {
-			val = newHistogram(s.fullyQualifiedName(name), s.tags, s.reporter)
-			s.histograms[name] = val
-		}
-		s.hm.Unlock()
 	}
 	return val
 }
@@ -291,16 +272,6 @@ func (s *scope) Snapshot() Snapshot {
 			}
 		}
 		ss.gm.RUnlock()
-		ss.hm.RLock()
-		for key, h := range ss.histograms {
-			name := ss.fullyQualifiedName(key)
-			snap.histograms[name] = &histogramSnapshot{
-				name:   name,
-				tags:   tags,
-				values: h.snapshot(),
-			}
-		}
-		ss.hm.RUnlock()
 		ss.tm.RLock()
 		for key, t := range ss.timers {
 			name := ss.fullyQualifiedName(key)
@@ -353,9 +324,6 @@ type Snapshot interface {
 	// Gauges returns a snapshot of gauge last values since last report execution
 	Gauges() map[string]GaugeSnapshot
 
-	// Histograms returns a snapshot of histogram values since last report execution
-	Histograms() map[string]HistogramSnapshot
-
 	// Timers returns a snapshot of timer values since last report execution
 	Timers() map[string]TimerSnapshot
 }
@@ -382,18 +350,6 @@ type GaugeSnapshot interface {
 
 	// Value returns the value
 	Value() float64
-}
-
-// HistogramSnapshot is a snapshot of a histogram
-type HistogramSnapshot interface {
-	// Name returns the name
-	Name() string
-
-	// Tags returns the tags
-	Tags() map[string]string
-
-	// Values returns the values
-	Values() []float64
 }
 
 // TimerSnapshot is a snapshot of a timer
@@ -425,18 +381,16 @@ func mergeRightTags(tagsLeft, tagsRight map[string]string) map[string]string {
 }
 
 type snapshot struct {
-	counters   map[string]CounterSnapshot
-	gauges     map[string]GaugeSnapshot
-	histograms map[string]HistogramSnapshot
-	timers     map[string]TimerSnapshot
+	counters map[string]CounterSnapshot
+	gauges   map[string]GaugeSnapshot
+	timers   map[string]TimerSnapshot
 }
 
 func newSnapshot() *snapshot {
 	return &snapshot{
-		counters:   make(map[string]CounterSnapshot),
-		gauges:     make(map[string]GaugeSnapshot),
-		histograms: make(map[string]HistogramSnapshot),
-		timers:     make(map[string]TimerSnapshot),
+		counters: make(map[string]CounterSnapshot),
+		gauges:   make(map[string]GaugeSnapshot),
+		timers:   make(map[string]TimerSnapshot),
 	}
 }
 
@@ -446,10 +400,6 @@ func (s *snapshot) Counters() map[string]CounterSnapshot {
 
 func (s *snapshot) Gauges() map[string]GaugeSnapshot {
 	return s.gauges
-}
-
-func (s *snapshot) Histograms() map[string]HistogramSnapshot {
-	return s.histograms
 }
 
 func (s *snapshot) Timers() map[string]TimerSnapshot {
@@ -490,24 +440,6 @@ func (s *gaugeSnapshot) Tags() map[string]string {
 
 func (s *gaugeSnapshot) Value() float64 {
 	return s.value
-}
-
-type histogramSnapshot struct {
-	name   string
-	tags   map[string]string
-	values []float64
-}
-
-func (s *histogramSnapshot) Name() string {
-	return s.name
-}
-
-func (s *histogramSnapshot) Tags() map[string]string {
-	return s.tags
-}
-
-func (s *histogramSnapshot) Values() []float64 {
-	return s.values
 }
 
 type timerSnapshot struct {

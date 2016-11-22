@@ -39,10 +39,6 @@ func (r *statsTestReporter) ReportGauge(name string, tags map[string]string, val
 	r.last = value
 }
 
-func (r *statsTestReporter) ReportHistogram(name string, tags map[string]string, value float64) {
-	r.last = value
-}
-
 func (r *statsTestReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
 	r.last = interval
 }
@@ -82,17 +78,6 @@ func TestGauge(t *testing.T) {
 	gauge.Update(5678)
 	gauge.report("", nil, r)
 	assert.Equal(t, float64(5678), r.last)
-}
-
-func TestHistogram(t *testing.T) {
-	r := &statsTestReporter{}
-	histogram := newHistogram("h1", nil, r)
-
-	histogram.Record(42)
-	assert.Equal(t, float64(42), r.last)
-
-	histogram.Record(1234)
-	assert.Equal(t, float64(1234), r.last)
 }
 
 func TestTimer(t *testing.T) {

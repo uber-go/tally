@@ -31,9 +31,6 @@ type Scope interface {
 	// Gauge returns the Gauge object corresponding to the name
 	Gauge(name string) Gauge
 
-	// Histogram returns the Histogram object corresponding to the name
-	Histogram(name string) Histogram
-
 	// Timer returns the Timer object corresponding to the name
 	Timer(name string) Timer
 
@@ -57,12 +54,6 @@ type Counter interface {
 type Gauge interface {
 	// Update sets the gauges absolute value
 	Update(value float64)
-}
-
-// Histogram is the interface for emitting histogram metrics
-type Histogram interface {
-	// Record a value for a histogram
-	Record(value float64)
 }
 
 // Timer is the interface for emitting timer metrics
