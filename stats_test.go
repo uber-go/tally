@@ -28,25 +28,29 @@ import (
 )
 
 type statsTestReporter struct {
-	last int64
+	last interface{}
 }
 
 func (r *statsTestReporter) ReportCounter(name string, tags map[string]string, value int64) {
 	r.last = value
 }
 
-func (r *statsTestReporter) ReportGauge(name string, tags map[string]string, value int64) {
+func (r *statsTestReporter) ReportGauge(name string, tags map[string]string, value float64) {
 	r.last = value
 }
 
 func (r *statsTestReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
-	r.last = int64(interval)
+	r.last = interval
+}
+
+func (r *statsTestReporter) Capabilities() Capabilities {
+	return capabilitiesReportingNoTagging
 }
 
 func (r *statsTestReporter) Flush() {}
 
 func TestCounter(t *testing.T) {
-	counter := &counter{}
+	counter := newCounter()
 	r := &statsTestReporter{}
 
 	counter.Inc(1)
@@ -63,15 +67,26 @@ func TestCounter(t *testing.T) {
 }
 
 func TestGauge(t *testing.T) {
-	gauge := &gauge{}
+	gauge := newGauge()
 	r := &statsTestReporter{}
 
 	gauge.Update(42)
 	gauge.report("", nil, r)
-	assert.Equal(t, int64(42), r.last)
+	assert.Equal(t, float64(42), r.last)
 
 	gauge.Update(1234)
 	gauge.Update(5678)
 	gauge.report("", nil, r)
-	assert.Equal(t, int64(5678), r.last)
+	assert.Equal(t, float64(5678), r.last)
+}
+
+func TestTimer(t *testing.T) {
+	r := &statsTestReporter{}
+	timer := newTimer("t1", nil, r)
+
+	timer.Record(42 * time.Millisecond)
+	assert.Equal(t, 42*time.Millisecond, r.last)
+
+	timer.Record(128 * time.Millisecond)
+	assert.Equal(t, 128*time.Millisecond, r.last)
 }

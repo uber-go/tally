@@ -34,30 +34,45 @@ func newPrintStatsReporter() tally.StatsReporter {
 }
 
 func (r *printStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
-	fmt.Printf("%s %d\n", name, value)
+	fmt.Printf("count %s %d\n", name, value)
 }
 
-func (r *printStatsReporter) ReportGauge(name string, tags map[string]string, value int64) {
-	fmt.Printf("%s %d\n", name, value)
+func (r *printStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
+	fmt.Printf("gauge %s %f\n", name, value)
 }
 
 func (r *printStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
-	fmt.Printf("%s %d\n", name, interval)
+	fmt.Printf("timer %s %s\n", name, interval.String())
+}
+
+func (r *printStatsReporter) Capabilities() tally.Capabilities {
+	return r
+}
+
+func (r *printStatsReporter) Reporting() bool {
+	return true
+}
+
+func (r *printStatsReporter) Tagging() bool {
+	return false
 }
 
 func (r *printStatsReporter) Flush() {
-	fmt.Printf("Flush\n")
+	fmt.Printf("flush\n")
 }
 
 func main() {
 	reporter := newPrintStatsReporter()
-	rootScope := tally.NewRootScope("", nil, reporter, time.Second)
+	rootScope, closer := tally.NewRootScope("", nil, reporter, time.Second)
+	defer closer.Close()
 	subScope := rootScope.SubScope("requests")
 
 	bighand := time.NewTicker(time.Millisecond * 2300)
 	littlehand := time.NewTicker(time.Millisecond * 10)
+	hugehand := time.NewTicker(time.Millisecond * 5100)
 
 	measureThing := rootScope.Gauge("thing")
+	timings := rootScope.Timer("timings")
 	tickCounter := subScope.Counter("ticks")
 
 	// Spin forever, watch report get called
@@ -65,10 +80,11 @@ func main() {
 		for {
 			select {
 			case <-bighand.C:
-				measureThing.Update(42)
-
+				measureThing.Update(42.1)
 			case <-littlehand.C:
 				tickCounter.Inc(1)
+			case <-hugehand.C:
+				timings.Record(3200 * time.Millisecond)
 			}
 		}
 	}()

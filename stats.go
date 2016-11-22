@@ -21,53 +21,38 @@
 package tally
 
 import (
+	"math"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
-// StatsReporter is the bridge between Scopes/metrics and the system where the metrics get sent in the end.
-// This interface should be inmplemented for your specific stats backend.
-type StatsReporter interface {
-	ReportCounter(name string, tags map[string]string, value int64)
-	ReportGauge(name string, tags map[string]string, value int64)
-	ReportTimer(name string, tags map[string]string, interval time.Duration)
+var (
+	capabilitiesNone = &capabilities{
+		reporting: false,
+		tagging:   false,
+	}
+	capabilitiesReportingNoTagging = &capabilities{
+		reporting: true,
+		tagging:   false,
+	}
+	capabilitiesReportingTagging = &capabilities{
+		reporting: true,
+		tagging:   true,
+	}
+)
 
-	// Flush is expected to be called by the Scope when it finishes a round or reporting
-	Flush()
+type capabilities struct {
+	reporting bool
+	tagging   bool
 }
 
-type reportableMetric interface {
-	report(name string, tags map[string]string, r StatsReporter)
+func (c *capabilities) Reporting() bool {
+	return c.reporting
 }
 
-// Counter is the interface for logging statsd-counter-type metrics
-type Counter interface {
-	reportableMetric
-
-	Inc(int64)
-}
-
-// Gauge is the interface for logging statsd-gauge-type metrics
-type Gauge interface {
-	reportableMetric
-
-	Update(int64)
-}
-
-// StopwatchStart is returned by Timer.Start, and should be passed back to Timer.Stop() at the end of the interval
-type StopwatchStart time.Time
-
-// Timer is the interface for logging statsd-timer-type metrics
-type Timer interface {
-
-	// Record Record a specific duration directly
-	Record(time.Duration)
-
-	// Start gives you back a specific point in time to report via Stop()
-	Start() StopwatchStart
-
-	// Stop records the difference between the current clock and startTime
-	Stop(startTime StopwatchStart)
+func (c *capabilities) Tagging() bool {
+	return c.tagging
 }
 
 type counter struct {
@@ -75,17 +60,8 @@ type counter struct {
 	curr int64
 }
 
-type gauge struct {
-	updated int64
-	curr    int64
-}
-
-type timer struct {
-	// Timers are a little special becuase they do no aggregate any data at the timer level. The
-	// reporter buffers may timer entries and periodically flushes
-	name     string
-	tags     map[string]string
-	reporter StatsReporter
+func newCounter() *counter {
+	return &counter{}
 }
 
 func (c *counter) Inc(v int64) {
@@ -95,7 +71,7 @@ func (c *counter) Inc(v int64) {
 func (c *counter) report(name string, tags map[string]string, r StatsReporter) {
 	curr := atomic.LoadInt64(&c.curr)
 
-	prev := c.prev
+	prev := atomic.LoadInt64(&c.prev)
 	if prev == curr {
 		return
 	}
@@ -103,15 +79,59 @@ func (c *counter) report(name string, tags map[string]string, r StatsReporter) {
 	r.ReportCounter(name, tags, curr-prev)
 }
 
-func (g *gauge) Update(v int64) {
-	atomic.StoreInt64(&g.curr, v)
-	atomic.StoreInt64(&g.updated, 1)
+func (c *counter) snapshot() int64 {
+	return atomic.LoadInt64(&c.curr) - atomic.LoadInt64(&c.prev)
+}
+
+type gauge struct {
+	updated uint64
+	curr    uint64
+}
+
+func newGauge() *gauge {
+	return &gauge{}
+}
+
+func (g *gauge) Update(v float64) {
+	atomic.StoreUint64(&g.curr, math.Float64bits(v))
+	atomic.StoreUint64(&g.updated, 1)
 }
 
 func (g *gauge) report(name string, tags map[string]string, r StatsReporter) {
-	if atomic.SwapInt64(&g.updated, 0) == 1 {
-		r.ReportGauge(name, tags, atomic.LoadInt64(&g.curr))
+	if atomic.SwapUint64(&g.updated, 0) == 1 {
+		r.ReportGauge(name, tags, math.Float64frombits(atomic.LoadUint64(&g.curr)))
 	}
+}
+
+func (g *gauge) snapshot() float64 {
+	return math.Float64frombits(atomic.LoadUint64(&g.curr))
+}
+
+// NB(jra3): timers are a little special because they do no aggregate any data
+// at the timer level. The reporter buffers may timer entries and periodically
+// flushes.
+type timer struct {
+	name       string
+	tags       map[string]string
+	reporter   StatsReporter
+	unreported timerValues
+}
+
+type timerValues struct {
+	sync.RWMutex
+	values []time.Duration
+}
+
+func newTimer(name string, tags map[string]string, r StatsReporter) *timer {
+	t := &timer{
+		name:     name,
+		tags:     tags,
+		reporter: r,
+	}
+	if r == nil {
+		t.reporter = &timerNoReporterSink{timer: t}
+	}
+	return t
 }
 
 func (t *timer) Start() StopwatchStart {
@@ -126,12 +146,49 @@ func (t *timer) Record(interval time.Duration) {
 	t.reporter.ReportTimer(t.name, t.tags, interval)
 }
 
+func (t *timer) snapshot() []time.Duration {
+	t.unreported.RLock()
+	snap := make([]time.Duration, len(t.unreported.values))
+	for i := range t.unreported.values {
+		snap[i] = t.unreported.values[i]
+	}
+	t.unreported.RUnlock()
+	return snap
+}
+
+type timerNoReporterSink struct {
+	sync.RWMutex
+	timer *timer
+}
+
+func (r *timerNoReporterSink) ReportCounter(name string, tags map[string]string, value int64) {
+}
+func (r *timerNoReporterSink) ReportGauge(name string, tags map[string]string, value float64) {
+}
+func (r *timerNoReporterSink) ReportTimer(name string, tags map[string]string, interval time.Duration) {
+	r.timer.unreported.Lock()
+	r.timer.unreported.values = append(r.timer.unreported.values, interval)
+	r.timer.unreported.Unlock()
+}
+func (r *timerNoReporterSink) Capabilities() Capabilities {
+	return capabilitiesReportingTagging
+}
+func (r *timerNoReporterSink) Flush() {
+}
+
 // NullStatsReporter is an implementatin of StatsReporter than simply does nothing.
 var NullStatsReporter StatsReporter = nullStatsReporter{}
 
-func (r nullStatsReporter) ReportCounter(name string, tags map[string]string, value int64)          {}
-func (r nullStatsReporter) ReportGauge(name string, tags map[string]string, value int64)            {}
-func (r nullStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {}
-func (r nullStatsReporter) Flush()                                                                  {}
+func (r nullStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
+}
+func (r nullStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
+}
+func (r nullStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
+}
+func (r nullStatsReporter) Capabilities() Capabilities {
+	return capabilitiesReportingNoTagging
+}
+func (r nullStatsReporter) Flush() {
+}
 
 type nullStatsReporter struct{}
