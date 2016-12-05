@@ -53,7 +53,7 @@ func BenchmarkTimerInterval(b *testing.B) {
 		reporter: NullStatsReporter,
 	}
 	for n := 0; n < b.N; n++ {
-		t.Stop(t.Start()) // start and stop
+		t.Start().Stop() // start and stop
 	}
 }
 

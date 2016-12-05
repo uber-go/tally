@@ -134,12 +134,8 @@ func newTimer(name string, tags map[string]string, r StatsReporter) *timer {
 	return t
 }
 
-func (t *timer) Start() StopwatchStart {
-	return StopwatchStart(globalClock.Now())
-}
-
-func (t *timer) Stop(sw StopwatchStart) {
-	t.reporter.ReportTimer(t.name, t.tags, globalClock.Now().Sub(time.Time(sw)))
+func (t *timer) Start() Stopwatch {
+	return Stopwatch{start: globalClock.Now(), timer: t}
 }
 
 func (t *timer) Record(interval time.Duration) {

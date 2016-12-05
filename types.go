@@ -62,15 +62,21 @@ type Timer interface {
 	Record(time.Duration)
 
 	// Start gives you back a specific point in time to report via Stop()
-	Start() StopwatchStart
-
-	// Stop records the difference between the current clock and startTime
-	Stop(startTime StopwatchStart)
+	Start() Stopwatch
 }
 
-// StopwatchStart is returned by a timer's start method, and should be passed
-// back to the timer's stop method at the end of the interval
-type StopwatchStart time.Time
+// Stopwatch is a helper convenience struct for nicer tracking of elapsed time
+type Stopwatch struct {
+	start time.Time
+	timer *timer
+}
+
+// Stop records the difference between the current clock and startTime
+func (s Stopwatch) Stop() time.Duration {
+	d := globalClock.Now().Sub(s.start)
+	s.timer.Record(d)
+	return d
+}
 
 // Capabilities is a description of metrics reporting capabilities
 type Capabilities interface {
