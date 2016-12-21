@@ -1,5 +1,5 @@
-hash: 31fe24e56ca2f9d4b7adf1e039cda071aea42db95c0cfb7e81654456bfabefb6
-updated: 2016-10-21T14:09:29.39810001-07:00
+hash: 5d1b9c23c18811e5f319140ac020e2412657095d1570490c5abf18cdcbf9eba2
+updated: 2016-12-21T12:31:58.580767513-05:00
 imports:
 - name: github.com/cactus/go-statsd-client
   version: 91c326c3f7bd20f0226d3d1c289dd9f8ce28d33d
@@ -7,6 +7,8 @@ imports:
   - statsd
 - name: github.com/facebookgo/clock
   version: 600d898af40aa09a7a93ecb9265d87b0504b6f03
+- name: github.com/prometheus/client_golang
+  version: c5b7fccd204277076155f10851dad72b76a49317
 testImports:
 - name: github.com/axw/gocov
   version: 54b98cfcac0c63fb3f9bd8e7ad241b724d4e985b
