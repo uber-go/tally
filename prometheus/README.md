@@ -40,6 +40,7 @@ func main() {
                 }
         }()
         fmt.Printf("Hello, listening on :8080\n")
+        http.Handle("/metrics", r.HTTPHandler())
         fmt.Printf("%v\n", http.ListenAndServe(":8080", nil))
         select {}
 
