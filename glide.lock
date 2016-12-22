@@ -1,14 +1,41 @@
-hash: 5d1b9c23c18811e5f319140ac020e2412657095d1570490c5abf18cdcbf9eba2
-updated: 2016-12-21T12:31:58.580767513-05:00
+hash: 6f924ebe8f8cf2fc4ef2df8dff6ec1fb0ab38ee329c28e33e3c9d9d1ad6e50e5
+updated: 2016-12-22T11:33:11.939562737-05:00
 imports:
+- name: github.com/beorn7/perks
+  version: 4c0e84591b9aa9e6dcfdf3e020114cd81f89d5f9
+  subpackages:
+  - quantile
 - name: github.com/cactus/go-statsd-client
   version: 91c326c3f7bd20f0226d3d1c289dd9f8ce28d33d
   subpackages:
   - statsd
 - name: github.com/facebookgo/clock
   version: 600d898af40aa09a7a93ecb9265d87b0504b6f03
+- name: github.com/golang/protobuf
+  version: 2bc9827a78f95c6665b5fe0abd1fd66b496ae2d8
+  subpackages:
+  - proto
+- name: github.com/matttproud/golang_protobuf_extensions
+  version: c12348ce28de40eed0136aa2b644d0ee0650e56c
+  subpackages:
+  - pbutil
 - name: github.com/prometheus/client_golang
   version: c5b7fccd204277076155f10851dad72b76a49317
+  subpackages:
+  - prometheus
+  - prometheus/promhttp
+- name: github.com/prometheus/client_model
+  version: fa8ad6fec33561be4280a8f0514318c79d7f6cb6
+  subpackages:
+  - go
+- name: github.com/prometheus/common
+  version: 6d76b79f239843a04e8ad8dfd8fcadfa3920236f
+  subpackages:
+  - expfmt
+  - internal/bitbucket.org/ww/goautoneg
+  - model
+- name: github.com/prometheus/procfs
+  version: fcdb11ccb4389efb1b210b7ffb623ab71c5fdd60
 testImports:
 - name: github.com/axw/gocov
   version: 54b98cfcac0c63fb3f9bd8e7ad241b724d4e985b

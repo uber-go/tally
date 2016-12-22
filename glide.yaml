@@ -8,6 +8,8 @@ import:
   version: 600d898af40aa09a7a93ecb9265d87b0504b6f03
 - package: github.com/prometheus/client_golang
   version: ^0.8.0
+  subpackages:
+  - prometheus
 testImport:
 - package: github.com/axw/gocov
   version: 54b98cfcac0c63fb3f9bd8e7ad241b724d4e985b
