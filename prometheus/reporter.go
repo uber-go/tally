@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/byxorna/tally"
 	prom "github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/uber-go/tally"
 )
 
 var (

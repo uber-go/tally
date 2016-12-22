@@ -7,14 +7,14 @@ package main
 
 import (
         "fmt"
-        "github.com/byxorna/tally/prometheus"
+        "github.com/uber-go/tally/prometheus"
         "math/rand"
         "net/http"
         "time"
 )
 
 func main() {
-        r := prometheus.NewPrometheusReporter()
+        r := prometheus.NewReporter()
 
         r.RegisterCounter("test_counter", map[string]string{"labela": "foo"}, "This is a counter")
         r.RegisterGauge("test_gauge", map[string]string{"labela": "foo"}, "This is a gauge")
