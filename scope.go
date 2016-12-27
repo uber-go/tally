@@ -31,7 +31,8 @@ import (
 
 var (
 	// NoopScope is a scope that does nothing
-	NoopScope, _ = NewRootScope("", nil, NullStatsReporter, 0)
+	NoopScope, _     = NewRootScope("", nil, NullStatsReporter, 0, "")
+	DefaultSeparator = "."
 
 	globalClock = clock.New()
 )
@@ -48,9 +49,10 @@ func (r *scopeRegistry) add(subscope *scope) {
 }
 
 type scope struct {
-	prefix   string
-	tags     map[string]string
-	reporter StatsReporter
+	separator string
+	prefix    string
+	tags      map[string]string
+	reporter  StatsReporter
 
 	registry *scopeRegistry
 	quit     chan struct{}
@@ -71,8 +73,9 @@ func NewRootScope(
 	tags map[string]string,
 	reporter StatsReporter,
 	interval time.Duration,
+	separator string,
 ) (Scope, io.Closer) {
-	s := newRootScope(prefix, tags, reporter, interval)
+	s := newRootScope(prefix, tags, reporter, interval, separator)
 	return s, s
 }
 
@@ -83,7 +86,7 @@ func NewTestScope(
 	prefix string,
 	tags map[string]string,
 ) TestScope {
-	return newRootScope(prefix, tags, nil, 0)
+	return newRootScope(prefix, tags, nil, 0, DefaultSeparator)
 }
 
 func newRootScope(
@@ -91,15 +94,21 @@ func newRootScope(
 	tags map[string]string,
 	reporter StatsReporter,
 	interval time.Duration,
+	separator string,
 ) *scope {
 	if tags == nil {
 		tags = make(map[string]string)
 	}
+	sep := DefaultSeparator
+	if separator != "" {
+		sep = separator
+	}
 
 	s := &scope{
-		prefix:   prefix,
-		tags:     tags,
-		reporter: reporter,
+		separator: sep,
+		prefix:    prefix,
+		tags:      tags,
+		reporter:  reporter,
 
 		registry: &scopeRegistry{},
 		quit:     make(chan struct{}),
@@ -204,10 +213,11 @@ func (s *scope) Timer(name string) Timer {
 
 func (s *scope) Tagged(tags map[string]string) Scope {
 	subscope := &scope{
-		prefix:   s.prefix,
-		tags:     mergeRightTags(s.tags, tags),
-		reporter: s.reporter,
-		registry: s.registry,
+		separator: s.separator,
+		prefix:    s.prefix,
+		tags:      mergeRightTags(s.tags, tags),
+		reporter:  s.reporter,
+		registry:  s.registry,
 
 		counters: make(map[string]*counter),
 		gauges:   make(map[string]*gauge),
@@ -220,10 +230,11 @@ func (s *scope) Tagged(tags map[string]string) Scope {
 
 func (s *scope) SubScope(prefix string) Scope {
 	subscope := &scope{
-		prefix:   s.fullyQualifiedName(prefix),
-		tags:     s.tags,
-		reporter: s.reporter,
-		registry: s.registry,
+		separator: s.separator,
+		prefix:    s.fullyQualifiedName(prefix),
+		tags:      s.tags,
+		reporter:  s.reporter,
+		registry:  s.registry,
 
 		counters: make(map[string]*counter),
 		gauges:   make(map[string]*gauge),
@@ -303,7 +314,7 @@ func (s *scope) fullyQualifiedName(name string) string {
 		return name
 	}
 
-	return fmt.Sprintf("%s.%s", s.prefix, name)
+	return fmt.Sprintf("%s%s%s", s.prefix, s.separator, name)
 }
 
 // TestScope is a metrics collector that has no reporting, ensuring that

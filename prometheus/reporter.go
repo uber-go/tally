@@ -2,7 +2,7 @@ package prometheus
 
 import (
 	"crypto/sha1"
-	"fmt"
+	"errors"
 	"net/http"
 	"sort"
 	"sync"
@@ -11,45 +11,62 @@ import (
 	prom "github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/uber-go/tally"
+	//"github.com/uber-go/tally"
 )
 
 var (
-	errorAlreadyRegistered = fmt.Errorf("Metric already registered")
+	errorAlreadyRegistered = errors.New("metric already registered")
+	// DefaultHistogramObjectives is the default objectives used when creating a new Summary histogram
+	// in the prometheus registry.
+	// See https://godoc.org/github.com/prometheus/client_golang/prometheus#SummaryOpts
+	DefaultHistogramObjectives = map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.99: 0.001, 0.999: 0.0001}
 )
 
 type metricID string
 
 // Reporter is a prometheus backed tally reporter
-type Reporter struct {
-	counters  map[metricID]*prom.CounterVec
-	gauges    map[metricID]*prom.GaugeVec
-	summaries map[metricID]*prom.SummaryVec
-	mtx       sync.RWMutex
+type Reporter interface {
+	tally.StatsReporter
+	HTTPHandler() http.Handler
+}
+
+type reporter struct {
+	objectives map[float64]float64
+	counters   map[metricID]*prom.CounterVec
+	gauges     map[metricID]*prom.GaugeVec
+	summaries  map[metricID]*prom.SummaryVec
+	sync.RWMutex
 }
 
 // HTTPHandler returns the prometheus HTTP handler for serving metrics
-func (r *Reporter) HTTPHandler() http.Handler {
+func (r *reporter) HTTPHandler() http.Handler {
 	return promhttp.Handler()
 }
 
 // NewReporter returns a new Reporter for Prometheus client backed metrics
-func NewReporter() Reporter {
+// objectives is the objectives used when creating a new Summary histogram for Timers. See
+// https://godoc.org/github.com/prometheus/client_golang/prometheus#SummaryOpts for more details
+func NewReporter(objectives map[float64]float64) Reporter {
 	counters := map[metricID]*prom.CounterVec{}
 	gauges := map[metricID]*prom.GaugeVec{}
 	summaries := map[metricID]*prom.SummaryVec{}
-	reporter := Reporter{
-		counters:  counters,
-		gauges:    gauges,
-		summaries: summaries,
-		mtx:       sync.RWMutex{},
+	obj := DefaultHistogramObjectives
+	if objectives != nil {
+		obj = objectives
+	}
+	reporter := reporter{
+		counters:   counters,
+		gauges:     gauges,
+		summaries:  summaries,
+		objectives: obj,
 	}
 
-	return reporter
+	return &reporter
 }
 
 // RegisterCounter is a helper method to initialize a counter in the prometheus backend with a given help text.
 // If not called explicitly, the Reporter will create one for you on first use, with a not super helpful HELP string
-func (r *Reporter) RegisterCounter(name string, tags map[string]string, desc string) (*prom.CounterVec, error) {
+func (r *reporter) RegisterCounter(name string, tags map[string]string, desc string) (*prom.CounterVec, error) {
 	ctr := &prom.CounterVec{}
 	id := hashMetricLabelsToID(name, tags)
 	exists := r.hasCounter(id)
@@ -68,19 +85,19 @@ func (r *Reporter) RegisterCounter(name string, tags map[string]string, desc str
 	if err != nil {
 		return ctr, err
 	}
-	r.mtx.Lock()
-	defer r.mtx.Unlock()
+	r.Lock()
+	defer r.Unlock()
 	r.counters[id] = ctr
 	return ctr, nil
 }
 
 // ReportCounter reports a counter value
-func (r *Reporter) ReportCounter(name string, tags map[string]string, value int64) {
+func (r *reporter) ReportCounter(name string, tags map[string]string, value int64) {
 	id := hashMetricLabelsToID(name, tags)
 
-	r.mtx.RLock()
+	r.RLock()
 	ctr, ok := r.counters[id]
-	r.mtx.RUnlock()
+	r.RUnlock()
 
 	if !ok {
 		var err error
@@ -94,7 +111,7 @@ func (r *Reporter) ReportCounter(name string, tags map[string]string, value int6
 
 // RegisterGauge is a helper method to initialize a gauge in the prometheus backend with a given help text.
 // If not called explicitly, the Reporter will create one for you on first use, with a not super helpful HELP string
-func (r *Reporter) RegisterGauge(name string, tags map[string]string, desc string) (*prom.GaugeVec, error) {
+func (r *reporter) RegisterGauge(name string, tags map[string]string, desc string) (*prom.GaugeVec, error) {
 	g := &prom.GaugeVec{}
 	id := hashMetricLabelsToID(name, tags)
 	exists := r.hasGauge(id)
@@ -114,19 +131,19 @@ func (r *Reporter) RegisterGauge(name string, tags map[string]string, desc strin
 	if err != nil {
 		return g, err
 	}
-	r.mtx.Lock()
-	defer r.mtx.Unlock()
+	r.Lock()
+	defer r.Unlock()
 	r.gauges[id] = g
 	return g, nil
 }
 
 // ReportGauge reports a gauge value
-func (r *Reporter) ReportGauge(name string, tags map[string]string, value float64) {
+func (r *reporter) ReportGauge(name string, tags map[string]string, value float64) {
 	id := hashMetricLabelsToID(name, tags)
 
-	r.mtx.RLock()
+	r.RLock()
 	g, ok := r.gauges[id]
-	r.mtx.RUnlock()
+	r.RUnlock()
 
 	if !ok {
 		var err error
@@ -140,9 +157,7 @@ func (r *Reporter) ReportGauge(name string, tags map[string]string, value float6
 
 // RegisterTimer is a helper method to initialize a Timer histogram vector in the prometheus backend with a given help text.
 // If not called explicitly, the Reporter will create one for you on first use, with a not super helpful HELP string
-// objectives is the prometheus.SummaryVec objectives. Default, if nil passed is {0.5: 0.05, 0.9: 0.01, 0.99: 0.001, 0.999: 0.0001}
-// See https://godoc.org/github.com/prometheus/client_golang/prometheus#SummaryOpts
-func (r *Reporter) RegisterTimer(name string, tags map[string]string, desc string, objectives map[float64]float64) (*prom.SummaryVec, error) {
+func (r *reporter) RegisterTimer(name string, tags map[string]string, desc string, objectives map[float64]float64) (*prom.SummaryVec, error) {
 	h := &prom.SummaryVec{}
 	id := hashMetricLabelsToID(name, tags)
 	exists := r.hasSummary(id)
@@ -152,7 +167,7 @@ func (r *Reporter) RegisterTimer(name string, tags map[string]string, desc strin
 	labelKeys := keysFromMap(tags)
 
 	if objectives == nil {
-		objectives = map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.99: 0.001, 0.999: 0.0001}
+		objectives = r.objectives
 	}
 	h = prom.NewSummaryVec(
 		prom.SummaryOpts{
@@ -166,19 +181,19 @@ func (r *Reporter) RegisterTimer(name string, tags map[string]string, desc strin
 	if err != nil {
 		return h, err
 	}
-	r.mtx.Lock()
-	defer r.mtx.Unlock()
+	r.Lock()
+	defer r.Unlock()
 	r.summaries[id] = h
 	return h, nil
 }
 
 // ReportTimer reports a timer value into the Summary histogram
-func (r *Reporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
+func (r *reporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
 	id := hashMetricLabelsToID(name, tags)
 
-	r.mtx.RLock()
+	r.RLock()
 	h, ok := r.summaries[id]
-	r.mtx.RUnlock()
+	r.RUnlock()
 
 	if !ok {
 		var err error
@@ -191,22 +206,22 @@ func (r *Reporter) ReportTimer(name string, tags map[string]string, interval tim
 }
 
 // Capabilities ...
-func (r *Reporter) Capabilities() tally.Capabilities {
+func (r *reporter) Capabilities() tally.Capabilities {
 	return r
 }
 
-// Reporting ...
-func (r *Reporter) Reporting() bool {
-	return false
+// Reporting indicates it can report outside of the process
+func (r *reporter) Reporting() bool {
+	return true
 }
 
 // Tagging indicates prometheus supports tagged metrics
-func (r *Reporter) Tagging() bool {
+func (r *reporter) Tagging() bool {
 	return true
 }
 
 // Flush does nothing for prometheus
-func (r *Reporter) Flush() {}
+func (r *reporter) Flush() {}
 
 // NOTE: this hashes name+label keys, not values, as we track metrics as Vectors, to support on-the-fly label changes
 func hashMetricLabelsToID(name string, tags map[string]string) metricID {
@@ -222,23 +237,23 @@ func hashMetricLabelsToID(name string, tags map[string]string) metricID {
 	return metricID(string(hasher.Sum([]byte(str))))
 }
 
-func (r *Reporter) hasCounter(id metricID) (exists bool) {
-	r.mtx.RLock()
-	defer r.mtx.RUnlock()
+func (r *reporter) hasCounter(id metricID) (exists bool) {
+	r.RLock()
+	defer r.RUnlock()
 	_, exists = r.counters[id]
 	return
 }
 
-func (r *Reporter) hasGauge(id metricID) (exists bool) {
-	r.mtx.RLock()
-	defer r.mtx.RUnlock()
+func (r *reporter) hasGauge(id metricID) (exists bool) {
+	r.RLock()
+	defer r.RUnlock()
 	_, exists = r.gauges[id]
 	return
 }
 
-func (r *Reporter) hasSummary(id metricID) (exists bool) {
-	r.mtx.RLock()
-	defer r.mtx.RUnlock()
+func (r *reporter) hasSummary(id metricID) (exists bool) {
+	r.RLock()
+	defer r.RUnlock()
 	_, exists = r.summaries[id]
 	return
 }

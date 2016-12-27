@@ -6,43 +6,52 @@
 package main
 
 import (
-        "fmt"
-        "github.com/uber-go/tally/prometheus"
-        "math/rand"
-        "net/http"
-        "time"
+  "fmt"
+  "math/rand"
+  "net/http"
+  "time"
+
+  "github.com/uber-go/tally"
+  "github.com/uber-go/tally/prometheus"
 )
 
 func main() {
-        r := prometheus.NewReporter()
+  r := prometheus.NewReporter(nil)
+  // note the "_" separator. Prometheus doesnt like metrics with "." in them.
+  scope, finisher := tally.NewRootScope("prefix", map[string]string{}, r, 1*time.Second, "_")
+  defer finisher.Close()
 
-        r.RegisterCounter("test_counter", map[string]string{"labela": "foo"}, "This is a counter")
-        r.RegisterGauge("test_gauge", map[string]string{"labela": "foo"}, "This is a gauge")
-        r.RegisterTimer("test_histogram", map[string]string{"labela": "foo"}, "This is a histogram", nil)
+  counter := scope.Counter("test_counter")
+  gauge := scope.Gauge("test_gauge")
+  histogram := scope.Timer("test_histogram")
 
-        go func() {
-                for {
-                        r.ReportCounter("test_counter", map[string]string{"labela": "foo"}, 1)
-                        time.Sleep(1000000)
-                }
-        }()
-        go func() {
-                for {
-                        r.ReportGauge("test_gauge", map[string]string{"labela": "foo"}, rand.Float64()*1000)
-                        time.Sleep(1000000)
-                }
-        }()
+  go func() {
+    for {
+      counter.Inc(1)
+      time.Sleep(1000000)
+    }
+  }()
 
-        go func() {
-                for {
-                        r.ReportTimer("test_histogram", map[string]string{"labela": "foo"}, time.Duration(rand.Float64()*1000*1000))
-                        time.Sleep(1000000)
-                }
-        }()
-        fmt.Printf("Hello, listening on :8080\n")
-        http.Handle("/metrics", r.HTTPHandler())
-        fmt.Printf("%v\n", http.ListenAndServe(":8080", nil))
-        select {}
+  go func() {
+    for {
+      gauge.Update(rand.Float64() * 1000)
+      time.Sleep(1000000)
+    }
+  }()
+
+  go func() {
+    for {
+      sw := histogram.Start()
+      time.Sleep(time.Duration(rand.Float64() * 1000 * 1000))
+      sw.Stop()
+      time.Sleep(1000000)
+    }
+  }()
+
+  http.Handle("/metrics", r.HTTPHandler())
+  fmt.Printf("Serving :8080/metrics\n")
+  fmt.Printf("%v\n", http.ListenAndServe(":8080", nil))
+  select {}
 
 }
 ```

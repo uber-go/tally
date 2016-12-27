@@ -63,7 +63,7 @@ func (r *printStatsReporter) Flush() {
 
 func main() {
 	reporter := newPrintStatsReporter()
-	rootScope, closer := tally.NewRootScope("", nil, reporter, time.Second)
+	rootScope, closer := tally.NewRootScope("", nil, reporter, time.Second, tally.DefaultSeparator)
 	defer closer.Close()
 	subScope := rootScope.SubScope("requests")
 
