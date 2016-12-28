@@ -31,7 +31,8 @@ import (
 
 var (
 	// NoopScope is a scope that does nothing
-	NoopScope, _     = NewRootScope("", nil, NullStatsReporter, 0, "")
+	NoopScope, _ = NewRootScope("", nil, NullStatsReporter, 0, "")
+	// DefaultSeparator is the default separator used to join nested scopes
 	DefaultSeparator = "."
 
 	globalClock = clock.New()
