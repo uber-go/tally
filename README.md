@@ -25,7 +25,7 @@ tags := map[string]string{
 	"type": "master",
 }
 reportEvery := 1 * time.Second
-scope := tally.NewRootScope("some_prefix", tags, reporter, reportEvery)
+scope := tally.NewRootScope("some_prefix", tags, reporter, reportEvery, tally.DefaultSeparator)
 ```
 
 ### Get/Create a metric, use it ###
@@ -59,7 +59,7 @@ tags := map[string]string{
 	"type": "master",
 }
 reportEvery := 1 * time.Second
-scope := tally.NewRootScope("some_prefix", tags, reporter, reportEvery)
+scope := tally.NewRootScope("some_prefix", tags, reporter, reportEvery, tally.DefaultSeparator)
 ```
 
 Implement your own reporter using the `StatsReporter` interface:

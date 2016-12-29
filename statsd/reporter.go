@@ -32,9 +32,9 @@ type cactusStatsReporter struct {
 	sampleRate float32
 }
 
-// NewStatsdReporter wraps a statsd.Statter for use with tally. Use either
+// NewReporter wraps a statsd.Statter for use with tally. Use either
 // statsd.NewClient or statsd.NewBufferedClient.
-func NewStatsdReporter(statsd statsd.Statter, opts Options) tally.StatsReporter {
+func NewReporter(statsd statsd.Statter, opts Options) tally.StatsReporter {
 	if opts == nil {
 		opts = NewOptions()
 	}
