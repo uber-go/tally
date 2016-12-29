@@ -1,7 +1,6 @@
 package prometheus
 
 import (
-	"crypto/sha1"
 	"errors"
 	"net/http"
 	"sort"
@@ -11,7 +10,6 @@ import (
 	prom "github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/uber-go/tally"
-	//"github.com/uber-go/tally"
 )
 
 var (
@@ -68,7 +66,7 @@ func NewReporter(objectives map[float64]float64) Reporter {
 // If not called explicitly, the Reporter will create one for you on first use, with a not super helpful HELP string
 func (r *reporter) RegisterCounter(name string, tags map[string]string, desc string) (*prom.CounterVec, error) {
 	ctr := &prom.CounterVec{}
-	id := hashMetricLabelsToID(name, tags)
+	id := canonicalMetricID(name, tags)
 	exists := r.hasCounter(id)
 	if exists {
 		return ctr, errorAlreadyRegistered
@@ -93,7 +91,7 @@ func (r *reporter) RegisterCounter(name string, tags map[string]string, desc str
 
 // ReportCounter reports a counter value
 func (r *reporter) ReportCounter(name string, tags map[string]string, value int64) {
-	id := hashMetricLabelsToID(name, tags)
+	id := canonicalMetricID(name, tags)
 
 	r.RLock()
 	ctr, ok := r.counters[id]
@@ -113,7 +111,7 @@ func (r *reporter) ReportCounter(name string, tags map[string]string, value int6
 // If not called explicitly, the Reporter will create one for you on first use, with a not super helpful HELP string
 func (r *reporter) RegisterGauge(name string, tags map[string]string, desc string) (*prom.GaugeVec, error) {
 	g := &prom.GaugeVec{}
-	id := hashMetricLabelsToID(name, tags)
+	id := canonicalMetricID(name, tags)
 	exists := r.hasGauge(id)
 	if exists {
 		return g, errorAlreadyRegistered
@@ -139,7 +137,7 @@ func (r *reporter) RegisterGauge(name string, tags map[string]string, desc strin
 
 // ReportGauge reports a gauge value
 func (r *reporter) ReportGauge(name string, tags map[string]string, value float64) {
-	id := hashMetricLabelsToID(name, tags)
+	id := canonicalMetricID(name, tags)
 
 	r.RLock()
 	g, ok := r.gauges[id]
@@ -159,7 +157,7 @@ func (r *reporter) ReportGauge(name string, tags map[string]string, value float6
 // If not called explicitly, the Reporter will create one for you on first use, with a not super helpful HELP string
 func (r *reporter) RegisterTimer(name string, tags map[string]string, desc string, objectives map[float64]float64) (*prom.SummaryVec, error) {
 	h := &prom.SummaryVec{}
-	id := hashMetricLabelsToID(name, tags)
+	id := canonicalMetricID(name, tags)
 	exists := r.hasSummary(id)
 	if exists {
 		return h, errorAlreadyRegistered
@@ -189,7 +187,7 @@ func (r *reporter) RegisterTimer(name string, tags map[string]string, desc strin
 
 // ReportTimer reports a timer value into the Summary histogram
 func (r *reporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
-	id := hashMetricLabelsToID(name, tags)
+	id := canonicalMetricID(name, tags)
 
 	r.RLock()
 	h, ok := r.summaries[id]
@@ -223,18 +221,18 @@ func (r *reporter) Tagging() bool {
 // Flush does nothing for prometheus
 func (r *reporter) Flush() {}
 
-// NOTE: this hashes name+label keys, not values, as we track metrics as Vectors, to support on-the-fly label changes
-func hashMetricLabelsToID(name string, tags map[string]string) metricID {
-	str := name + "{"
-	hasher := sha1.New()
+// NOTE: this generates a canonical MetricID for a given name+label keys, not values. This omits label values, as we track
+// metrics as Vectors in order to support on-the-fly label changes
+func canonicalMetricID(name string, tags map[string]string) metricID {
+	canonicalRep := name + "{"
 	ts := keysFromMap(tags)
 	sort.Strings(ts)
 	for _, k := range ts {
-		str = str + k + ","
+		canonicalRep = canonicalRep + k + ","
 	}
-	str = str + "}"
+	canonicalRep = canonicalRep + "}"
 
-	return metricID(string(hasher.Sum([]byte(str))))
+	return metricID(canonicalRep)
 }
 
 func (r *reporter) hasCounter(id metricID) (exists bool) {
