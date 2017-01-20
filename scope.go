@@ -55,6 +55,7 @@ type scope struct {
 	tags           map[string]string
 	reporter       StatsReporter
 	cachedReporter CachedStatsReporter
+	baseReporter   baseStatsReporter
 
 	registry *scopeRegistry
 	quit     chan struct{}
@@ -120,12 +121,20 @@ func newRootScope(
 		sep = separator
 	}
 
+	var baseReporter baseStatsReporter
+	if reporter != nil {
+		baseReporter = reporter
+	} else if cachedReporter != nil {
+		baseReporter = cachedReporter
+	}
+
 	s := &scope{
 		separator:      sep,
 		prefix:         prefix,
 		tags:           tags,
 		reporter:       reporter,
 		cachedReporter: cachedReporter,
+		baseReporter:   baseReporter,
 
 		registry: &scopeRegistry{},
 		quit:     make(chan struct{}),
@@ -178,7 +187,7 @@ func (s *scope) cachedReport(c CachedStatsReporter) {
 
 	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
 
-	c.CachedFlush()
+	c.Flush()
 }
 
 // reportLoop is used by the root scope for periodic reporting
@@ -285,6 +294,7 @@ func (s *scope) Tagged(tags map[string]string) Scope {
 		tags:           mergeRightTags(s.tags, tags),
 		reporter:       s.reporter,
 		cachedReporter: s.cachedReporter,
+		baseReporter:   s.baseReporter,
 		registry:       s.registry,
 
 		counters: make(map[string]*counter),
@@ -303,6 +313,7 @@ func (s *scope) SubScope(prefix string) Scope {
 		tags:           s.tags,
 		reporter:       s.reporter,
 		cachedReporter: s.cachedReporter,
+		baseReporter:   s.baseReporter,
 		registry:       s.registry,
 
 		counters: make(map[string]*counter),
@@ -315,13 +326,11 @@ func (s *scope) SubScope(prefix string) Scope {
 }
 
 func (s *scope) Capabilities() Capabilities {
-	if s.reporter != nil {
-		return s.reporter.Capabilities()
+	if s.baseReporter == nil {
+		return capabilitiesNone
 	}
-	if s.cachedReporter != nil {
-		return s.cachedReporter.CachedCapabilities()
-	}
-	return capabilitiesNone
+
+	return s.baseReporter.Capabilities()
 }
 
 func (s *scope) Snapshot() Snapshot {
@@ -373,10 +382,7 @@ func (s *scope) Snapshot() Snapshot {
 
 func (s *scope) Close() error {
 	close(s.quit)
-	if closer, ok := s.reporter.(io.Closer); ok {
-		return closer.Close()
-	}
-	if closer, ok := s.cachedReporter.(io.Closer); ok {
+	if closer, ok := s.baseReporter.(io.Closer); ok {
 		return closer.Close()
 	}
 	return nil

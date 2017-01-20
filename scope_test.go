@@ -140,13 +140,7 @@ func (r *testStatsReporter) Capabilities() Capabilities {
 	return capabilitiesReportingNoTagging
 }
 
-func (r *testStatsReporter) CachedCapabilities() Capabilities {
-	return capabilitiesReportingNoTagging
-}
-
 func (r *testStatsReporter) Flush() {}
-
-func (r *testStatsReporter) CachedFlush() {}
 
 func TestWriteTimerImmediately(t *testing.T) {
 	r := newTestStatsReporter()
