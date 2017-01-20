@@ -39,3 +39,37 @@ type StatsReporter interface {
 	// Flush is expected to be called by a Scope when it completes a round or reporting
 	Flush()
 }
+
+// CachedStatsReporter is a backend for Scopes that pre allocates all
+// counter, gauges & timers. This is harder to implement but more performant
+type CachedStatsReporter interface {
+	// AllocateCounter pre allocates a counter data structure with name & tags.
+	AllocateCounter(name string, tags map[string]string) CachedCount
+
+	// AllocateGauge pre allocates a gauge data structure with name & tags.
+	AllocateGauge(name string, tags map[string]string) CachedGauge
+
+	// AllocateTimer pre allocates a timer data structure with name & tags.
+	AllocateTimer(name string, tags map[string]string) CachedTimer
+
+	// CachedCapabilities returns a description of metrics reporting capabilities
+	CachedCapabilities() Capabilities
+
+	// CachedFlush is expected to be called by a Scope when it completes a round or reporting
+	CachedFlush()
+}
+
+// CachedCount interface for reporting an individual counter
+type CachedCount interface {
+	ReportCount(value int64)
+}
+
+// CachedGauge interface for reporting an individual gauge
+type CachedGauge interface {
+	ReportGauge(value float64)
+}
+
+// CachedTimer interface for reporting an individual timer
+type CachedTimer interface {
+	ReportTimer(interval time.Duration)
+}
