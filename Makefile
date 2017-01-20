@@ -57,6 +57,10 @@ endif
 test:
 	go test -race $(PKGS)
 
+.PHONY: cover
+cover:
+	go test -cover -coverprofile cover.out -race .
+
 .PHONY: coveralls
 coveralls:
 	goveralls -service=travis-ci .
