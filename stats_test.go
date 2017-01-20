@@ -50,7 +50,7 @@ func (r *statsTestReporter) Capabilities() Capabilities {
 func (r *statsTestReporter) Flush() {}
 
 func TestCounter(t *testing.T) {
-	counter := newCounter()
+	counter := newCounter(nil)
 	r := &statsTestReporter{}
 
 	counter.Inc(1)
@@ -67,7 +67,7 @@ func TestCounter(t *testing.T) {
 }
 
 func TestGauge(t *testing.T) {
-	gauge := newGauge()
+	gauge := newGauge(nil)
 	r := &statsTestReporter{}
 
 	gauge.Update(42)
@@ -82,7 +82,7 @@ func TestGauge(t *testing.T) {
 
 func TestTimer(t *testing.T) {
 	r := &statsTestReporter{}
-	timer := newTimer("t1", nil, r)
+	timer := newTimer("t1", nil, r, nil)
 
 	timer.Record(42 * time.Millisecond)
 	assert.Equal(t, 42*time.Millisecond, r.last)

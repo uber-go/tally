@@ -50,10 +50,11 @@ func (r *scopeRegistry) add(subscope *scope) {
 }
 
 type scope struct {
-	separator string
-	prefix    string
-	tags      map[string]string
-	reporter  StatsReporter
+	separator      string
+	prefix         string
+	tags           map[string]string
+	reporter       StatsReporter
+	cachedReporter CachedStatsReporter
 
 	registry *scopeRegistry
 	quit     chan struct{}
@@ -76,7 +77,20 @@ func NewRootScope(
 	interval time.Duration,
 	separator string,
 ) (Scope, io.Closer) {
-	s := newRootScope(prefix, tags, reporter, interval, separator)
+	s := newRootScope(prefix, tags, reporter, nil, interval, separator)
+	return s, s
+}
+
+// NewCachedRootScope creates a new Scope using a more performant
+// cached stats reporter with the given prefix
+func NewCachedRootScope(
+	prefix string,
+	tags map[string]string,
+	reporter CachedStatsReporter,
+	interval time.Duration,
+	separator string,
+) (Scope, io.Closer) {
+	s := newRootScope(prefix, tags, nil, reporter, interval, separator)
 	return s, s
 }
 
@@ -87,13 +101,14 @@ func NewTestScope(
 	prefix string,
 	tags map[string]string,
 ) TestScope {
-	return newRootScope(prefix, tags, nil, 0, DefaultSeparator)
+	return newRootScope(prefix, tags, nil, nil, 0, DefaultSeparator)
 }
 
 func newRootScope(
 	prefix string,
 	tags map[string]string,
 	reporter StatsReporter,
+	cachedReporter CachedStatsReporter,
 	interval time.Duration,
 	separator string,
 ) *scope {
@@ -106,10 +121,11 @@ func newRootScope(
 	}
 
 	s := &scope{
-		separator: sep,
-		prefix:    prefix,
-		tags:      tags,
-		reporter:  reporter,
+		separator:      sep,
+		prefix:         prefix,
+		tags:           tags,
+		reporter:       reporter,
+		cachedReporter: cachedReporter,
 
 		registry: &scopeRegistry{},
 		quit:     make(chan struct{}),
@@ -147,6 +163,24 @@ func (s *scope) report(r StatsReporter) {
 	r.Flush()
 }
 
+func (s *scope) cachedReport(c CachedStatsReporter) {
+	s.cm.RLock()
+	for _, counter := range s.counters {
+		counter.cachedReport()
+	}
+	s.cm.RUnlock()
+
+	s.gm.RLock()
+	for _, gauge := range s.gauges {
+		gauge.cachedReport()
+	}
+	s.gm.RUnlock()
+
+	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
+
+	c.CachedFlush()
+}
+
 // reportLoop is used by the root scope for periodic reporting
 func (s *scope) reportLoop(interval time.Duration) {
 	ticker := time.NewTicker(interval)
@@ -154,9 +188,16 @@ func (s *scope) reportLoop(interval time.Duration) {
 		select {
 		case <-ticker.C:
 			s.registry.sm.Lock()
-			for _, ss := range s.registry.subscopes {
-				ss.report(s.reporter)
+			if s.reporter != nil {
+				for _, ss := range s.registry.subscopes {
+					ss.report(s.reporter)
+				}
+			} else if s.cachedReporter != nil {
+				for _, ss := range s.registry.subscopes {
+					ss.cachedReport(s.cachedReporter)
+				}
 			}
+
 			s.registry.sm.Unlock()
 		case <-s.quit:
 			return
@@ -172,7 +213,14 @@ func (s *scope) Counter(name string) Counter {
 		s.cm.Lock()
 		val, ok = s.counters[name]
 		if !ok {
-			val = newCounter()
+			if s.cachedReporter != nil {
+				cachedCounter := s.cachedReporter.AllocateCounter(
+					s.fullyQualifiedName(name), s.tags,
+				)
+				val = newCounter(cachedCounter)
+			} else {
+				val = newCounter(nil)
+			}
 			s.counters[name] = val
 		}
 		s.cm.Unlock()
@@ -188,7 +236,14 @@ func (s *scope) Gauge(name string) Gauge {
 		s.gm.Lock()
 		val, ok = s.gauges[name]
 		if !ok {
-			val = newGauge()
+			if s.cachedReporter != nil {
+				cachedGauge := s.cachedReporter.AllocateGauge(
+					s.fullyQualifiedName(name), s.tags,
+				)
+				val = newGauge(cachedGauge)
+			} else {
+				val = newGauge(nil)
+			}
 			s.gauges[name] = val
 		}
 		s.gm.Unlock()
@@ -204,7 +259,18 @@ func (s *scope) Timer(name string) Timer {
 		s.tm.Lock()
 		val, ok = s.timers[name]
 		if !ok {
-			val = newTimer(s.fullyQualifiedName(name), s.tags, s.reporter)
+			if s.cachedReporter != nil {
+				cachedTimer := s.cachedReporter.AllocateTimer(
+					s.fullyQualifiedName(name), s.tags,
+				)
+				val = newTimer(
+					s.fullyQualifiedName(name), s.tags, s.reporter, cachedTimer,
+				)
+			} else {
+				val = newTimer(
+					s.fullyQualifiedName(name), s.tags, s.reporter, nil,
+				)
+			}
 			s.timers[name] = val
 		}
 		s.tm.Unlock()
@@ -214,11 +280,12 @@ func (s *scope) Timer(name string) Timer {
 
 func (s *scope) Tagged(tags map[string]string) Scope {
 	subscope := &scope{
-		separator: s.separator,
-		prefix:    s.prefix,
-		tags:      mergeRightTags(s.tags, tags),
-		reporter:  s.reporter,
-		registry:  s.registry,
+		separator:      s.separator,
+		prefix:         s.prefix,
+		tags:           mergeRightTags(s.tags, tags),
+		reporter:       s.reporter,
+		cachedReporter: s.cachedReporter,
+		registry:       s.registry,
 
 		counters: make(map[string]*counter),
 		gauges:   make(map[string]*gauge),
@@ -231,11 +298,12 @@ func (s *scope) Tagged(tags map[string]string) Scope {
 
 func (s *scope) SubScope(prefix string) Scope {
 	subscope := &scope{
-		separator: s.separator,
-		prefix:    s.fullyQualifiedName(prefix),
-		tags:      s.tags,
-		reporter:  s.reporter,
-		registry:  s.registry,
+		separator:      s.separator,
+		prefix:         s.fullyQualifiedName(prefix),
+		tags:           s.tags,
+		reporter:       s.reporter,
+		cachedReporter: s.cachedReporter,
+		registry:       s.registry,
 
 		counters: make(map[string]*counter),
 		gauges:   make(map[string]*gauge),
@@ -247,10 +315,13 @@ func (s *scope) SubScope(prefix string) Scope {
 }
 
 func (s *scope) Capabilities() Capabilities {
-	if s.reporter == nil {
-		return capabilitiesNone
+	if s.reporter != nil {
+		return s.reporter.Capabilities()
 	}
-	return s.reporter.Capabilities()
+	if s.cachedReporter != nil {
+		return s.cachedReporter.CachedCapabilities()
+	}
+	return capabilitiesNone
 }
 
 func (s *scope) Snapshot() Snapshot {
@@ -303,6 +374,9 @@ func (s *scope) Snapshot() Snapshot {
 func (s *scope) Close() error {
 	close(s.quit)
 	if closer, ok := s.reporter.(io.Closer); ok {
+		return closer.Close()
+	}
+	if closer, ok := s.cachedReporter.(io.Closer); ok {
 		return closer.Close()
 	}
 	return nil
