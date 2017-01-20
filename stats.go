@@ -69,27 +69,33 @@ func (c *counter) Inc(v int64) {
 	atomic.AddInt64(&c.curr, v)
 }
 
-func (c *counter) report(name string, tags map[string]string, r StatsReporter) {
+func (c *counter) value() int64 {
 	curr := atomic.LoadInt64(&c.curr)
 
 	prev := atomic.LoadInt64(&c.prev)
 	if prev == curr {
-		return
+		return 0
 	}
 	atomic.StoreInt64(&c.prev, curr)
-	r.ReportCounter(name, tags, curr-prev)
+	return curr - prev
+}
+
+func (c *counter) report(name string, tags map[string]string, r StatsReporter) {
+	delta := c.value()
+	if delta == 0 {
+		return
+	}
+
+	r.ReportCounter(name, tags, delta)
 }
 
 func (c *counter) cachedReport() {
-	curr := atomic.LoadInt64(&c.curr)
-
-	prev := atomic.LoadInt64(&c.prev)
-	if prev == curr {
+	delta := c.value()
+	if delta == 0 {
 		return
 	}
-	atomic.StoreInt64(&c.prev, curr)
 
-	c.cachedCount.ReportCount(curr - prev)
+	c.cachedCount.ReportCount(delta)
 }
 
 func (c *counter) snapshot() int64 {
@@ -111,17 +117,19 @@ func (g *gauge) Update(v float64) {
 	atomic.StoreUint64(&g.updated, 1)
 }
 
+func (g *gauge) value() float64 {
+	return math.Float64frombits(atomic.LoadUint64(&g.curr))
+}
+
 func (g *gauge) report(name string, tags map[string]string, r StatsReporter) {
 	if atomic.SwapUint64(&g.updated, 0) == 1 {
-		r.ReportGauge(name, tags, math.Float64frombits(atomic.LoadUint64(&g.curr)))
+		r.ReportGauge(name, tags, g.value())
 	}
 }
 
 func (g *gauge) cachedReport() {
 	if atomic.SwapUint64(&g.updated, 0) == 1 {
-		g.cachedGauge.ReportGauge(
-			math.Float64frombits(atomic.LoadUint64(&g.curr)),
-		)
+		g.cachedGauge.ReportGauge(g.value())
 	}
 }
 
