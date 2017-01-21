@@ -55,7 +55,7 @@ type scope struct {
 	tags           map[string]string
 	reporter       StatsReporter
 	cachedReporter CachedStatsReporter
-	baseReporter   baseStatsReporter
+	baseReporter   BaseStatsReporter
 
 	registry *scopeRegistry
 	quit     chan struct{}
@@ -121,7 +121,7 @@ func newRootScope(
 		sep = separator
 	}
 
-	var baseReporter baseStatsReporter
+	var baseReporter BaseStatsReporter
 	if reporter != nil {
 		baseReporter = reporter
 	} else if cachedReporter != nil {

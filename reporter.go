@@ -22,14 +22,15 @@ package tally
 
 import "time"
 
-type baseStatsReporter interface {
+// BaseStatsReporter implements the shared reporter methods
+type BaseStatsReporter interface {
 	Capabilities() Capabilities
 	Flush()
 }
 
 // StatsReporter is a backend for Scopes to report metrics to
 type StatsReporter interface {
-	baseStatsReporter
+	BaseStatsReporter
 
 	// ReportCounter reports a counter value
 	ReportCounter(name string, tags map[string]string, value int64)
@@ -44,7 +45,7 @@ type StatsReporter interface {
 // CachedStatsReporter is a backend for Scopes that pre allocates all
 // counter, gauges & timers. This is harder to implement but more performant
 type CachedStatsReporter interface {
-	baseStatsReporter
+	BaseStatsReporter
 
 	// AllocateCounter pre allocates a counter data structure with name & tags.
 	AllocateCounter(name string, tags map[string]string) CachedCount
