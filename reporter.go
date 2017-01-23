@@ -22,8 +22,16 @@ package tally
 
 import "time"
 
+// BaseStatsReporter implements the shared reporter methods
+type BaseStatsReporter interface {
+	Capabilities() Capabilities
+	Flush()
+}
+
 // StatsReporter is a backend for Scopes to report metrics to
 type StatsReporter interface {
+	BaseStatsReporter
+
 	// ReportCounter reports a counter value
 	ReportCounter(name string, tags map[string]string, value int64)
 
@@ -32,10 +40,34 @@ type StatsReporter interface {
 
 	// ReportTimer reports a timer value
 	ReportTimer(name string, tags map[string]string, interval time.Duration)
+}
 
-	// Capabilities returns a description of metrics reporting capabilities
-	Capabilities() Capabilities
+// CachedStatsReporter is a backend for Scopes that pre allocates all
+// counter, gauges & timers. This is harder to implement but more performant
+type CachedStatsReporter interface {
+	BaseStatsReporter
 
-	// Flush is expected to be called by a Scope when it completes a round or reporting
-	Flush()
+	// AllocateCounter pre allocates a counter data structure with name & tags.
+	AllocateCounter(name string, tags map[string]string) CachedCount
+
+	// AllocateGauge pre allocates a gauge data structure with name & tags.
+	AllocateGauge(name string, tags map[string]string) CachedGauge
+
+	// AllocateTimer pre allocates a timer data structure with name & tags.
+	AllocateTimer(name string, tags map[string]string) CachedTimer
+}
+
+// CachedCount interface for reporting an individual counter
+type CachedCount interface {
+	ReportCount(value int64)
+}
+
+// CachedGauge interface for reporting an individual gauge
+type CachedGauge interface {
+	ReportGauge(value float64)
+}
+
+// CachedTimer interface for reporting an individual timer
+type CachedTimer interface {
+	ReportTimer(interval time.Duration)
 }

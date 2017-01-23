@@ -56,27 +56,46 @@ func (c *capabilities) Tagging() bool {
 }
 
 type counter struct {
-	prev int64
-	curr int64
+	prev        int64
+	curr        int64
+	cachedCount CachedCount
 }
 
-func newCounter() *counter {
-	return &counter{}
+func newCounter(cachedCount CachedCount) *counter {
+	return &counter{cachedCount: cachedCount}
 }
 
 func (c *counter) Inc(v int64) {
 	atomic.AddInt64(&c.curr, v)
 }
 
-func (c *counter) report(name string, tags map[string]string, r StatsReporter) {
+func (c *counter) value() int64 {
 	curr := atomic.LoadInt64(&c.curr)
 
 	prev := atomic.LoadInt64(&c.prev)
 	if prev == curr {
-		return
+		return 0
 	}
 	atomic.StoreInt64(&c.prev, curr)
-	r.ReportCounter(name, tags, curr-prev)
+	return curr - prev
+}
+
+func (c *counter) report(name string, tags map[string]string, r StatsReporter) {
+	delta := c.value()
+	if delta == 0 {
+		return
+	}
+
+	r.ReportCounter(name, tags, delta)
+}
+
+func (c *counter) cachedReport() {
+	delta := c.value()
+	if delta == 0 {
+		return
+	}
+
+	c.cachedCount.ReportCount(delta)
 }
 
 func (c *counter) snapshot() int64 {
@@ -84,12 +103,13 @@ func (c *counter) snapshot() int64 {
 }
 
 type gauge struct {
-	updated uint64
-	curr    uint64
+	updated     uint64
+	curr        uint64
+	cachedGauge CachedGauge
 }
 
-func newGauge() *gauge {
-	return &gauge{}
+func newGauge(cachedGauge CachedGauge) *gauge {
+	return &gauge{cachedGauge: cachedGauge}
 }
 
 func (g *gauge) Update(v float64) {
@@ -97,9 +117,19 @@ func (g *gauge) Update(v float64) {
 	atomic.StoreUint64(&g.updated, 1)
 }
 
+func (g *gauge) value() float64 {
+	return math.Float64frombits(atomic.LoadUint64(&g.curr))
+}
+
 func (g *gauge) report(name string, tags map[string]string, r StatsReporter) {
 	if atomic.SwapUint64(&g.updated, 0) == 1 {
-		r.ReportGauge(name, tags, math.Float64frombits(atomic.LoadUint64(&g.curr)))
+		r.ReportGauge(name, tags, g.value())
+	}
+}
+
+func (g *gauge) cachedReport() {
+	if atomic.SwapUint64(&g.updated, 0) == 1 {
+		g.cachedGauge.ReportGauge(g.value())
 	}
 }
 
@@ -111,10 +141,11 @@ func (g *gauge) snapshot() float64 {
 // at the timer level. The reporter buffers may timer entries and periodically
 // flushes.
 type timer struct {
-	name       string
-	tags       map[string]string
-	reporter   StatsReporter
-	unreported timerValues
+	name        string
+	tags        map[string]string
+	reporter    StatsReporter
+	cachedTimer CachedTimer
+	unreported  timerValues
 }
 
 type timerValues struct {
@@ -122,11 +153,17 @@ type timerValues struct {
 	values []time.Duration
 }
 
-func newTimer(name string, tags map[string]string, r StatsReporter) *timer {
+func newTimer(
+	name string,
+	tags map[string]string,
+	r StatsReporter,
+	cachedTimer CachedTimer,
+) *timer {
 	t := &timer{
-		name:     name,
-		tags:     tags,
-		reporter: r,
+		name:        name,
+		tags:        tags,
+		cachedTimer: cachedTimer,
+		reporter:    r,
 	}
 	if r == nil {
 		t.reporter = &timerNoReporterSink{timer: t}
@@ -139,7 +176,11 @@ func (t *timer) Start() Stopwatch {
 }
 
 func (t *timer) Record(interval time.Duration) {
-	t.reporter.ReportTimer(t.name, t.tags, interval)
+	if t.cachedTimer != nil {
+		t.cachedTimer.ReportTimer(interval)
+	} else {
+		t.reporter.ReportTimer(t.name, t.tags, interval)
+	}
 }
 
 func (t *timer) snapshot() []time.Duration {

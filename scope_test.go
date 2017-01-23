@@ -29,13 +29,30 @@ import (
 )
 
 type testIntValue struct {
-	val  int64
-	tags map[string]string
+	val      int64
+	tags     map[string]string
+	reporter *testStatsReporter
+}
+
+func (m *testIntValue) ReportCount(value int64) {
+	m.val = value
+	m.reporter.cg.Done()
+}
+
+func (m *testIntValue) ReportTimer(interval time.Duration) {
+	m.val = int64(interval)
+	m.reporter.tg.Done()
 }
 
 type testFloatValue struct {
-	val  float64
-	tags map[string]string
+	val      float64
+	tags     map[string]string
+	reporter *testStatsReporter
+}
+
+func (m *testFloatValue) ReportGauge(value float64) {
+	m.val = value
+	m.reporter.gg.Done()
 }
 
 type testStatsReporter struct {
@@ -59,6 +76,18 @@ func newTestStatsReporter() *testStatsReporter {
 	}
 }
 
+func (r *testStatsReporter) AllocateCounter(
+	name string, tags map[string]string,
+) CachedCount {
+	counter := &testIntValue{
+		val:      0,
+		tags:     tags,
+		reporter: r,
+	}
+	r.counters[name] = counter
+	return counter
+}
+
 func (r *testStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
 	r.counters[name] = &testIntValue{
 		val:  value,
@@ -67,12 +96,36 @@ func (r *testStatsReporter) ReportCounter(name string, tags map[string]string, v
 	r.cg.Done()
 }
 
+func (r *testStatsReporter) AllocateGauge(
+	name string, tags map[string]string,
+) CachedGauge {
+	gauge := &testFloatValue{
+		val:      0,
+		tags:     tags,
+		reporter: r,
+	}
+	r.gauges[name] = gauge
+	return gauge
+}
+
 func (r *testStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
 	r.gauges[name] = &testFloatValue{
 		val:  value,
 		tags: tags,
 	}
 	r.gg.Done()
+}
+
+func (r *testStatsReporter) AllocateTimer(
+	name string, tags map[string]string,
+) CachedTimer {
+	timer := &testIntValue{
+		val:      0,
+		tags:     tags,
+		reporter: r,
+	}
+	r.timers[name] = timer
+	return timer
 }
 
 func (r *testStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
@@ -123,6 +176,23 @@ func TestWriteReportLoop(t *testing.T) {
 	r.tg.Wait()
 }
 
+func TestCachedReportLoop(t *testing.T) {
+	r := newTestStatsReporter()
+	s, close := NewCachedRootScope("", nil, r, 10, "")
+	defer close.Close()
+
+	r.cg.Add(1)
+	s.Counter("bar").Inc(1)
+	r.gg.Add(1)
+	s.Gauge("zed").Update(1)
+	r.tg.Add(1)
+	s.Timer("ticky").Record(time.Millisecond * 175)
+
+	r.cg.Wait()
+	r.gg.Wait()
+	r.tg.Wait()
+}
+
 func TestWriteOnce(t *testing.T) {
 	r := newTestStatsReporter()
 
@@ -151,6 +221,29 @@ func TestWriteOnce(t *testing.T) {
 	assert.Nil(t, r.counters["bar"])
 	assert.Nil(t, r.gauges["zed"])
 	assert.Nil(t, r.timers["ticky"])
+}
+
+func TestCachedReporter(t *testing.T) {
+	r := newTestStatsReporter()
+
+	root, _ := NewCachedRootScope("", nil, r, 0, "")
+	s := root.(*scope)
+
+	r.cg.Add(1)
+	s.Counter("bar").Inc(1)
+	r.gg.Add(1)
+	s.Gauge("zed").Update(1)
+	r.tg.Add(1)
+	s.Timer("ticky").Record(time.Millisecond * 175)
+
+	s.cachedReport(r)
+	r.cg.Wait()
+	r.gg.Wait()
+	r.tg.Wait()
+
+	assert.EqualValues(t, 1, r.counters["bar"].val)
+	assert.EqualValues(t, 1, r.gauges["zed"].val)
+	assert.EqualValues(t, time.Millisecond*175, r.timers["ticky"].val)
 }
 
 func TestRootScopeWithoutPrefix(t *testing.T) {
