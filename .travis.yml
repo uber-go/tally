@@ -12,6 +12,7 @@ cache:
   directories:
     - vendor
 install:
+  - npm i uber-licence -g
   - make dependencies
 script:
   - make test
