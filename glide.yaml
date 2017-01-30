@@ -11,6 +11,14 @@ import:
   version: ^0.8.0
   subpackages:
   - prometheus
+- package: github.com/apache/thrift
+  version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
+  subpackages:
+  - lib/go/thrift
+- package: github.com/uber-go/atomic
+  version: ^1.0.0
+- package: github.com/uber-common/bark
+  version: 8841a0f8e7ca869284ccb29c08a14cf3f4310f46
 testImport:
 - package: github.com/axw/gocov
   version: 54b98cfcac0c63fb3f9bd8e7ad241b724d4e985b
