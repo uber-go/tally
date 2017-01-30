@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"code.uber.internal/rt/go-common-m3-client.git/customtransports"
-	"code.uber.internal/rt/go-common-m3-client.git/thrift"
-	"code.uber.internal/rt/go-common-m3-client.git/thriftudp"
+	"github.com/uber-go/tally/m3/customtransports"
+	"github.com/uber-go/tally/m3/thrift"
+	"github.com/uber-go/tally/m3/thriftudp"
 
 	"github.com/apache/thrift/lib/go/thrift"
 	"github.com/stretchr/testify/require"

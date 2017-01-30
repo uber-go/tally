@@ -3,10 +3,10 @@ package metrics
 // Copied from code.uber.internal:go-common.git at version 139e3b5b4b4b775ff9ed8abb2a9f31b7bd1aad58
 
 import (
-	"code.uber.internal/rt/go-common-m3-client.git/customtransports"
-	"code.uber.internal/rt/go-common-m3-client.git/thrift"
-	"code.uber.internal/rt/go-common-pool.git"
 	"github.com/apache/thrift/lib/go/thrift"
+	"github.com/uber-go/tally/m3/customtransports"
+	"github.com/uber-go/tally/m3/pool"
+	"github.com/uber-go/tally/m3/thrift"
 )
 
 const (

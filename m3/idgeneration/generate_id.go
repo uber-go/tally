@@ -6,9 +6,8 @@ import (
 	"bytes"
 	"sort"
 
-	"code.uber.internal/rt/go-common-pool.git"
-
 	"github.com/uber-common/bark"
+	"github.com/uber-go/tally/m3/pool"
 )
 
 const (

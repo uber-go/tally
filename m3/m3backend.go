@@ -9,14 +9,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"code.uber.internal/rt/go-common-config.git"
-	"code.uber.internal/rt/go-common-m3-client.git/customtransports"
-	"code.uber.internal/rt/go-common-m3-client.git/idgeneration"
-	"code.uber.internal/rt/go-common-m3-client.git/thrift"
-	"code.uber.internal/rt/go-common-m3-client.git/thriftudp"
 	"github.com/apache/thrift/lib/go/thrift"
 	"github.com/uber-common/bark"
 	"github.com/uber-go/tally"
+	"github.com/uber-go/tally/m3/customtransports"
+	"github.com/uber-go/tally/m3/idgeneration"
+	"github.com/uber-go/tally/m3/thrift"
+	"github.com/uber-go/tally/m3/thriftudp"
 )
 
 // Protocol represent a thrift transport protocol
