@@ -38,7 +38,7 @@ const (
 	updates  = 1000
 	numIds   = 10
 
-	testID = "stats.pek1.gauges.m3+servers.rt-geospatial08-pek1.network.eth0_tx_colls+dc=pek1,domain=production.pod01,env=production,pipe=cn1,service=servers,type=gauge"
+	testID = "stats.$dc.gauges.m3+servers.my-internal-server-$dc.network.eth0_tx_colls+dc=$dc,domain=production.$zone,env=production,pipe=$pipe,service=servers,type=gauge"
 )
 
 func BenchmarkDirectID(b *testing.B) {
