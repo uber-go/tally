@@ -32,6 +32,7 @@ const (
 )
 
 var localListenAddr = &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)}
+var defaultCommonTags = map[string]string{"env": "test", "host": "test"}
 
 var protocols = []Protocol{Compact, Binary}
 
@@ -43,7 +44,7 @@ func TestM3Backend(t *testing.T) {
 		go server.Serve()
 		defer server.Close()
 
-		commonTags := map[string]string{"commonTag": "common", "commonTag2": "tag", "commonTag3": "val"}
+		commonTags := map[string]string{"env": "development", "host": hostname(), "commonTag": "common", "commonTag2": "tag", "commonTag3": "val"}
 		var m3be BufferedBackend
 		var err error
 		if protocol == Compact {
@@ -121,7 +122,7 @@ func TestM3Backend(t *testing.T) {
 // TestMultiM3Backend tests the multi M3Backend works as expected
 func TestMultiM3Backend(t *testing.T) {
 	dests := []string{"127.0.0.1:9052", "127.0.0.1:9053"}
-	commonTags := map[string]string{"commonTag": "common", "commonTag2": "tag", "commonTag3": "val"}
+	commonTags := map[string]string{"env": "test", "host": "test", "commonTag": "common", "commonTag2": "tag", "commonTag3": "val"}
 	m, err := NewMultiM3Backend(dests, "testService", commonTags, includeHost, queueSize, maxPacketSize, shortInterval)
 	require.Nil(t, err)
 	defer m.Close()
@@ -156,7 +157,7 @@ func TestM3BackendInterval(t *testing.T) {
 	go server.Serve()
 	defer server.Close()
 
-	m3be, err := NewM3Backend(server.Addr, "testService", nil, false, queueSize, maxPacketSize, shortInterval)
+	m3be, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, false, queueSize, maxPacketSize, shortInterval)
 	require.Nil(t, err)
 	defer m3be.Close()
 	wg.Add(1)
@@ -176,7 +177,7 @@ func TestM3BackendTally(t *testing.T) {
 	go server.Serve()
 	defer server.Close()
 
-	m, err := NewM3Backend(server.Addr, "testService", nil, false, queueSize, maxPacketSize, shortInterval)
+	m, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, false, queueSize, maxPacketSize, shortInterval)
 	require.Nil(t, err)
 	defer m.Close()
 
@@ -215,7 +216,7 @@ func TestM3BackendBuffering(t *testing.T) {
 	go server.Serve()
 	defer server.Close()
 
-	m3be, err := NewM3Backend(server.Addr, "testService", nil, false, queueSize, maxPacketSize, longInterval)
+	m3be, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, false, queueSize, maxPacketSize, longInterval)
 	require.Nil(t, err)
 	defer m3be.Close()
 	numCounters := 40
@@ -245,7 +246,7 @@ func TestM3BackendFinalFlush(t *testing.T) {
 	go server.Serve()
 	defer server.Close()
 
-	m3be, err := NewM3Backend(server.Addr, "testService", nil, false, queueSize, maxPacketSize, shortInterval)
+	m3be, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, false, queueSize, maxPacketSize, shortInterval)
 	require.Nil(t, err)
 	wg.Add(1)
 	id := m3be.RegisterForID("my-timer", nil, TimerType)
@@ -265,7 +266,7 @@ func TestM3BackendCache(t *testing.T) {
 	go server.Serve()
 	defer server.Close()
 
-	m3be, err := NewM3Backend(server.Addr, "testService", nil, false, 10, 1440, shortInterval)
+	m3be, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, false, 10, 1440, shortInterval)
 	require.Nil(t, err)
 	defer m3be.Close()
 
@@ -303,7 +304,7 @@ func TestBatchSizes(t *testing.T) {
 	go server.serve()
 	defer server.close()
 
-	commonTags := map[string]string{"domain": "pod" + strconv.Itoa(rand.Intn(100))}
+	commonTags := map[string]string{"env": "test", "domain": "pod" + strconv.Itoa(rand.Intn(100))}
 	maxPacketSize := int32(1440)
 	m3be, err := NewM3Backend(server.addr(), "testService", commonTags, false, 10, maxPacketSize, shortInterval)
 
@@ -352,7 +353,7 @@ func TestInvalidIds(t *testing.T) {
 	go server.Serve()
 	defer server.Close()
 
-	m3be, err := NewM3Backend(server.Addr, "testService", nil, false, queueSize, maxPacketSize, shortInterval)
+	m3be, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, false, queueSize, maxPacketSize, shortInterval)
 	require.Nil(t, err)
 	m3be.RecordTimer(nil, 10)
 	m3be.IncCounter(nil, 20)
@@ -371,7 +372,7 @@ func TestUnregister(t *testing.T) {
 	go server.Serve()
 	defer server.Close()
 
-	m3be, err := NewM3Backend(server.Addr, "testService", nil, false, queueSize, maxPacketSize, shortInterval)
+	m3be, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, false, queueSize, maxPacketSize, shortInterval)
 	require.Nil(t, err)
 	id := m3be.RegisterForID("my-counter", nil, CounterType)
 	m3be.IncCounter(id, 1)
@@ -391,6 +392,7 @@ func TestUnregister(t *testing.T) {
 func TestM3BackendSpecifyService(t *testing.T) {
 	commonTags := map[string]string{
 		serviceTag: "overrideService",
+		envTag:     "test",
 		hostTag:    "overrideHost",
 	}
 	m, err := NewM3Backend("127.0.0.1:1000", "testService", commonTags, includeHost, 10, 100, noInterval)
@@ -416,7 +418,7 @@ func TestM3BackendMaxTags(t *testing.T) {
 	go server.Serve()
 	defer server.Close()
 
-	m, err := NewM3Backend(server.Addr, "testService", nil, includeHost, 10, 100, shortInterval)
+	m, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, includeHost, 10, 100, shortInterval)
 	require.Nil(t, err)
 	defer m.Close()
 	m3be, ok := m.(*m3Backend)
@@ -449,14 +451,15 @@ func TestIncludeHost(t *testing.T) {
 		return false
 	}
 
-	m, err := NewM3Backend(server.Addr, "testService", nil, false, queueSize, maxPacketSize, noInterval)
+	commonTags := map[string]string{"env": "test"}
+	m, err := NewM3Backend(server.Addr, "testService", commonTags, false, queueSize, maxPacketSize, noInterval)
 	require.NoError(t, err)
 	defer m.Close()
 	m3WithoutHost, ok := m.(*m3Backend)
 	require.True(t, ok)
 	require.False(t, tagIncluded(m3WithoutHost.commonTags, "host"))
 
-	m, err = NewM3Backend(server.Addr, "testService", nil, true, queueSize, maxPacketSize, noInterval)
+	m, err = NewM3Backend(server.Addr, "testService", defaultCommonTags, true, queueSize, maxPacketSize, noInterval)
 	require.NoError(t, err)
 	defer m.Close()
 	m3WithHost, ok := m.(*m3Backend)
@@ -465,7 +468,7 @@ func TestIncludeHost(t *testing.T) {
 }
 
 func TestM3BackendHasTaggingCapability(t *testing.T) {
-	m, err := NewM3Backend("127.0.0.1:9052", "testService", nil, false, queueSize, maxPacketSize, noInterval)
+	m, err := NewM3Backend("127.0.0.1:9052", "testService", defaultCommonTags, false, queueSize, maxPacketSize, noInterval)
 	require.Nil(t, err)
 
 	require.True(t, m.Capabilities().Tagging())
@@ -477,7 +480,7 @@ func TestM3GetForID(t *testing.T) {
 	go server.Serve()
 	defer server.Close()
 
-	m3be, err := NewM3Backend(server.Addr, "testService", nil, false, queueSize, maxPacketSize, shortInterval)
+	m3be, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, false, queueSize, maxPacketSize, shortInterval)
 	require.Nil(t, err)
 
 	tags := map[string]string{"testTag": "TestValue", "testTag2": "TestValue2"}

@@ -11,6 +11,8 @@ import (
 	"github.com/uber-go/tally"
 )
 
+var commonTags = map[string]string{"env": "test"}
+
 // TestM3Scope tests that scope works as expected
 func TestM3Scope(t *testing.T) {
 	var wg sync.WaitGroup
@@ -20,7 +22,7 @@ func TestM3Scope(t *testing.T) {
 
 	tags := map[string]string{"testTag": "TestValue", "testTag2": "TestValue2"}
 
-	m3be, err := NewM3Backend(server.Addr, "testService", nil, false, queueSize, maxPacketSize, shortInterval)
+	m3be, err := NewM3Backend(server.Addr, "testService", commonTags, false, queueSize, maxPacketSize, shortInterval)
 	require.Nil(t, err)
 	wg.Add(1)
 
@@ -52,7 +54,7 @@ func TestM3ScopeCounter(t *testing.T) {
 
 	tags := map[string]string{"testTag": "TestValue", "testTag2": "TestValue2"}
 
-	m3be, err := NewM3Backend(server.Addr, "testService", nil, false, queueSize, maxPacketSize, shortInterval)
+	m3be, err := NewM3Backend(server.Addr, "testService", commonTags, false, queueSize, maxPacketSize, shortInterval)
 	require.Nil(t, err)
 	wg.Add(1)
 
@@ -84,7 +86,7 @@ func TestM3ScopeGauge(t *testing.T) {
 
 	tags := map[string]string{"testTag": "TestValue", "testTag2": "TestValue2"}
 
-	m3be, err := NewM3Backend(server.Addr, "testService", nil, false, queueSize, maxPacketSize, shortInterval)
+	m3be, err := NewM3Backend(server.Addr, "testService", commonTags, false, queueSize, maxPacketSize, shortInterval)
 	require.Nil(t, err)
 	wg.Add(1)
 
@@ -116,7 +118,7 @@ func TestM3CachedScope(t *testing.T) {
 
 	tags := map[string]string{"testTag": "TestValue", "testTag2": "TestValue2"}
 
-	m3be, err := NewM3Backend(server.Addr, "testService", nil, false, queueSize, maxPacketSize, shortInterval)
+	m3be, err := NewM3Backend(server.Addr, "testService", commonTags, false, queueSize, maxPacketSize, shortInterval)
 	require.Nil(t, err)
 	wg.Add(1)
 
@@ -147,7 +149,7 @@ func TestM3CachedScopeCounter(t *testing.T) {
 
 	tags := map[string]string{"testTag": "TestValue", "testTag2": "TestValue2"}
 
-	m3be, err := NewM3Backend(server.Addr, "testService", nil, false, queueSize, maxPacketSize, shortInterval)
+	m3be, err := NewM3Backend(server.Addr, "testService", commonTags, false, queueSize, maxPacketSize, shortInterval)
 	require.Nil(t, err)
 	wg.Add(1)
 
@@ -178,7 +180,7 @@ func TestM3CachedScopeGauge(t *testing.T) {
 
 	tags := map[string]string{"testTag": "TestValue", "testTag2": "TestValue2"}
 
-	m3be, err := NewM3Backend(server.Addr, "testService", nil, false, queueSize, maxPacketSize, shortInterval)
+	m3be, err := NewM3Backend(server.Addr, "testService", commonTags, false, queueSize, maxPacketSize, shortInterval)
 	require.Nil(t, err)
 	wg.Add(1)
 
