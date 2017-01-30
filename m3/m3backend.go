@@ -187,10 +187,14 @@ func newMultiM3BackendWithProtocol(opts backendOptions) (*m3Backend, error) {
 		tags[createTag(resourcePool, serviceTag, opts.service)] = true
 	}
 	if opts.commonTags[envTag] == "" {
-		tags[createTag(resourcePool, envTag, config.GetEnvironment())] = true
+		panic("m3backend: commontags[env] is required")
+		// tags[createTag(resourcePool, envTag, config.GetEnvironment())] = true
 	}
-	if opts.includeHost && opts.commonTags[hostTag] == "" {
-		tags[createTag(resourcePool, hostTag, config.GetHostname())] = true
+	if opts.includeHost {
+		if opts.commonTags[hostTag] == "" {
+			panic("m3backend: commonTags[host] is required")
+		}
+		// tags[createTag(resourcePool, hostTag, config.GetHostname())] = true
 	}
 
 	//calculate size of common tags
