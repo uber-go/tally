@@ -20,8 +20,6 @@
 
 package pool
 
-// Copied from code.uber.internal:go-common.git at version 2581320e78e1574e31e581fb32498c19c40acd66
-
 import (
 	"sync"
 	"sync/atomic"

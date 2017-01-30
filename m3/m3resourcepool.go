@@ -20,8 +20,6 @@
 
 package metrics
 
-// Copied from code.uber.internal:go-common.git at version 139e3b5b4b4b775ff9ed8abb2a9f31b7bd1aad58
-
 import (
 	"github.com/apache/thrift/lib/go/thrift"
 	"github.com/uber-go/tally/m3/customtransports"
