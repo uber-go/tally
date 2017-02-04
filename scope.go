@@ -137,7 +137,7 @@ func newRootScope(
 		baseReporter:   baseReporter,
 
 		registry: &scopeRegistry{},
-		quit:     make(chan struct{}),
+		quit:     make(chan struct{}, 1),
 
 		counters: make(map[string]*counter),
 		gauges:   make(map[string]*gauge),
@@ -389,12 +389,10 @@ func (s *scope) Close() error {
 }
 
 func (s *scope) fullyQualifiedName(name string) string {
-	// TODO(mmihic): Consider maintaining a map[string]string for common names so we
-	// avoid the cost of continual allocations
+	// NB(r): Only called on cached creation of a counter, gauge or timer
 	if len(s.prefix) == 0 {
 		return name
 	}
-
 	return fmt.Sprintf("%s%s%s", s.prefix, s.separator, name)
 }
 

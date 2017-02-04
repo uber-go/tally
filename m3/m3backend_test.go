@@ -31,11 +31,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uber-go/tally"
 	"github.com/uber-go/tally/m3/customtransports"
 	"github.com/uber-go/tally/m3/thrift"
 	"github.com/uber-go/tally/m3/thriftudp"
 
 	"github.com/apache/thrift/lib/go/thrift"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -44,9 +46,7 @@ const (
 	queueSize     = 1000
 	includeHost   = true
 	maxPacketSize = int32(1440)
-	noInterval    = time.Duration(0)
 	shortInterval = 10 * time.Millisecond
-	longInterval  = 100 * time.Millisecond
 )
 
 var localListenAddr = &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)}
@@ -54,49 +54,61 @@ var defaultCommonTags = map[string]string{"env": "test", "host": "test"}
 
 var protocols = []Protocol{Compact, Binary}
 
-// TestM3Backend tests the M3Backend works as expected with both compact and binary protocols
-func TestM3Backend(t *testing.T) {
+// TestReporter tests the reporter works as expected with both compact and binary protocols
+func TestReporter(t *testing.T) {
 	for _, protocol := range protocols {
 		var wg sync.WaitGroup
 		server := newFakeM3Server(t, &wg, true, protocol)
 		go server.Serve()
 		defer server.Close()
 
-		commonTags := map[string]string{"env": "development", "host": hostname(), "commonTag": "common", "commonTag2": "tag", "commonTag3": "val"}
-		var m3be BufferedBackend
-		var err error
-		if protocol == Compact {
-			m3be, err = NewM3Backend(server.Addr, "testService", commonTags, includeHost, queueSize,
-				maxPacketSize, shortInterval)
-		} else {
-			m3be, err = NewMultiM3BackendWithProtocol([]string{server.Addr}, "testService", commonTags,
-				includeHost, queueSize, maxPacketSize, shortInterval, Binary)
+		commonTags = map[string]string{
+			"env":        "development",
+			"host":       hostname(),
+			"commonTag":  "common",
+			"commonTag2": "tag",
+			"commonTag3": "val",
 		}
-		require.Nil(t, err)
-		defer m3be.Close()
-		tags := map[string]string{"testTag": "TestValue", "testTag2": "TestValue2"}
-		wg.Add(2)
-		id1 := m3be.RegisterForID("my-counter", tags, CounterType)
-		m3be.IncCounter(id1, 10)
-		id2 := m3be.RegisterForID("my-timer", tags, TimerType)
-		m3be.RecordTimer(id2, 5*time.Millisecond)
-		wg.Wait()
+		r, err := NewReporter(Options{
+			HostPorts:          []string{server.Addr},
+			Service:            "testService",
+			CommonTags:         commonTags,
+			IncludeHost:        includeHost,
+			Protocol:           protocol,
+			MaxQueueSize:       queueSize,
+			MaxPacketSizeBytes: maxPacketSize,
+		})
+		require.NoError(t, err)
+		defer func() {
+			assert.NoError(t, r.Close())
+		}()
 
-		//Fill in service and env tags
-		commonTags["service"] = "testService"
-		commonTags["env"] = "development"
-		commonTags["host"] = hostname()
+		tags := map[string]string{"testTag": "TestValue", "testTag2": "TestValue2"}
+
+		wg.Add(2)
+
+		r.AllocateCounter("my-counter", tags).ReportCount(10)
+		r.Flush()
+
+		r.AllocateTimer("my-timer", tags).ReportTimer(5 * time.Millisecond)
+		r.Flush()
+
+		wg.Wait()
 
 		batches := server.Service.getBatches()
 		require.Equal(t, 2, len(batches))
 
-		//Validate common tags
+		// Validate common tags
 		for _, batch := range batches {
 			require.NotNil(t, batch)
 			require.True(t, batch.IsSetCommonTags())
-			require.Equal(t, len(commonTags), len(batch.GetCommonTags()))
+			require.Equal(t, len(commonTags)+1, len(batch.GetCommonTags()))
 			for tag := range batch.GetCommonTags() {
-				require.Equal(t, commonTags[tag.GetTagName()], tag.GetTagValue())
+				if tag.GetTagName() == ServiceTag {
+					require.Equal(t, "testService", tag.GetTagValue())
+				} else {
+					require.Equal(t, commonTags[tag.GetTagName()], tag.GetTagValue())
+				}
 			}
 		}
 
@@ -137,184 +149,77 @@ func TestM3Backend(t *testing.T) {
 	}
 }
 
-// TestMultiM3Backend tests the multi M3Backend works as expected
-func TestMultiM3Backend(t *testing.T) {
+// TestMultiReporter tests the multi Reporter works as expected
+func TestMultiReporter(t *testing.T) {
 	dests := []string{"127.0.0.1:9052", "127.0.0.1:9053"}
-	commonTags := map[string]string{"env": "test", "host": "test", "commonTag": "common", "commonTag2": "tag", "commonTag3": "val"}
-	m, err := NewMultiM3Backend(dests, "testService", commonTags, includeHost, queueSize, maxPacketSize, shortInterval)
-	require.Nil(t, err)
-	defer m.Close()
-	m3be, ok := m.(*m3Backend)
+	commonTags := map[string]string{
+		"env":        "test",
+		"host":       "test",
+		"commonTag":  "common",
+		"commonTag2": "tag",
+		"commonTag3": "val",
+	}
+	r, err := NewReporter(Options{
+		HostPorts:  dests,
+		Service:    "testService",
+		CommonTags: commonTags,
+	})
+	require.NoError(t, err)
+	defer r.Close()
+
+	reporter, ok := r.(*reporter)
 	require.True(t, ok)
-	multitransport, ok := m3be.client.Transport.(*thriftudp.TMultiUDPTransport)
+	multitransport, ok := reporter.client.Transport.(*thriftudp.TMultiUDPTransport)
 	require.NotNil(t, multitransport)
 	require.True(t, ok)
 }
 
-// TestNewM3BackendErrors tests for M3Backend creation errors
-func TestNewM3BackendErrors(t *testing.T) {
+// TestNewReporterErrors tests for Reporter creation errors
+func TestNewReporterErrors(t *testing.T) {
 	var err error
-	// Test 0 queue size
-	_, err = NewM3Backend("127.0.0.1", "testService", nil, false, 0, maxPacketSize, noInterval)
-	require.NotNil(t, err)
-	// Test 0 max packet size
-	_, err = NewM3Backend("127.0.0.1", "testService", nil, false, queueSize, 0, noInterval)
-	require.NotNil(t, err)
 	// Test freeBytes (maxPacketSizeBytes - numOverheadBytes) is negative
-	_, err = NewM3Backend("127.0.0.1", "testService", nil, false, 10, 2<<5, time.Minute)
-	require.NotNil(t, err)
+	_, err = NewReporter(Options{
+		HostPorts:          []string{"127.0.0.1"},
+		Service:            "testService",
+		MaxQueueSize:       10,
+		MaxPacketSizeBytes: 2 << 5,
+	})
+	assert.Error(t, err)
 	// Test invalid addr
-	_, err = NewM3Backend("fakeAddress", "testService", nil, false, queueSize, maxPacketSize, noInterval)
-	require.NotNil(t, err)
+	_, err = NewReporter(Options{
+		HostPorts: []string{"fakeAddress"},
+		Service:   "testService",
+	})
+	assert.Error(t, err)
 }
 
-// TestM3BackendInterval ensures the M3Backend emits metrics on the set interval
-func TestM3BackendInterval(t *testing.T) {
-	var wg sync.WaitGroup
-	server := newFakeM3Server(t, &wg, true, Compact)
-	go server.Serve()
-	defer server.Close()
-
-	m3be, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, false, queueSize, maxPacketSize, shortInterval)
-	require.Nil(t, err)
-	defer m3be.Close()
-	wg.Add(1)
-	id := m3be.RegisterForID("my-counter", nil, CounterType)
-	m3be.IncCounter(id, 10)
-	wg.Wait()
-
-	require.Equal(t, 1, len(server.Service.getBatches()))
-	require.NotNil(t, server.Service.getBatches()[0])
-	require.Equal(t, 1, len(server.Service.getBatches()[0].GetMetrics()))
-}
-
-// TestM3BackendInterval ensures the M3Backend tallies counters as expected
-func TestM3BackendTally(t *testing.T) {
-	var wg sync.WaitGroup
-	server := newFakeM3Server(t, &wg, true, Compact)
-	go server.Serve()
-	defer server.Close()
-
-	m, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, false, queueSize, maxPacketSize, shortInterval)
-	require.Nil(t, err)
-	defer m.Close()
-
-	m3be, ok := m.(*m3Backend)
-	require.True(t, ok)
-
-	value := int64(1234)
-	counter := m3be.counters.newMetric("direct", nil, CounterType)
-	counter.MetricValue.Count.I64Value = &value
-	m3be.counters.Lock()
-	size := m3be.counters.calculateSize(counter)
-	m3be.counters.Unlock()
-
-	mets := make([]*m3.Metric, 0, (m3be.freeBytes / 10))
-	info := &tallyMetricsInfo{mets, false}
-	bytes := int32(0)
-
-	sizedMet := m3be.resourcePool.getSizedMetric()
-	sizedMet.m = counter
-	sizedMet.size = size
-
-	info, bytes = m3be.processTallyMetric(info, bytes, sizedMet)
-	require.Equal(t, 1, len(info.mets))
-	require.True(t, bytes > 0)
-
-	wg.Add(1)
-	info, bytes = m3be.processTallyMetric(info, bytes, nil)
-	require.Equal(t, 0, len(info.mets))
-	require.True(t, bytes == 0)
-}
-
-// TestM3BackendBuffering ensures the M3Backend buffers values
-func TestM3BackendBuffering(t *testing.T) {
-	var wg sync.WaitGroup
-	server := newFakeM3Server(t, &wg, false, Compact)
-	go server.Serve()
-	defer server.Close()
-
-	m3be, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, false, queueSize, maxPacketSize, longInterval)
-	require.Nil(t, err)
-	defer m3be.Close()
-	numCounters := 40
-	incPerCounter := 2
-	wg.Add(numCounters)
-	for i := 0; i < numCounters; i++ {
-		id := m3be.RegisterForID("testing.my-counter.for.backend.buffering"+strconv.Itoa(i), nil, CounterType)
-		for j := 0; j < incPerCounter; j++ {
-			m3be.IncCounter(id, 1)
-		}
-	}
-
-	wg.Wait()
-
-	mets := server.Service.getMetrics()
-	require.Equal(t, numCounters, len(mets))
-	for _, met := range mets {
-		require.Equal(t, int64(2), *met.MetricValue.Count.I64Value)
-	}
-}
-
-// TestM3BackendFinalFlush ensures the M3Backend emits the last batch of metrics
+// TestReporterFinalFlush ensures the Reporter emits the last batch of metrics
 // after close
-func TestM3BackendFinalFlush(t *testing.T) {
+func TestReporterFinalFlush(t *testing.T) {
 	var wg sync.WaitGroup
 	server := newFakeM3Server(t, &wg, true, Compact)
 	go server.Serve()
 	defer server.Close()
 
-	m3be, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, false, queueSize, maxPacketSize, shortInterval)
-	require.Nil(t, err)
+	r, err := NewReporter(Options{
+		HostPorts:          []string{server.Addr},
+		Service:            "testService",
+		CommonTags:         defaultCommonTags,
+		MaxQueueSize:       queueSize,
+		MaxPacketSizeBytes: maxPacketSize,
+	})
+	require.NoError(t, err)
+
 	wg.Add(1)
-	id := m3be.RegisterForID("my-timer", nil, TimerType)
-	m3be.RecordTimer(id, 10)
-	m3be.Close()
+
+	r.AllocateTimer("my-timer", nil).ReportTimer(10 * time.Millisecond)
+	r.Close()
+
 	wg.Wait()
 
 	require.Equal(t, 1, len(server.Service.getBatches()))
 	require.NotNil(t, server.Service.getBatches()[0])
 	require.Equal(t, 1, len(server.Service.getBatches()[0].GetMetrics()))
-}
-
-// TestM3BackendCache ensures the M3Backend caches results
-func TestM3BackendCache(t *testing.T) {
-	var wg sync.WaitGroup
-	server := newFakeM3Server(t, &wg, true, Compact)
-	go server.Serve()
-	defer server.Close()
-
-	m3be, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, false, 10, 1440, shortInterval)
-	require.Nil(t, err)
-	defer m3be.Close()
-
-	server.Service.wg.Add(2)
-	gID := m3be.RegisterForID("gauge", map[string]string{"t1": "v1"}, GaugeType)
-	m3be.UpdateGauge(gID, 1)
-	m3be.UpdateGauge(gID, 2)
-	m3be.UpdateGauge(gID, 3)
-	cID := m3be.RegisterForID("counter", nil, CounterType)
-	m3be.IncCounter(cID, 1)
-	m3be.IncCounter(cID, 2)
-	m3be.IncCounter(cID, 3)
-
-	server.Service.wg.Wait()
-
-	batches := server.Service.getBatches()
-	require.Equal(t, 2, len(batches))
-	m1 := batches[0].GetMetrics()[0]
-	m2 := batches[1].GetMetrics()[0]
-
-	if m1.GetName() == "gauge" {
-		tmp := m1
-		m1 = m2
-		m2 = tmp
-	}
-
-	require.True(t, m1.MetricValue.IsSetCount())
-	require.Equal(t, int64(6), m1.MetricValue.Count.GetI64Value())
-	require.True(t, m2.MetricValue.IsSetGauge())
-	require.Equal(t, int64(3), m2.MetricValue.Gauge.GetI64Value())
 }
 
 func TestBatchSizes(t *testing.T) {
@@ -322,136 +227,100 @@ func TestBatchSizes(t *testing.T) {
 	go server.serve()
 	defer server.close()
 
-	commonTags := map[string]string{"env": "test", "domain": "pod" + strconv.Itoa(rand.Intn(100))}
+	commonTags := map[string]string{
+		"env":    "test",
+		"domain": "pod" + strconv.Itoa(rand.Intn(100)),
+	}
 	maxPacketSize := int32(1440)
-	m3be, err := NewM3Backend(server.addr(), "testService", commonTags, false, 10, maxPacketSize, shortInterval)
+	r, err := NewReporter(Options{
+		HostPorts:          []string{server.addr()},
+		Service:            "testService",
+		CommonTags:         commonTags,
+		MaxQueueSize:       10000,
+		MaxPacketSizeBytes: maxPacketSize,
+	})
 
 	require.NoError(t, err)
 	rand.Seed(time.Now().UnixNano())
-	var stop uint32
 
+	var stop uint32
 	go func() {
+		var (
+			counters = make(map[string]tally.CachedCount)
+			gauges   = make(map[string]tally.CachedGauge)
+			timers   = make(map[string]tally.CachedTimer)
+			randTags = func() map[string]string {
+				return map[string]string{
+					"t1": "val" + strconv.Itoa(rand.Intn(10000)),
+				}
+			}
+		)
 		for atomic.LoadUint32(&stop) == 0 {
 			metTypeRand := rand.Intn(9)
 			name := "size.test.metric.name" + strconv.Itoa(rand.Intn(50))
-			var tags map[string]string
-			if rand.Intn(2) == 0 {
-				tags = map[string]string{"t1": "val" + strconv.Itoa(rand.Intn(10000))}
-			}
 
-			cid := m3be.RegisterForID(name, tags, CounterType)
-			gid := m3be.RegisterForID(name, tags, GaugeType)
-			tid := m3be.RegisterForID(name, tags, TimerType)
 			if metTypeRand <= 2 {
-				m3be.IncCounter(cid, rand.Int63n(10000))
+				_, ok := counters[name]
+				if !ok {
+					counters[name] = r.AllocateCounter(name, randTags())
+				}
+				counters[name].ReportCount(rand.Int63n(10000))
 			} else if metTypeRand <= 5 {
-				m3be.UpdateGauge(gid, rand.Int63n(10000))
+				_, ok := gauges[name]
+				if !ok {
+					gauges[name] = r.AllocateGauge(name, randTags())
+				}
+				gauges[name].ReportGauge(rand.Float64() * 10000)
 			} else {
-				m3be.RecordTimer(tid, time.Duration(rand.Int63n(10000)))
+				_, ok := timers[name]
+				if !ok {
+					timers[name] = r.AllocateTimer(name, randTags())
+				}
+				timers[name].ReportTimer(time.Duration(rand.Int63n(10000)))
 			}
 		}
-		m3be.Close()
+		r.Close()
 	}()
 
-	packets := server.getPackets()
-	for len(packets) < 100 {
+	for len(server.getPackets()) < 100 {
 		time.Sleep(shortInterval)
-		packets = server.getPackets()
 	}
 
 	atomic.StoreUint32(&stop, 1)
-	for _, packet := range packets {
+	for _, packet := range server.getPackets() {
 		require.True(t, len(packet) < int(maxPacketSize))
 	}
 }
 
-func TestInvalidIds(t *testing.T) {
-	var wg sync.WaitGroup
-	server := newFakeM3Server(t, &wg, true, Compact)
-	go server.Serve()
-	defer server.Close()
-
-	m3be, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, false, queueSize, maxPacketSize, shortInterval)
-	require.Nil(t, err)
-	m3be.RecordTimer(nil, 10)
-	m3be.IncCounter(nil, 20)
-	m3be.UpdateGauge(nil, 20)
-	m3be.Close()
-	time.Sleep(2 * shortInterval)
-
-	require.Equal(t, 0, len(server.Service.getBatches()))
-	require.Panics(t, func() { m3be.RegisterForID("test", nil, 0) }, "Unknown MetricType")
-}
-
-func TestUnregister(t *testing.T) {
-	var wg sync.WaitGroup
-	wg.Add(1)
-	server := newFakeM3Server(t, &wg, false, Compact)
-	go server.Serve()
-	defer server.Close()
-
-	m3be, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, false, queueSize, maxPacketSize, shortInterval)
-	require.Nil(t, err)
-	id := m3be.RegisterForID("my-counter", nil, CounterType)
-	m3be.IncCounter(id, 1)
-	id.UnregisterID()
-	wg.Wait()
-
-	time.Sleep(10 * shortInterval) // give some time for async cleanup to run
-	m3be.IncCounter(id, 2)
-	m3be.Close()
-	time.Sleep(10 * shortInterval) // give some time for flushed value that we do not expect
-
-	mets := server.Service.getMetrics()
-	require.Equal(t, 1, len(mets))
-	require.Equal(t, int64(1), *mets[0].MetricValue.Count.I64Value)
-}
-
-func TestM3BackendSpecifyService(t *testing.T) {
+func TestReporterSpecifyService(t *testing.T) {
 	commonTags := map[string]string{
-		serviceTag: "overrideService",
-		envTag:     "test",
-		hostTag:    "overrideHost",
+		ServiceTag: "overrideService",
+		EnvTag:     "test",
+		HostTag:    "overrideHost",
 	}
-	m, err := NewM3Backend("127.0.0.1:1000", "testService", commonTags, includeHost, 10, 100, noInterval)
-	require.Nil(t, err)
-	defer m.Close()
+	r, err := NewReporter(Options{
+		HostPorts:    []string{"127.0.0.1:1000"},
+		Service:      "testService",
+		CommonTags:   commonTags,
+		IncludeHost:  includeHost,
+		MaxQueueSize: 10, MaxPacketSizeBytes: 100,
+	})
+	require.NoError(t, err)
+	defer r.Close()
 
-	m3be, ok := m.(*m3Backend)
+	reporter, ok := r.(*reporter)
 	require.True(t, ok)
-	require.Equal(t, 3, len(m3be.commonTags))
-	for tag := range m3be.commonTags {
-		if tag.GetTagName() == serviceTag {
-			require.Equal(t, "overrideService", tag.GetTagValue())
-		}
-		if tag.GetTagName() == hostTag {
-			require.Equal(t, "overrideHost", tag.GetTagValue())
+	assert.Equal(t, 3, len(reporter.commonTags))
+	for tag := range reporter.commonTags {
+		switch tag.GetTagName() {
+		case ServiceTag:
+			assert.Equal(t, "overrideService", tag.GetTagValue())
+		case EnvTag:
+			assert.Equal(t, "test", tag.GetTagValue())
+		case HostTag:
+			assert.Equal(t, "overrideHost", tag.GetTagValue())
 		}
 	}
-}
-
-func TestM3BackendMaxTags(t *testing.T) {
-	var wg sync.WaitGroup
-	server := newFakeM3Server(t, &wg, true, Compact)
-	go server.Serve()
-	defer server.Close()
-
-	m, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, includeHost, 10, 100, shortInterval)
-	require.Nil(t, err)
-	defer m.Close()
-	m3be, ok := m.(*m3Backend)
-	require.True(t, ok)
-
-	tags := make(map[string]string, 11)
-	for i := 0; i <= MaxTags; i++ {
-		tags["tagName"+strconv.Itoa(i)] = "tagValue"
-	}
-
-	id := m3be.RegisterForID("gauge", tags, GaugeType)
-	m3be.UpdateGauge(id, 10)
-	time.Sleep(5 * shortInterval)
-
-	require.Equal(t, 0, len(server.Service.getBatches()))
 }
 
 func TestIncludeHost(t *testing.T) {
@@ -470,60 +339,41 @@ func TestIncludeHost(t *testing.T) {
 	}
 
 	commonTags := map[string]string{"env": "test"}
-	m, err := NewM3Backend(server.Addr, "testService", commonTags, false, queueSize, maxPacketSize, noInterval)
+	r, err := NewReporter(Options{
+		HostPorts:   []string{server.Addr},
+		Service:     "testService",
+		CommonTags:  commonTags,
+		IncludeHost: false,
+	})
 	require.NoError(t, err)
-	defer m.Close()
-	m3WithoutHost, ok := m.(*m3Backend)
+	defer r.Close()
+	withoutHost, ok := r.(*reporter)
 	require.True(t, ok)
-	require.False(t, tagIncluded(m3WithoutHost.commonTags, "host"))
+	assert.False(t, tagIncluded(withoutHost.commonTags, "host"))
 
-	m, err = NewM3Backend(server.Addr, "testService", defaultCommonTags, true, queueSize, maxPacketSize, noInterval)
+	r, err = NewReporter(Options{
+		HostPorts:   []string{server.Addr},
+		Service:     "testService",
+		CommonTags:  commonTags,
+		IncludeHost: true,
+	})
 	require.NoError(t, err)
-	defer m.Close()
-	m3WithHost, ok := m.(*m3Backend)
+	defer r.Close()
+	withHost, ok := r.(*reporter)
 	require.True(t, ok)
-	require.True(t, tagIncluded(m3WithHost.commonTags, "host"))
+	assert.True(t, tagIncluded(withHost.commonTags, "host"))
 }
 
-func TestM3BackendHasTaggingCapability(t *testing.T) {
-	m, err := NewM3Backend("127.0.0.1:9052", "testService", defaultCommonTags, false, queueSize, maxPacketSize, noInterval)
+func TestReporterHasReportingAndTaggingCapability(t *testing.T) {
+	r, err := NewReporter(Options{
+		HostPorts:  []string{"127.0.0.1:9052"},
+		Service:    "testService",
+		CommonTags: defaultCommonTags,
+	})
 	require.Nil(t, err)
 
-	require.True(t, m.Capabilities().Tagging())
-}
-
-func TestM3GetForID(t *testing.T) {
-	var wg sync.WaitGroup
-	server := newFakeM3Server(t, &wg, true, Compact)
-	go server.Serve()
-	defer server.Close()
-
-	m3be, err := NewM3Backend(server.Addr, "testService", defaultCommonTags, false, queueSize, maxPacketSize, shortInterval)
-	require.Nil(t, err)
-
-	tags := map[string]string{"testTag": "TestValue", "testTag2": "TestValue2"}
-
-	id1 := m3be.RegisterForID("my-counter", tags, CounterType)
-	id2 := m3be.RegisterForID("my-timer", tags, TimerType)
-	id3 := m3be.RegisterForID("my-gauge", tags, GaugeType)
-
-	// Verify that the created IDs exist
-	r1, e1 := m3be.GetForID("my-counter", tags, CounterType)
-	require.Equal(t, id1, r1)
-	require.True(t, e1)
-
-	r2, e2 := m3be.GetForID("my-timer", tags, TimerType)
-	require.Equal(t, id2, r2)
-	require.True(t, e2)
-
-	r3, e3 := m3be.GetForID("my-gauge", tags, GaugeType)
-	require.Equal(t, id3, r3)
-	require.True(t, e3)
-
-	// Check for a metric that has not been created
-	r, e := m3be.GetForID("my-ctr", tags, CounterType)
-	require.Nil(t, r)
-	require.False(t, e)
+	assert.True(t, r.Capabilities().Reporting())
+	assert.True(t, r.Capabilities().Tagging())
 }
 
 type simpleServer struct {

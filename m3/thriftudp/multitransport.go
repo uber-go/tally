@@ -36,7 +36,10 @@ type TMultiUDPTransport struct {
 // will be used as the local address for the connection
 // Example:
 // 	trans, err := thriftudp.NewTMultiUDPClientTransport([]string{"192.168.1.1:9090","192.168.1.2:9090"}, "")
-func NewTMultiUDPClientTransport(destHostPorts []string, locHostPort string) (*TMultiUDPTransport, error) {
+func NewTMultiUDPClientTransport(
+	destHostPorts []string,
+	locHostPort string,
+) (*TMultiUDPTransport, error) {
 	var transports []thrift.TTransport
 	for i := range destHostPorts {
 		trans, err := NewTUDPClientTransport(destHostPorts[i], locHostPort)
