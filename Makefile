@@ -56,11 +56,11 @@ endif
 
 .PHONY: test
 test:
-	go test -race $(PKGS)
+	go test -race -v $(PKGS)
 
 .PHONY: cover
 cover:
-	go test -cover -coverprofile cover.out -race .
+	go test -cover -coverprofile cover.out -race -v $(PKGS)
 
 .PHONY: coveralls
 coveralls:

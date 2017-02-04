@@ -1,5 +1,5 @@
-hash: 125bab2aa1a8e6fcf93d84833e760ec8b6e4ce79c75411a5a5869638303cc2b9
-updated: 2017-01-30T13:28:37.588182643-08:00
+hash: 97eca6701a6e8ae23ebff2e2d4e632b1be2f3f6302e7912d94adede665b80f90
+updated: 2017-02-04T18:17:10.893491776-05:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -19,6 +19,13 @@ imports:
   version: 2bc9827a78f95c6665b5fe0abd1fd66b496ae2d8
   subpackages:
   - proto
+- name: github.com/m3db/m3x
+  version: 9dd1dcc694dfc9959eaca1941c280339f0b09d4d
+  subpackages:
+  - checked
+  - instrument
+  - log
+  - pool
 - name: github.com/matttproud/golang_protobuf_extensions
   version: c12348ce28de40eed0136aa2b644d0ee0650e56c
   subpackages:
@@ -40,12 +47,8 @@ imports:
   - model
 - name: github.com/prometheus/procfs
   version: fcdb11ccb4389efb1b210b7ffb623ab71c5fdd60
-- name: github.com/Sirupsen/logrus
-  version: 61e43dc76f7ee59a82bdf3d71033dc12bea4c77d
-- name: golang.org/x/sys
-  version: d75a52659825e75fff6158388dddc6a5b04f9ba5
-  subpackages:
-  - unix
+- name: github.com/uber-go/atomic
+  version: e682c1008ac17bf26d2e4b5ad6cdd08520ed0b22
 testImports:
 - name: github.com/axw/gocov
   version: 54b98cfcac0c63fb3f9bd8e7ad241b724d4e985b

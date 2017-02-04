@@ -15,6 +15,12 @@ import:
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
   subpackages:
   - lib/go/thrift
+- package: github.com/m3db/m3x
+  version: 9dd1dcc694dfc9959eaca1941c280339f0b09d4d
+  subpackages:
+  - pool
+- package: github.com/uber-go/atomic
+  version: e682c1008ac17bf26d2e4b5ad6cdd08520ed0b22
 testImport:
 - package: github.com/axw/gocov
   version: 54b98cfcac0c63fb3f9bd8e7ad241b724d4e985b
