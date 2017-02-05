@@ -251,6 +251,27 @@ func TestTimerSummary(t *testing.T) {
 	})
 }
 
+func TestOnRegisterError(t *testing.T) {
+	var captured []error
+
+	registry := prom.NewRegistry()
+	r := NewReporter(Options{
+		Registerer: registry,
+		OnRegisterError: func(err error) {
+			captured = append(captured, err)
+		},
+	})
+
+	c := r.AllocateCounter("bad-name", nil)
+	c.ReportCount(2)
+	c.ReportCount(4)
+	c = r.AllocateCounter("bad.name", nil)
+	c.ReportCount(42)
+	c.ReportCount(84)
+
+	assert.Equal(t, 2, len(captured))
+}
+
 func gather(t *testing.T, r prom.Gatherer) []*dto.MetricFamily {
 	metrics, err := r.Gather()
 	require.NoError(t, err)

@@ -32,6 +32,12 @@ import (
 	"github.com/uber-go/tally"
 )
 
+const (
+	// DefaultSeparator is the default separator that should be used with
+	// a tally scope for a prometheus reporter.
+	DefaultSeparator = "_"
+)
+
 var (
 	errUnknownTimerType = errors.New("unknown metric timer type")
 	ms                  = float64(time.Millisecond) / float64(time.Second)
@@ -136,13 +142,14 @@ type metricID string
 
 type reporter struct {
 	sync.RWMutex
-	registerer prom.Registerer
-	timerType  TimerType
-	objectives map[float64]float64
-	buckets    []float64
-	counters   map[metricID]*prom.CounterVec
-	gauges     map[metricID]*prom.GaugeVec
-	timers     map[metricID]*promTimerVec
+	registerer      prom.Registerer
+	timerType       TimerType
+	objectives      map[float64]float64
+	buckets         []float64
+	onRegisterError func(e error)
+	counters        map[metricID]*prom.CounterVec
+	gauges          map[metricID]*prom.GaugeVec
+	timers          map[metricID]*promTimerVec
 }
 
 type promTimerVec struct {
@@ -158,25 +165,31 @@ type cachedMetric struct {
 	summary     prom.Summary
 }
 
-func (c *cachedMetric) ReportCount(value int64) {
-	c.counter.Add(float64(value))
+func (m *cachedMetric) ReportCount(value int64) {
+	m.counter.Add(float64(value))
 }
 
-func (c *cachedMetric) ReportGauge(value float64) {
-	c.gauge.Set(value)
+func (m *cachedMetric) ReportGauge(value float64) {
+	m.gauge.Set(value)
 }
 
-func (c *cachedMetric) ReportTimer(interval time.Duration) {
-	c.reportTimer(interval)
+func (m *cachedMetric) ReportTimer(interval time.Duration) {
+	m.reportTimer(interval)
 }
 
-func (c *cachedMetric) reportTimerHistogram(interval time.Duration) {
-	c.histogram.Observe(float64(interval) / float64(time.Second))
+func (m *cachedMetric) reportTimerHistogram(interval time.Duration) {
+	m.histogram.Observe(float64(interval) / float64(time.Second))
 }
 
-func (c *cachedMetric) reportTimerSummary(interval time.Duration) {
-	c.summary.Observe(float64(interval) / float64(time.Second))
+func (m *cachedMetric) reportTimerSummary(interval time.Duration) {
+	m.summary.Observe(float64(interval) / float64(time.Second))
 }
+
+type noopMetric struct{}
+
+func (m noopMetric) ReportCount(value int64)            {}
+func (m noopMetric) ReportGauge(value float64)          {}
+func (m noopMetric) ReportTimer(interval time.Duration) {}
 
 func (r *reporter) HTTPHandler() http.Handler {
 	return promhttp.Handler()
@@ -209,6 +222,11 @@ type Options struct {
 	// DefaultSummaryObjectives is the default summary objectives
 	// to use. Use nil to specify the default summary objectives.
 	DefaultSummaryObjectives map[float64]float64
+
+	// OnRegisterError defines a method to call to when registering
+	// a metric with the registerer fails. Use nil to specify
+	// to panic by default when registering fails.
+	OnRegisterError func(err error)
 }
 
 // NewReporter returns a new Reporter for Prometheus client backed metrics
@@ -224,14 +242,20 @@ func NewReporter(opts Options) Reporter {
 	if opts.DefaultSummaryObjectives == nil {
 		opts.DefaultSummaryObjectives = DefaultSummaryObjectives()
 	}
+	if opts.OnRegisterError == nil {
+		opts.OnRegisterError = func(err error) {
+			panic(err)
+		}
+	}
 	return &reporter{
-		registerer: opts.Registerer,
-		timerType:  opts.DefaultTimerType,
-		buckets:    opts.DefaultHistogramBuckets,
-		objectives: opts.DefaultSummaryObjectives,
-		counters:   make(map[metricID]*prom.CounterVec),
-		gauges:     make(map[metricID]*prom.GaugeVec),
-		timers:     make(map[metricID]*promTimerVec),
+		registerer:      opts.Registerer,
+		timerType:       opts.DefaultTimerType,
+		buckets:         opts.DefaultHistogramBuckets,
+		objectives:      opts.DefaultSummaryObjectives,
+		onRegisterError: opts.OnRegisterError,
+		counters:        make(map[metricID]*prom.CounterVec),
+		gauges:          make(map[metricID]*prom.GaugeVec),
+		timers:          make(map[metricID]*promTimerVec),
 	}
 }
 
@@ -278,7 +302,8 @@ func (r *reporter) AllocateCounter(name string, tags map[string]string) tally.Ca
 	tagKeys := keysFromMap(tags)
 	counterVec, err := r.counterVec(name, tagKeys, name+" counter")
 	if err != nil {
-		panic(err)
+		r.onRegisterError(err)
+		return noopMetric{}
 	}
 	return &cachedMetric{counter: counterVec.With(tags)}
 }
@@ -326,7 +351,8 @@ func (r *reporter) AllocateGauge(name string, tags map[string]string) tally.Cach
 	tagKeys := keysFromMap(tags)
 	gaugeVec, err := r.gaugeVec(name, tagKeys, name+" gauge")
 	if err != nil {
-		panic(err)
+		r.onRegisterError(err)
+		return noopMetric{}
 	}
 	return &cachedMetric{gauge: gaugeVec.With(tags)}
 }
@@ -464,7 +490,8 @@ func (r *reporter) AllocateTimer(name string, tags map[string]string) tally.Cach
 		err = errUnknownTimerType
 	}
 	if err != nil {
-		panic(err)
+		r.onRegisterError(err)
+		return noopMetric{}
 	}
 	return timer
 }
