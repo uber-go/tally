@@ -3,12 +3,12 @@ package prometheus
 import (
 	"errors"
 	"net/http"
-	"sort"
 	"sync"
 	"time"
 
 	prom "github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/uber-go/tally"
 )
 
@@ -17,15 +17,53 @@ var (
 	// DefaultHistogramObjectives is the default objectives used when creating a new Summary histogram
 	// in the prometheus registry.
 	// See https://godoc.org/github.com/prometheus/client_golang/prometheus#SummaryOpts
-	DefaultHistogramObjectives = map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.99: 0.001, 0.999: 0.0001}
+	DefaultHistogramObjectives = map[float64]float64{
+		0.5:   0.05,
+		0.9:   0.01,
+		0.99:  0.001,
+		0.999: 0.0001,
+	}
 )
 
 type metricID string
 
-// Reporter is a prometheus backed tally reporter
+// Reporter is a Prometheus backed tally reporter.
 type Reporter interface {
 	tally.StatsReporter
+
+	// HTTPHandler provides the Prometheus HTTP scrape handler.
 	HTTPHandler() http.Handler
+
+	// RegisterCounter is a helper method to initialize a counter
+	// in the prometheus backend with a given help text.
+	// If not called explicitly, the Reporter will create one for
+	// you on first use, with a not super helpful HELP string.
+	RegisterCounter(
+		name string,
+		tags map[string]string,
+		desc string,
+	) (*prom.CounterVec, error)
+
+	// RegisterGauge is a helper method to initialize a gauge
+	// in the prometheus backend with a given help text.
+	// If not called explicitly, the Reporter will create one for
+	// you on first use, with a not super helpful HELP string.
+	RegisterGauge(
+		name string,
+		tags map[string]string,
+		desc string,
+	) (*prom.GaugeVec, error)
+
+	// RegisterTimer is a helper method to initialize a Timer
+	// histogram vector in the prometheus backend with a given help text.
+	// If not called explicitly, the Reporter will create one for
+	// you on first use, with a not super helpful HELP string.
+	RegisterTimer(
+		name string,
+		tags map[string]string,
+		desc string,
+		objectives map[float64]float64,
+	) (*prom.SummaryVec, error)
 }
 
 type reporter struct {
@@ -36,35 +74,33 @@ type reporter struct {
 	sync.RWMutex
 }
 
-// HTTPHandler returns the prometheus HTTP handler for serving metrics
 func (r *reporter) HTTPHandler() http.Handler {
 	return promhttp.Handler()
 }
 
 // NewReporter returns a new Reporter for Prometheus client backed metrics
 // objectives is the objectives used when creating a new Summary histogram for Timers. See
-// https://godoc.org/github.com/prometheus/client_golang/prometheus#SummaryOpts for more details
+// https://godoc.org/github.com/prometheus/client_golang/prometheus#SummaryOpts for more details.
 func NewReporter(objectives map[float64]float64) Reporter {
 	counters := map[metricID]*prom.CounterVec{}
 	gauges := map[metricID]*prom.GaugeVec{}
 	summaries := map[metricID]*prom.SummaryVec{}
-	obj := DefaultHistogramObjectives
-	if objectives != nil {
-		obj = objectives
+	if objectives == nil {
+		objectives = DefaultHistogramObjectives
 	}
-	reporter := reporter{
+	return &reporter{
 		counters:   counters,
 		gauges:     gauges,
 		summaries:  summaries,
-		objectives: obj,
+		objectives: objectives,
 	}
-
-	return &reporter
 }
 
-// RegisterCounter is a helper method to initialize a counter in the prometheus backend with a given help text.
-// If not called explicitly, the Reporter will create one for you on first use, with a not super helpful HELP string
-func (r *reporter) RegisterCounter(name string, tags map[string]string, desc string) (*prom.CounterVec, error) {
+func (r *reporter) RegisterCounter(
+	name string,
+	tags map[string]string,
+	desc string,
+) (*prom.CounterVec, error) {
 	ctr := &prom.CounterVec{}
 	id := canonicalMetricID(name, tags)
 	exists := r.hasCounter(id)
@@ -89,7 +125,7 @@ func (r *reporter) RegisterCounter(name string, tags map[string]string, desc str
 	return ctr, nil
 }
 
-// ReportCounter reports a counter value
+// ReportCounter implements tally.StatsReporter.
 func (r *reporter) ReportCounter(name string, tags map[string]string, value int64) {
 	id := canonicalMetricID(name, tags)
 
@@ -107,9 +143,11 @@ func (r *reporter) ReportCounter(name string, tags map[string]string, value int6
 	ctr.With(tags).Add(float64(value))
 }
 
-// RegisterGauge is a helper method to initialize a gauge in the prometheus backend with a given help text.
-// If not called explicitly, the Reporter will create one for you on first use, with a not super helpful HELP string
-func (r *reporter) RegisterGauge(name string, tags map[string]string, desc string) (*prom.GaugeVec, error) {
+func (r *reporter) RegisterGauge(
+	name string,
+	tags map[string]string,
+	desc string,
+) (*prom.GaugeVec, error) {
 	g := &prom.GaugeVec{}
 	id := canonicalMetricID(name, tags)
 	exists := r.hasGauge(id)
@@ -117,7 +155,6 @@ func (r *reporter) RegisterGauge(name string, tags map[string]string, desc strin
 		return g, errorAlreadyRegistered
 	}
 	labelKeys := keysFromMap(tags)
-
 	g = prom.NewGaugeVec(
 		prom.GaugeOpts{
 			Name: name,
@@ -135,7 +172,7 @@ func (r *reporter) RegisterGauge(name string, tags map[string]string, desc strin
 	return g, nil
 }
 
-// ReportGauge reports a gauge value
+// ReportGauge implements tally.StatsReporter.
 func (r *reporter) ReportGauge(name string, tags map[string]string, value float64) {
 	id := canonicalMetricID(name, tags)
 
@@ -153,9 +190,12 @@ func (r *reporter) ReportGauge(name string, tags map[string]string, value float6
 	g.With(tags).Set(value)
 }
 
-// RegisterTimer is a helper method to initialize a Timer histogram vector in the prometheus backend with a given help text.
-// If not called explicitly, the Reporter will create one for you on first use, with a not super helpful HELP string
-func (r *reporter) RegisterTimer(name string, tags map[string]string, desc string, objectives map[float64]float64) (*prom.SummaryVec, error) {
+func (r *reporter) RegisterTimer(
+	name string,
+	tags map[string]string,
+	desc string,
+	objectives map[float64]float64,
+) (*prom.SummaryVec, error) {
 	h := &prom.SummaryVec{}
 	id := canonicalMetricID(name, tags)
 	exists := r.hasSummary(id)
@@ -185,7 +225,8 @@ func (r *reporter) RegisterTimer(name string, tags map[string]string, desc strin
 	return h, nil
 }
 
-// ReportTimer reports a timer value into the Summary histogram
+// ReportTimer implements tally.StatsReporter. It
+// reports a timer value into the Summary histogram.
 func (r *reporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
 	id := canonicalMetricID(name, tags)
 
@@ -203,17 +244,14 @@ func (r *reporter) ReportTimer(name string, tags map[string]string, interval tim
 	h.With(tags).Observe(float64(interval))
 }
 
-// Capabilities ...
 func (r *reporter) Capabilities() tally.Capabilities {
 	return r
 }
 
-// Reporting indicates it can report outside of the process
 func (r *reporter) Reporting() bool {
 	return true
 }
 
-// Tagging indicates prometheus supports tagged metrics
 func (r *reporter) Tagging() bool {
 	return true
 }
@@ -221,18 +259,11 @@ func (r *reporter) Tagging() bool {
 // Flush does nothing for prometheus
 func (r *reporter) Flush() {}
 
-// NOTE: this generates a canonical MetricID for a given name+label keys, not values. This omits label values, as we track
-// metrics as Vectors in order to support on-the-fly label changes
+// NOTE: this generates a canonical MetricID for a given name+label keys,
+// not values. This omits label values, as we track metrics as
+// Vectors in order to support on-the-fly label changes.
 func canonicalMetricID(name string, tags map[string]string) metricID {
-	canonicalRep := name + "{"
-	ts := keysFromMap(tags)
-	sort.Strings(ts)
-	for _, k := range ts {
-		canonicalRep = canonicalRep + k + ","
-	}
-	canonicalRep = canonicalRep + "}"
-
-	return metricID(canonicalRep)
+	return metricID(tally.KeyForPrefixedStringMap(name, tags))
 }
 
 func (r *reporter) hasCounter(id metricID) (exists bool) {

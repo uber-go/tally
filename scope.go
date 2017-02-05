@@ -38,17 +38,6 @@ var (
 	globalClock = clock.New()
 )
 
-type scopeRegistry struct {
-	sm        sync.RWMutex
-	subscopes []*scope
-}
-
-func (r *scopeRegistry) add(subscope *scope) {
-	r.sm.Lock()
-	r.subscopes = append(r.subscopes, subscope)
-	r.sm.Unlock()
-}
-
 type scope struct {
 	separator      string
 	prefix         string
@@ -68,6 +57,13 @@ type scope struct {
 	gauges   map[string]*gauge
 	timers   map[string]*timer
 }
+
+type scopeRegistry struct {
+	sync.RWMutex
+	subscopes map[string]*scope
+}
+
+var scopeRegistryKey = KeyForPrefixedStringMap
 
 // NewRootScope creates a new Scope around a given stats reporter with the
 // given prefix
@@ -129,22 +125,27 @@ func newRootScope(
 	}
 
 	s := &scope{
-		separator:      sep,
-		prefix:         prefix,
-		tags:           tags,
+		separator: sep,
+		prefix:    prefix,
+		// NB(r): Take a copy of the tags on creation
+		// so that it cannot be modified after set.
+		tags:           copyStringMap(tags),
 		reporter:       reporter,
 		cachedReporter: cachedReporter,
 		baseReporter:   baseReporter,
 
-		registry: &scopeRegistry{},
-		quit:     make(chan struct{}),
+		registry: &scopeRegistry{
+			subscopes: make(map[string]*scope),
+		},
+		quit: make(chan struct{}),
 
 		counters: make(map[string]*counter),
 		gauges:   make(map[string]*gauge),
 		timers:   make(map[string]*timer),
 	}
 
-	s.registry.add(s)
+	// Register the root scope
+	s.registry.subscopes[scopeRegistryKey(s.prefix, s.tags)] = s
 
 	if interval > 0 {
 		go s.reportLoop(interval)
@@ -196,7 +197,7 @@ func (s *scope) reportLoop(interval time.Duration) {
 	for {
 		select {
 		case <-ticker.C:
-			s.registry.sm.Lock()
+			s.registry.RLock()
 			if s.reporter != nil {
 				for _, ss := range s.registry.subscopes {
 					ss.report(s.reporter)
@@ -207,7 +208,7 @@ func (s *scope) reportLoop(interval time.Duration) {
 				}
 			}
 
-			s.registry.sm.Unlock()
+			s.registry.RUnlock()
 		case <-s.quit:
 			return
 		}
@@ -288,29 +289,43 @@ func (s *scope) Timer(name string) Timer {
 }
 
 func (s *scope) Tagged(tags map[string]string) Scope {
-	subscope := &scope{
-		separator:      s.separator,
-		prefix:         s.prefix,
-		tags:           mergeRightTags(s.tags, tags),
-		reporter:       s.reporter,
-		cachedReporter: s.cachedReporter,
-		baseReporter:   s.baseReporter,
-		registry:       s.registry,
-
-		counters: make(map[string]*counter),
-		gauges:   make(map[string]*gauge),
-		timers:   make(map[string]*timer),
-	}
-
-	subscope.registry.add(subscope)
-	return subscope
+	return s.subscope(s.prefix, tags)
 }
 
 func (s *scope) SubScope(prefix string) Scope {
+	return s.subscope(s.fullyQualifiedName(prefix), nil)
+}
+
+func (s *scope) subscope(prefix string, tags map[string]string) Scope {
+	if len(tags) == 0 {
+		tags = s.tags
+	} else {
+		tags = mergeRightTags(s.tags, tags)
+	}
+	key := scopeRegistryKey(prefix, tags)
+
+	s.registry.RLock()
+	existing, ok := s.registry.subscopes[key]
+	if ok {
+		s.registry.RUnlock()
+		return existing
+	}
+	s.registry.RUnlock()
+
+	s.registry.Lock()
+	defer s.registry.Unlock()
+
+	existing, ok = s.registry.subscopes[key]
+	if ok {
+		return existing
+	}
+
 	subscope := &scope{
-		separator:      s.separator,
-		prefix:         s.fullyQualifiedName(prefix),
-		tags:           s.tags,
+		separator: s.separator,
+		prefix:    prefix,
+		// NB(r): Take a copy of the tags on creation
+		// so that it cannot be modified after set.
+		tags:           copyStringMap(tags),
 		reporter:       s.reporter,
 		cachedReporter: s.cachedReporter,
 		baseReporter:   s.baseReporter,
@@ -321,7 +336,7 @@ func (s *scope) SubScope(prefix string) Scope {
 		timers:   make(map[string]*timer),
 	}
 
-	subscope.registry.add(subscope)
+	s.registry.subscopes[key] = subscope
 	return subscope
 }
 
@@ -329,14 +344,13 @@ func (s *scope) Capabilities() Capabilities {
 	if s.baseReporter == nil {
 		return capabilitiesNone
 	}
-
 	return s.baseReporter.Capabilities()
 }
 
 func (s *scope) Snapshot() Snapshot {
 	snap := newSnapshot()
 
-	s.registry.sm.RLock()
+	s.registry.RLock()
 	for _, ss := range s.registry.subscopes {
 		// NB(r): tags are immutable, no lock required to read.
 		tags := make(map[string]string, len(s.tags))
@@ -375,7 +389,7 @@ func (s *scope) Snapshot() Snapshot {
 		}
 		ss.tm.RUnlock()
 	}
-	s.registry.sm.RUnlock()
+	s.registry.RUnlock()
 
 	return snap
 }
@@ -389,12 +403,9 @@ func (s *scope) Close() error {
 }
 
 func (s *scope) fullyQualifiedName(name string) string {
-	// TODO(mmihic): Consider maintaining a map[string]string for common names so we
-	// avoid the cost of continual allocations
 	if len(s.prefix) == 0 {
 		return name
 	}
-
 	return fmt.Sprintf("%s%s%s", s.prefix, s.separator, name)
 }
 
@@ -461,12 +472,26 @@ func mergeRightTags(tagsLeft, tagsRight map[string]string) map[string]string {
 	if tagsLeft == nil && tagsRight == nil {
 		return nil
 	}
+	if len(tagsRight) == 0 {
+		return tagsLeft
+	}
+	if len(tagsLeft) == 0 {
+		return tagsRight
+	}
 
 	result := make(map[string]string, len(tagsLeft)+len(tagsRight))
 	for k, v := range tagsLeft {
 		result[k] = v
 	}
 	for k, v := range tagsRight {
+		result[k] = v
+	}
+	return result
+}
+
+func copyStringMap(stringMap map[string]string) map[string]string {
+	result := make(map[string]string, len(stringMap))
+	for k, v := range stringMap {
 		result[k] = v
 	}
 	return result
