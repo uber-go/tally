@@ -105,7 +105,7 @@ type reporter struct {
 	commonTags   map[*m3thrift.MetricTag]bool
 	freeBytes    int32
 	processors   sync.WaitGroup
-	resourcePool *m3ResourcePool
+	resourcePool *resourcePool
 	closeChan    chan struct{}
 
 	metCh chan sizedMetric
@@ -155,7 +155,7 @@ func NewReporter(opts Options) (Reporter, error) {
 	}
 
 	client := m3thrift.NewM3ClientFactory(trans, protocolFactory)
-	resourcePool := newM3ResourcePool(protocolFactory)
+	resourcePool := newResourcePool(protocolFactory)
 
 	// Create common tags
 	tags := resourcePool.getTagList()
@@ -408,7 +408,7 @@ func (r *reporter) flush(
 }
 
 func createTag(
-	pool *m3ResourcePool,
+	pool *resourcePool,
 	tagName, tagValue string,
 ) *m3thrift.MetricTag {
 	tag := pool.getTag()

@@ -30,7 +30,7 @@ import (
 )
 
 func TestM3ResourcePoolMetric(t *testing.T) {
-	p := newM3ResourcePool(thrift.NewTCompactProtocolFactory())
+	p := newResourcePool(thrift.NewTCompactProtocolFactory())
 
 	var v int64
 	cm := p.getMetric()
@@ -69,7 +69,7 @@ func TestM3ResourcePoolMetric(t *testing.T) {
 }
 
 func TestM3ResourcePoolMetricValue(t *testing.T) {
-	p := newM3ResourcePool(thrift.NewTCompactProtocolFactory())
+	p := newResourcePool(thrift.NewTCompactProtocolFactory())
 	var v int64
 	cmv := p.getValue()
 	cv := p.getCount()
@@ -100,7 +100,7 @@ func TestM3ResourcePoolMetricValue(t *testing.T) {
 }
 
 func TestM3ResourcePoolBatch(t *testing.T) {
-	p := newM3ResourcePool(thrift.NewTCompactProtocolFactory())
+	p := newResourcePool(thrift.NewTCompactProtocolFactory())
 	b := p.getBatch()
 	b.Metrics = append(b.Metrics, p.getMetric())
 	p.releaseBatch(b)
