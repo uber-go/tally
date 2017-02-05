@@ -13,34 +13,58 @@ import (
 )
 
 var (
-	errorAlreadyRegistered = errors.New("metric already registered")
-	// DefaultHistogramObjectives is the default objectives used when creating a new Summary histogram
-	// in the prometheus registry.
-	// See https://godoc.org/github.com/prometheus/client_golang/prometheus#SummaryOpts
-	DefaultHistogramObjectives = map[float64]float64{
-		0.5:   0.05,
-		0.9:   0.01,
+	errUnknownTimerType = errors.New("unknown metric timer type")
+	ms                  = float64(time.Millisecond) / float64(time.Second)
+)
+
+// DefaultHistogramBuckets is the default histogram buckets used when
+// creating a new Histogram in the prometheus registry.
+// See: https://godoc.org/github.com/prometheus/client_golang/prometheus#HistogramOpts
+func DefaultHistogramBuckets() []float64 {
+	return []float64{
+		ms,
+		2 * ms,
+		5 * ms,
+		10 * ms,
+		20 * ms,
+		50 * ms,
+		100 * ms,
+		200 * ms,
+		500 * ms,
+		1000 * ms,
+		2000 * ms,
+		5000 * ms,
+		10000 * ms,
+	}
+}
+
+// DefaultSummaryObjectives is the default objectives used when
+// creating a new Summary in the prometheus registry.
+// See: https://godoc.org/github.com/prometheus/client_golang/prometheus#SummaryOpts
+func DefaultSummaryObjectives() map[float64]float64 {
+	return map[float64]float64{
+		0.5:   0.01,
+		0.75:  0.001,
+		0.95:  0.001,
 		0.99:  0.001,
 		0.999: 0.0001,
 	}
-)
-
-type metricID string
+}
 
 // Reporter is a Prometheus backed tally reporter.
 type Reporter interface {
-	tally.StatsReporter
+	tally.CachedStatsReporter
 
 	// HTTPHandler provides the Prometheus HTTP scrape handler.
 	HTTPHandler() http.Handler
 
 	// RegisterCounter is a helper method to initialize a counter
-	// in the prometheus backend with a given help text.
+	// in the Prometheus backend with a given help text.
 	// If not called explicitly, the Reporter will create one for
 	// you on first use, with a not super helpful HELP string.
 	RegisterCounter(
 		name string,
-		tags map[string]string,
+		tagKeys []string,
 		desc string,
 	) (*prom.CounterVec, error)
 
@@ -50,198 +74,379 @@ type Reporter interface {
 	// you on first use, with a not super helpful HELP string.
 	RegisterGauge(
 		name string,
-		tags map[string]string,
+		tagKeys []string,
 		desc string,
 	) (*prom.GaugeVec, error)
 
-	// RegisterTimer is a helper method to initialize a Timer
-	// histogram vector in the prometheus backend with a given help text.
+	// RegisterTimer is a helper method to initialize a timer
+	// summary or histogram vector in the prometheus backend
+	// with a given help text.
 	// If not called explicitly, the Reporter will create one for
 	// you on first use, with a not super helpful HELP string.
+	// You may pass opts as nil to get the default timer type
+	// and objectives/buckets.
+	// You may also pass objectives/buckets as nil in opts to
+	// get the default objectives/buckets for the specified
+	// timer type.
 	RegisterTimer(
 		name string,
-		tags map[string]string,
+		tagKeys []string,
 		desc string,
-		objectives map[float64]float64,
-	) (*prom.SummaryVec, error)
+		opts *RegisterTimerOptions,
+	) (TimerUnion, error)
 }
 
+// RegisterTimerOptions provides options when registering a timer on demand.
+// By default you can pass nil for the options to get the reporter defaults.
+type RegisterTimerOptions struct {
+	TimerType         TimerType
+	HistogramBuckets  []float64
+	SummaryObjectives map[float64]float64
+}
+
+// TimerUnion is a representation of either a summary or a histogram
+// described by the TimerType.
+type TimerUnion struct {
+	TimerType TimerType
+	Histogram *prom.HistogramVec
+	Summary   *prom.SummaryVec
+}
+
+type metricID string
+
 type reporter struct {
+	sync.RWMutex
+	registerer prom.Registerer
+	timerType  TimerType
 	objectives map[float64]float64
+	buckets    []float64
 	counters   map[metricID]*prom.CounterVec
 	gauges     map[metricID]*prom.GaugeVec
-	summaries  map[metricID]*prom.SummaryVec
-	sync.RWMutex
+	timers     map[metricID]*promTimerVec
+}
+
+type promTimerVec struct {
+	summary   *prom.SummaryVec
+	histogram *prom.HistogramVec
+}
+
+type cachedMetric struct {
+	counter     prom.Counter
+	gauge       prom.Gauge
+	reportTimer func(d time.Duration)
+	histogram   prom.Histogram
+	summary     prom.Summary
+}
+
+func (c *cachedMetric) ReportCount(value int64) {
+	c.counter.Add(float64(value))
+}
+
+func (c *cachedMetric) ReportGauge(value float64) {
+	c.gauge.Set(value)
+}
+
+func (c *cachedMetric) ReportTimer(interval time.Duration) {
+	c.reportTimer(interval)
+}
+
+func (c *cachedMetric) reportTimerHistogram(interval time.Duration) {
+	c.histogram.Observe(float64(interval) / float64(time.Second))
+}
+
+func (c *cachedMetric) reportTimerSummary(interval time.Duration) {
+	c.summary.Observe(float64(interval) / float64(time.Second))
 }
 
 func (r *reporter) HTTPHandler() http.Handler {
 	return promhttp.Handler()
 }
 
+// TimerType describes a type of timer
+type TimerType int
+
+const (
+	// HistogramTimerType is a timer type that reports into a histogram
+	HistogramTimerType TimerType = iota
+	// SummaryTimerType is a timer type that reports into a summary
+	SummaryTimerType
+)
+
+// Options is a set of options for the tally reporter.
+type Options struct {
+	// Registerer is the prometheus registerer to register
+	// metrics with. Use nil to specify the default registerer.
+	Registerer prom.Registerer
+
+	// DefaultTimerType is the default type timer type to create
+	// when using timers. It's default value is a histogram timer type.
+	DefaultTimerType TimerType
+
+	// DefaultHistogramBuckets is the default histogram buckets
+	// to use. Use nil to specify the default histogram buckets.
+	DefaultHistogramBuckets []float64
+
+	// DefaultSummaryObjectives is the default summary objectives
+	// to use. Use nil to specify the default summary objectives.
+	DefaultSummaryObjectives map[float64]float64
+}
+
 // NewReporter returns a new Reporter for Prometheus client backed metrics
 // objectives is the objectives used when creating a new Summary histogram for Timers. See
 // https://godoc.org/github.com/prometheus/client_golang/prometheus#SummaryOpts for more details.
-func NewReporter(objectives map[float64]float64) Reporter {
-	counters := map[metricID]*prom.CounterVec{}
-	gauges := map[metricID]*prom.GaugeVec{}
-	summaries := map[metricID]*prom.SummaryVec{}
-	if objectives == nil {
-		objectives = DefaultHistogramObjectives
+func NewReporter(opts Options) Reporter {
+	if opts.Registerer == nil {
+		opts.Registerer = prom.DefaultRegisterer
+	}
+	if opts.DefaultHistogramBuckets == nil {
+		opts.DefaultHistogramBuckets = DefaultHistogramBuckets()
+	}
+	if opts.DefaultSummaryObjectives == nil {
+		opts.DefaultSummaryObjectives = DefaultSummaryObjectives()
 	}
 	return &reporter{
-		counters:   counters,
-		gauges:     gauges,
-		summaries:  summaries,
-		objectives: objectives,
+		registerer: opts.Registerer,
+		timerType:  opts.DefaultTimerType,
+		buckets:    opts.DefaultHistogramBuckets,
+		objectives: opts.DefaultSummaryObjectives,
+		counters:   make(map[metricID]*prom.CounterVec),
+		gauges:     make(map[metricID]*prom.GaugeVec),
+		timers:     make(map[metricID]*promTimerVec),
 	}
 }
 
 func (r *reporter) RegisterCounter(
 	name string,
-	tags map[string]string,
+	tagKeys []string,
 	desc string,
 ) (*prom.CounterVec, error) {
-	ctr := &prom.CounterVec{}
-	id := canonicalMetricID(name, tags)
-	exists := r.hasCounter(id)
-	if exists {
-		return ctr, errorAlreadyRegistered
+	return r.counterVec(name, tagKeys, desc)
+}
+
+func (r *reporter) counterVec(
+	name string,
+	tagKeys []string,
+	desc string,
+) (*prom.CounterVec, error) {
+	id := canonicalMetricID(name, tagKeys)
+
+	r.Lock()
+	defer r.Unlock()
+
+	if ctr, ok := r.counters[id]; ok {
+		return ctr, nil
 	}
-	labelKeys := keysFromMap(tags)
-	ctr = prom.NewCounterVec(
+
+	ctr := prom.NewCounterVec(
 		prom.CounterOpts{
 			Name: name,
 			Help: desc,
 		},
-		labelKeys,
+		tagKeys,
 	)
-	err := prom.Register(ctr)
-	if err != nil {
-		return ctr, err
+
+	if err := r.registerer.Register(ctr); err != nil {
+		return nil, err
 	}
-	r.Lock()
-	defer r.Unlock()
+
 	r.counters[id] = ctr
 	return ctr, nil
 }
 
-// ReportCounter implements tally.StatsReporter.
-func (r *reporter) ReportCounter(name string, tags map[string]string, value int64) {
-	id := canonicalMetricID(name, tags)
-
-	r.RLock()
-	ctr, ok := r.counters[id]
-	r.RUnlock()
-
-	if !ok {
-		var err error
-		ctr, err = r.RegisterCounter(name, tags, name+" counter")
-		if err != nil {
-			panic(err)
-		}
+// AllocateCounter implements tally.CachedStatsReporter.
+func (r *reporter) AllocateCounter(name string, tags map[string]string) tally.CachedCount {
+	tagKeys := keysFromMap(tags)
+	counterVec, err := r.counterVec(name, tagKeys, name+" counter")
+	if err != nil {
+		panic(err)
 	}
-	ctr.With(tags).Add(float64(value))
+	return &cachedMetric{counter: counterVec.With(tags)}
 }
 
 func (r *reporter) RegisterGauge(
 	name string,
-	tags map[string]string,
+	tagKeys []string,
 	desc string,
 ) (*prom.GaugeVec, error) {
-	g := &prom.GaugeVec{}
-	id := canonicalMetricID(name, tags)
-	exists := r.hasGauge(id)
-	if exists {
-		return g, errorAlreadyRegistered
+	return r.gaugeVec(name, tagKeys, desc)
+}
+
+func (r *reporter) gaugeVec(
+	name string,
+	tagKeys []string,
+	desc string,
+) (*prom.GaugeVec, error) {
+	id := canonicalMetricID(name, tagKeys)
+
+	r.Lock()
+	defer r.Unlock()
+
+	if g, ok := r.gauges[id]; ok {
+		return g, nil
 	}
-	labelKeys := keysFromMap(tags)
-	g = prom.NewGaugeVec(
+
+	g := prom.NewGaugeVec(
 		prom.GaugeOpts{
 			Name: name,
 			Help: desc,
 		},
-		labelKeys,
+		tagKeys,
 	)
-	err := prom.Register(g)
-	if err != nil {
-		return g, err
+
+	if err := r.registerer.Register(g); err != nil {
+		return nil, err
 	}
-	r.Lock()
-	defer r.Unlock()
+
 	r.gauges[id] = g
 	return g, nil
 }
 
-// ReportGauge implements tally.StatsReporter.
-func (r *reporter) ReportGauge(name string, tags map[string]string, value float64) {
-	id := canonicalMetricID(name, tags)
-
-	r.RLock()
-	g, ok := r.gauges[id]
-	r.RUnlock()
-
-	if !ok {
-		var err error
-		g, err = r.RegisterGauge(name, tags, name+" gauge")
-		if err != nil {
-			panic(err)
-		}
+// AllocateGauge implements tally.CachedStatsReporter.
+func (r *reporter) AllocateGauge(name string, tags map[string]string) tally.CachedGauge {
+	tagKeys := keysFromMap(tags)
+	gaugeVec, err := r.gaugeVec(name, tagKeys, name+" gauge")
+	if err != nil {
+		panic(err)
 	}
-	g.With(tags).Set(value)
+	return &cachedMetric{gauge: gaugeVec.With(tags)}
 }
 
 func (r *reporter) RegisterTimer(
 	name string,
-	tags map[string]string,
+	tagKeys []string,
+	desc string,
+	opts *RegisterTimerOptions,
+) (TimerUnion, error) {
+	timerType, buckets, objectives := r.timerConfig(opts)
+	switch timerType {
+	case HistogramTimerType:
+		h, err := r.histogramVec(name, tagKeys, desc, buckets)
+		return TimerUnion{TimerType: timerType, Histogram: h}, err
+	case SummaryTimerType:
+		s, err := r.summaryVec(name, tagKeys, desc, objectives)
+		return TimerUnion{TimerType: timerType, Summary: s}, err
+	}
+	return TimerUnion{}, errUnknownTimerType
+}
+
+func (r *reporter) timerConfig(
+	opts *RegisterTimerOptions,
+) (
+	timerType TimerType,
+	buckets []float64,
+	objectives map[float64]float64,
+) {
+	timerType = r.timerType
+	objectives = r.objectives
+	buckets = r.buckets
+	if opts != nil {
+		timerType = opts.TimerType
+		if opts.SummaryObjectives != nil {
+			objectives = opts.SummaryObjectives
+		}
+		if opts.HistogramBuckets != nil {
+			buckets = opts.HistogramBuckets
+		}
+	}
+	return
+}
+
+func (r *reporter) summaryVec(
+	name string,
+	tagKeys []string,
 	desc string,
 	objectives map[float64]float64,
 ) (*prom.SummaryVec, error) {
-	h := &prom.SummaryVec{}
-	id := canonicalMetricID(name, tags)
-	exists := r.hasSummary(id)
-	if exists {
-		return h, errorAlreadyRegistered
-	}
-	labelKeys := keysFromMap(tags)
+	id := canonicalMetricID(name, tagKeys)
 
-	if objectives == nil {
-		objectives = r.objectives
+	r.Lock()
+	defer r.Unlock()
+
+	if s, ok := r.timers[id]; ok {
+		return s.summary, nil
 	}
-	h = prom.NewSummaryVec(
+
+	s := prom.NewSummaryVec(
 		prom.SummaryOpts{
 			Name:       name,
 			Help:       desc,
 			Objectives: objectives,
 		},
-		labelKeys,
+		tagKeys,
 	)
-	err := prom.Register(h)
-	if err != nil {
-		return h, err
+
+	if err := r.registerer.Register(s); err != nil {
+		return nil, err
 	}
+
+	r.timers[id] = &promTimerVec{summary: s}
+	return s, nil
+}
+
+func (r *reporter) histogramVec(
+	name string,
+	tagKeys []string,
+	desc string,
+	buckets []float64,
+) (*prom.HistogramVec, error) {
+	id := canonicalMetricID(name, tagKeys)
+
 	r.Lock()
 	defer r.Unlock()
-	r.summaries[id] = h
+
+	if h, ok := r.timers[id]; ok {
+		return h.histogram, nil
+	}
+
+	h := prom.NewHistogramVec(
+		prom.HistogramOpts{
+			Name:    name,
+			Help:    desc,
+			Buckets: buckets,
+		},
+		tagKeys,
+	)
+
+	if err := r.registerer.Register(h); err != nil {
+		return nil, err
+	}
+
+	r.timers[id] = &promTimerVec{histogram: h}
 	return h, nil
 }
 
-// ReportTimer implements tally.StatsReporter. It
-// reports a timer value into the Summary histogram.
-func (r *reporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
-	id := canonicalMetricID(name, tags)
-
-	r.RLock()
-	h, ok := r.summaries[id]
-	r.RUnlock()
-
-	if !ok {
-		var err error
-		h, err = r.RegisterTimer(name, tags, name+" histogram in seconds", nil)
-		if err != nil {
-			panic(err)
+// AllocateTimer implements tally.CachedStatsReporter.
+func (r *reporter) AllocateTimer(name string, tags map[string]string) tally.CachedTimer {
+	var (
+		timer tally.CachedTimer
+		err   error
+	)
+	tagKeys := keysFromMap(tags)
+	timerType, buckets, objectives := r.timerConfig(nil)
+	switch timerType {
+	case HistogramTimerType:
+		var histogramVec *prom.HistogramVec
+		histogramVec, err = r.histogramVec(name, tagKeys, name+" timer histogram", buckets)
+		if err == nil {
+			t := &cachedMetric{histogram: histogramVec.With(tags)}
+			t.reportTimer = t.reportTimerHistogram
+			timer = t
 		}
+	case SummaryTimerType:
+		var summaryVec *prom.SummaryVec
+		summaryVec, err = r.summaryVec(name, tagKeys, name+" timer summary", objectives)
+		if err == nil {
+			t := &cachedMetric{summary: summaryVec.With(tags)}
+			t.reportTimer = t.reportTimerSummary
+			timer = t
+		}
+	default:
+		err = errUnknownTimerType
 	}
-	h.With(tags).Observe(float64(interval))
+	if err != nil {
+		panic(err)
+	}
+	return timer
 }
 
 func (r *reporter) Capabilities() tally.Capabilities {
@@ -259,32 +464,17 @@ func (r *reporter) Tagging() bool {
 // Flush does nothing for prometheus
 func (r *reporter) Flush() {}
 
+var metricIDKeyValue = "1"
+
 // NOTE: this generates a canonical MetricID for a given name+label keys,
 // not values. This omits label values, as we track metrics as
 // Vectors in order to support on-the-fly label changes.
-func canonicalMetricID(name string, tags map[string]string) metricID {
-	return metricID(tally.KeyForPrefixedStringMap(name, tags))
-}
-
-func (r *reporter) hasCounter(id metricID) (exists bool) {
-	r.RLock()
-	defer r.RUnlock()
-	_, exists = r.counters[id]
-	return
-}
-
-func (r *reporter) hasGauge(id metricID) (exists bool) {
-	r.RLock()
-	defer r.RUnlock()
-	_, exists = r.gauges[id]
-	return
-}
-
-func (r *reporter) hasSummary(id metricID) (exists bool) {
-	r.RLock()
-	defer r.RUnlock()
-	_, exists = r.summaries[id]
-	return
+func canonicalMetricID(name string, tagKeys []string) metricID {
+	keySet := make(map[string]string, len(tagKeys))
+	for _, key := range tagKeys {
+		keySet[key] = metricIDKeyValue
+	}
+	return metricID(tally.KeyForPrefixedStringMap(name, keySet))
 }
 
 func keysFromMap(m map[string]string) []string {
