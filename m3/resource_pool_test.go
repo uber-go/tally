@@ -18,12 +18,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package metrics
+package m3
 
 import (
 	"testing"
 
-	"github.com/uber-go/tally/m3/thrift"
+	m3thrift "github.com/uber-go/tally/m3/thrift"
 
 	"github.com/apache/thrift/lib/go/thrift"
 	"github.com/stretchr/testify/require"
@@ -39,7 +39,7 @@ func TestM3ResourcePoolMetric(t *testing.T) {
 	cv := p.getCount()
 	cmv.Count = cv
 	cv.I64Value = &v
-	cm.Tags = map[*m3.MetricTag]bool{createTag(p, "t1", "v1"): true}
+	cm.Tags = map[*m3thrift.MetricTag]bool{createTag(p, "t1", "v1"): true}
 
 	gm := p.getMetric()
 	gmv := p.getValue()

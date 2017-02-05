@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package metrics
+package m3
 
 import (
 	"errors"
@@ -31,7 +31,7 @@ import (
 
 	"github.com/uber-go/tally"
 	"github.com/uber-go/tally/m3/customtransports"
-	"github.com/uber-go/tally/m3/thrift"
+	m3thrift "github.com/uber-go/tally/m3/thrift"
 	"github.com/uber-go/tally/m3/thriftudp"
 
 	"github.com/apache/thrift/lib/go/thrift"
@@ -96,13 +96,13 @@ type Reporter interface {
 // remote M3 collector, metrics are batched together and emitted
 // via either thrift compact or binary protocol in batch UDP packets.
 type reporter struct {
-	client       *m3.M3Client
-	curBatch     *m3.MetricBatch
+	client       *m3thrift.M3Client
+	curBatch     *m3thrift.MetricBatch
 	curBatchLock sync.Mutex
 	calc         *customtransport.TCalcTransport
 	calcProto    thrift.TProtocol
 	calcLock     sync.Mutex
-	commonTags   map[*m3.MetricTag]bool
+	commonTags   map[*m3thrift.MetricTag]bool
 	freeBytes    int32
 	processors   sync.WaitGroup
 	resourcePool *m3ResourcePool
@@ -115,6 +115,7 @@ type reporter struct {
 type Options struct {
 	HostPorts          []string
 	Service            string
+	Env                string
 	CommonTags         map[string]string
 	IncludeHost        bool
 	Protocol           Protocol
@@ -153,7 +154,7 @@ func NewReporter(opts Options) (Reporter, error) {
 		protocolFactory = thrift.NewTBinaryProtocolFactoryDefault()
 	}
 
-	client := m3.NewM3ClientFactory(trans, protocolFactory)
+	client := m3thrift.NewM3ClientFactory(trans, protocolFactory)
 	resourcePool := newM3ResourcePool(protocolFactory)
 
 	// Create common tags
@@ -168,7 +169,10 @@ func NewReporter(opts Options) (Reporter, error) {
 		tags[createTag(resourcePool, ServiceTag, opts.Service)] = true
 	}
 	if opts.CommonTags[EnvTag] == "" {
-		return nil, fmt.Errorf("%s common tag is required", EnvTag)
+		if opts.Env == "" {
+			return nil, fmt.Errorf("%s common tag is required", EnvTag)
+		}
+		tags[createTag(resourcePool, EnvTag, opts.Env)] = true
 	}
 	if opts.IncludeHost {
 		if opts.CommonTags[HostTag] == "" {
@@ -183,7 +187,7 @@ func NewReporter(opts Options) (Reporter, error) {
 	// Calculate size of common tags
 	batch := resourcePool.getBatch()
 	batch.CommonTags = tags
-	batch.Metrics = []*m3.Metric{}
+	batch.Metrics = []*m3thrift.Metric{}
 	proto := resourcePool.getProto()
 	batch.Write(proto)
 	calc := proto.Transport().(*customtransport.TCalcTransport)
@@ -243,7 +247,7 @@ func (r *reporter) newMetric(
 	name string,
 	tags map[string]string,
 	t metricType,
-) *m3.Metric {
+) *m3thrift.Metric {
 	var (
 		m      = r.resourcePool.getMetric()
 		metVal = r.resourcePool.getValue()
@@ -281,7 +285,7 @@ func (r *reporter) newMetric(
 	return m
 }
 
-func (r *reporter) calculateSize(m *m3.Metric) int32 {
+func (r *reporter) calculateSize(m *m3thrift.Metric) int32 {
 	r.calcLock.Lock()
 	m.Write(r.calcProto)
 	size := r.calc.GetCount()
@@ -291,7 +295,7 @@ func (r *reporter) calculateSize(m *m3.Metric) int32 {
 }
 
 func (r *reporter) reportCopyMetric(
-	m *m3.Metric,
+	m *m3thrift.Metric,
 	size int32,
 	t metricType,
 	iValue int64,
@@ -356,7 +360,7 @@ func (r *reporter) Tagging() bool {
 }
 
 func (r *reporter) process() {
-	mets := make([]*m3.Metric, 0, (r.freeBytes / 10))
+	mets := make([]*m3thrift.Metric, 0, (r.freeBytes / 10))
 	bytes := int32(0)
 
 	for smet := range r.metCh {
@@ -387,8 +391,8 @@ func (r *reporter) process() {
 }
 
 func (r *reporter) flush(
-	mets []*m3.Metric,
-) []*m3.Metric {
+	mets []*m3thrift.Metric,
+) []*m3thrift.Metric {
 	r.curBatchLock.Lock()
 	r.curBatch.Metrics = mets
 	r.client.EmitMetricBatch(r.curBatch)
@@ -403,7 +407,10 @@ func (r *reporter) flush(
 	return mets[:0]
 }
 
-func createTag(pool *m3ResourcePool, tagName string, tagValue string) *m3.MetricTag {
+func createTag(
+	pool *m3ResourcePool,
+	tagName, tagValue string,
+) *m3thrift.MetricTag {
 	tag := pool.getTag()
 	tag.TagName = tagName
 	if tagValue != "" {
@@ -414,7 +421,7 @@ func createTag(pool *m3ResourcePool, tagName string, tagValue string) *m3.Metric
 }
 
 type cachedMetric struct {
-	metric   *m3.Metric
+	metric   *m3thrift.Metric
 	reporter *reporter
 	size     int32
 }
@@ -433,6 +440,6 @@ func (c cachedMetric) ReportTimer(interval time.Duration) {
 }
 
 type sizedMetric struct {
-	m    *m3.Metric
+	m    *m3thrift.Metric
 	size int32
 }

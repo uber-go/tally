@@ -18,11 +18,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package metrics
+package m3
 
 import (
 	"github.com/uber-go/tally/m3/customtransports"
-	"github.com/uber-go/tally/m3/thrift"
+	m3thrift "github.com/uber-go/tally/m3/thrift"
 
 	"github.com/apache/thrift/lib/go/thrift"
 	"github.com/m3db/m3x/pool"
@@ -53,37 +53,37 @@ type m3ResourcePool struct {
 func newM3ResourcePool(protoFac thrift.TProtocolFactory) *m3ResourcePool {
 	batchPool := pool.NewObjectPool(pool.NewObjectPoolOptions().SetSize(batchPoolSize))
 	batchPool.Init(func() interface{} {
-		return m3.NewMetricBatch()
+		return m3thrift.NewMetricBatch()
 	})
 
 	metricPool := pool.NewObjectPool(pool.NewObjectPoolOptions().SetSize(metricPoolSize))
 	metricPool.Init(func() interface{} {
-		return m3.NewMetric()
+		return m3thrift.NewMetric()
 	})
 
 	tagPool := pool.NewObjectPool(pool.NewObjectPoolOptions().SetSize(tagPoolSize))
 	tagPool.Init(func() interface{} {
-		return m3.NewMetricTag()
+		return m3thrift.NewMetricTag()
 	})
 
 	valuePool := pool.NewObjectPool(pool.NewObjectPoolOptions().SetSize(valuePoolSize))
 	valuePool.Init(func() interface{} {
-		return m3.NewMetricValue()
+		return m3thrift.NewMetricValue()
 	})
 
 	counterPool := pool.NewObjectPool(pool.NewObjectPoolOptions().SetSize(counterPoolSize))
 	counterPool.Init(func() interface{} {
-		return m3.NewCountValue()
+		return m3thrift.NewCountValue()
 	})
 
 	gaugePool := pool.NewObjectPool(pool.NewObjectPoolOptions().SetSize(gaugePoolSize))
 	gaugePool.Init(func() interface{} {
-		return m3.NewGaugeValue()
+		return m3thrift.NewGaugeValue()
 	})
 
 	timerPool := pool.NewObjectPool(pool.NewObjectPoolOptions().SetSize(timerPoolSize))
 	timerPool.Init(func() interface{} {
-		return m3.NewTimerValue()
+		return m3thrift.NewTimerValue()
 	})
 
 	protoPool := pool.NewObjectPool(pool.NewObjectPoolOptions().SetSize(protoPoolSize))
@@ -103,43 +103,43 @@ func newM3ResourcePool(protoFac thrift.TProtocolFactory) *m3ResourcePool {
 	}
 }
 
-func (r *m3ResourcePool) getBatch() *m3.MetricBatch {
+func (r *m3ResourcePool) getBatch() *m3thrift.MetricBatch {
 	o := r.batchPool.Get()
-	return o.(*m3.MetricBatch)
+	return o.(*m3thrift.MetricBatch)
 }
 
-func (r *m3ResourcePool) getMetric() *m3.Metric {
+func (r *m3ResourcePool) getMetric() *m3thrift.Metric {
 	o := r.metricPool.Get()
-	return o.(*m3.Metric)
+	return o.(*m3thrift.Metric)
 }
 
-func (r *m3ResourcePool) getTagList() map[*m3.MetricTag]bool {
-	return map[*m3.MetricTag]bool{}
+func (r *m3ResourcePool) getTagList() map[*m3thrift.MetricTag]bool {
+	return map[*m3thrift.MetricTag]bool{}
 }
 
-func (r *m3ResourcePool) getTag() *m3.MetricTag {
+func (r *m3ResourcePool) getTag() *m3thrift.MetricTag {
 	o := r.tagPool.Get()
-	return o.(*m3.MetricTag)
+	return o.(*m3thrift.MetricTag)
 }
 
-func (r *m3ResourcePool) getValue() *m3.MetricValue {
+func (r *m3ResourcePool) getValue() *m3thrift.MetricValue {
 	o := r.valuePool.Get()
-	return o.(*m3.MetricValue)
+	return o.(*m3thrift.MetricValue)
 }
 
-func (r *m3ResourcePool) getCount() *m3.CountValue {
+func (r *m3ResourcePool) getCount() *m3thrift.CountValue {
 	o := r.counterPool.Get()
-	return o.(*m3.CountValue)
+	return o.(*m3thrift.CountValue)
 }
 
-func (r *m3ResourcePool) getGauge() *m3.GaugeValue {
+func (r *m3ResourcePool) getGauge() *m3thrift.GaugeValue {
 	o := r.gaugePool.Get()
-	return o.(*m3.GaugeValue)
+	return o.(*m3thrift.GaugeValue)
 }
 
-func (r *m3ResourcePool) getTimer() *m3.TimerValue {
+func (r *m3ResourcePool) getTimer() *m3thrift.TimerValue {
 	o := r.timerPool.Get()
-	return o.(*m3.TimerValue)
+	return o.(*m3thrift.TimerValue)
 }
 
 func (r *m3ResourcePool) getProto() thrift.TProtocol {
@@ -153,7 +153,7 @@ func (r *m3ResourcePool) releaseProto(proto thrift.TProtocol) {
 	r.protoPool.Put(proto)
 }
 
-func (r *m3ResourcePool) releaseBatch(batch *m3.MetricBatch) {
+func (r *m3ResourcePool) releaseBatch(batch *m3thrift.MetricBatch) {
 	batch.CommonTags = nil
 	for _, metric := range batch.Metrics {
 		r.releaseMetric(metric)
@@ -162,7 +162,7 @@ func (r *m3ResourcePool) releaseBatch(batch *m3.MetricBatch) {
 	r.batchPool.Put(batch)
 }
 
-func (r *m3ResourcePool) releaseMetricValue(metVal *m3.MetricValue) {
+func (r *m3ResourcePool) releaseMetricValue(metVal *m3thrift.MetricValue) {
 	if metVal.IsSetCount() {
 		metVal.Count.I64Value = nil
 		r.counterPool.Put(metVal.Count)
@@ -181,19 +181,19 @@ func (r *m3ResourcePool) releaseMetricValue(metVal *m3.MetricValue) {
 	r.valuePool.Put(metVal)
 }
 
-func (r *m3ResourcePool) releaseMetrics(mets []*m3.Metric) {
+func (r *m3ResourcePool) releaseMetrics(mets []*m3thrift.Metric) {
 	for _, m := range mets {
 		r.releaseMetric(m)
 	}
 }
 
-func (r *m3ResourcePool) releaseShallowMetrics(mets []*m3.Metric) {
+func (r *m3ResourcePool) releaseShallowMetrics(mets []*m3thrift.Metric) {
 	for _, m := range mets {
 		r.releaseShallowMetric(m)
 	}
 }
 
-func (r *m3ResourcePool) releaseMetric(metric *m3.Metric) {
+func (r *m3ResourcePool) releaseMetric(metric *m3thrift.Metric) {
 	metric.Name = ""
 	// Release Tags
 	for tag := range metric.Tags {
@@ -206,7 +206,7 @@ func (r *m3ResourcePool) releaseMetric(metric *m3.Metric) {
 	r.releaseShallowMetric(metric)
 }
 
-func (r *m3ResourcePool) releaseShallowMetric(metric *m3.Metric) {
+func (r *m3ResourcePool) releaseShallowMetric(metric *m3thrift.Metric) {
 	metric.Timestamp = nil
 
 	metVal := metric.MetricValue

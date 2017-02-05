@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package metrics
+package m3
 
 import (
 	"bytes"
@@ -33,7 +33,7 @@ import (
 
 	"github.com/uber-go/tally"
 	"github.com/uber-go/tally/m3/customtransports"
-	"github.com/uber-go/tally/m3/thrift"
+	m3thrift "github.com/uber-go/tally/m3/thrift"
 	"github.com/uber-go/tally/m3/thriftudp"
 
 	"github.com/apache/thrift/lib/go/thrift"
@@ -329,15 +329,6 @@ func TestIncludeHost(t *testing.T) {
 	go server.Serve()
 	defer server.Close()
 
-	tagIncluded := func(tags map[*m3.MetricTag]bool, tagName string) bool {
-		for k, v := range tags {
-			if v && k.TagName == tagName {
-				return true
-			}
-		}
-		return false
-	}
-
 	commonTags := map[string]string{"env": "test"}
 	r, err := NewReporter(Options{
 		HostPorts:   []string{server.Addr},
@@ -443,7 +434,7 @@ type fakeM3Server struct {
 
 func newFakeM3Server(t *testing.T, wg *sync.WaitGroup, countBatches bool, protocol Protocol) *fakeM3Server {
 	service := newFakeM3Service(wg, countBatches)
-	processor := m3.NewM3Processor(service)
+	processor := m3thrift.NewM3Processor(service)
 	conn, err := net.ListenUDP(localListenAddr.Network(), localListenAddr)
 	require.NoError(t, err, "ListenUDP failed")
 
@@ -489,25 +480,25 @@ func newFakeM3Service(wg *sync.WaitGroup, countBatches bool) *fakeM3Service {
 
 type fakeM3Service struct {
 	lock         sync.RWMutex
-	batches      []*m3.MetricBatch
-	metrics      []*m3.Metric
+	batches      []*m3thrift.MetricBatch
+	metrics      []*m3thrift.Metric
 	wg           *sync.WaitGroup
 	countBatches bool
 }
 
-func (m *fakeM3Service) getBatches() []*m3.MetricBatch {
+func (m *fakeM3Service) getBatches() []*m3thrift.MetricBatch {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
 	return m.batches
 }
 
-func (m *fakeM3Service) getMetrics() []*m3.Metric {
+func (m *fakeM3Service) getMetrics() []*m3thrift.Metric {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
 	return m.metrics
 }
 
-func (m *fakeM3Service) EmitMetricBatch(batch *m3.MetricBatch) (err error) {
+func (m *fakeM3Service) EmitMetricBatch(batch *m3thrift.MetricBatch) (err error) {
 	m.lock.Lock()
 	m.batches = append(m.batches, batch)
 	if m.countBatches {
@@ -531,4 +522,22 @@ func hostname() string {
 		host = "unknown"
 	}
 	return host
+}
+
+func tagIncluded(tags map[*m3thrift.MetricTag]bool, tagName string) bool {
+	for k, v := range tags {
+		if v && k.TagName == tagName {
+			return true
+		}
+	}
+	return false
+}
+
+func tagEquals(tags map[*m3thrift.MetricTag]bool, tagName, tagValue string) bool {
+	for k, v := range tags {
+		if v && k.GetTagName() == tagName {
+			return k.GetTagValue() == tagValue
+		}
+	}
+	return false
 }
