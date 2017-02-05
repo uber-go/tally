@@ -1,6 +1,6 @@
 # :heavy_check_mark: tally [![GoDoc][doc-img]][doc] [![Build Status][ci-img]][ci] [![Coverage Status][cov-img]][cov]
 
-Fast, buffered, heirarchical stats collection in Go.
+Fast, buffered, hierarchical stats collection in Go.
 
 ## Installation
 `go get -u github.com/uber-go/tally`
