@@ -16,7 +16,7 @@ import:
   subpackages:
   - lib/go/thrift
 - package: github.com/m3db/m3x
-  version: 9dd1dcc694dfc9959eaca1941c280339f0b09d4d
+  version: 6c0871e5cd927ceaca827549c91da70503b0fdd8
   subpackages:
   - pool
 - package: github.com/uber-go/atomic

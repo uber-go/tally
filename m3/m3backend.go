@@ -362,7 +362,6 @@ func (r *reporter) process() {
 		if smet.m == nil {
 			// Explicit flush requested
 			if len(mets) > 0 {
-				fmt.Printf("flushing with bytes: %d\n", bytes)
 				mets = r.flush(mets)
 				bytes = 0
 			}
@@ -370,7 +369,6 @@ func (r *reporter) process() {
 		}
 
 		if bytes+smet.size > r.freeBytes {
-			fmt.Printf("flushing with bytes: %d\n", bytes)
 			mets = r.flush(mets)
 			bytes = 0
 		}
