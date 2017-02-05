@@ -260,6 +260,7 @@ func (r *reporter) newMetric(
 		}
 		m.Tags = metTags
 	}
+	m.Timestamp = &maxInt64
 
 	switch t {
 	case counterType:
