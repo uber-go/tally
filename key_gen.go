@@ -45,17 +45,7 @@ type keyGenerationPool struct {
 func KeyForStringMap(
 	stringMap map[string]string,
 ) string {
-	keys := keyGenPool.stringsPool.Get().([]string)
-	for k := range stringMap {
-		keys = append(keys, k)
-	}
-
-	buf := keyGenPool.bufferPool.Get().(*bytes.Buffer)
-	writeKeyValuesSortedByKeys(buf, keys, stringMap)
-
-	key := buf.String()
-	keyGenPool.release(buf, keys)
-	return key
+	return KeyForPrefixedStringMap(nilString, stringMap)
 }
 
 // KeyForPrefixedStringMap generates a unique key for a
@@ -69,31 +59,28 @@ func KeyForPrefixedStringMap(
 		keys = append(keys, k)
 	}
 
-	buf := keyGenPool.bufferPool.Get().(*bytes.Buffer)
-	buf.WriteString(prefix)
-	buf.WriteByte(prefixSplitter)
-	writeKeyValuesSortedByKeys(buf, keys, stringMap)
-
-	key := buf.String()
-	keyGenPool.release(buf, keys)
-	return key
-}
-
-func writeKeyValuesSortedByKeys(
-	buf *bytes.Buffer,
-	keys []string,
-	values map[string]string,
-) {
 	sort.Strings(keys)
-	sortedKeysLen := len(values)
+
+	buf := keyGenPool.bufferPool.Get().(*bytes.Buffer)
+
+	if prefix != nilString {
+		buf.WriteString(prefix)
+		buf.WriteByte(prefixSplitter)
+	}
+
+	sortedKeysLen := len(stringMap)
 	for i := 0; i < sortedKeysLen; i++ {
 		buf.WriteString(keys[i])
 		buf.WriteByte(keyNameSplitter)
-		buf.WriteString(values[keys[i]])
+		buf.WriteString(stringMap[keys[i]])
 		if i != sortedKeysLen-1 {
 			buf.WriteByte(keyPairSplitter)
 		}
 	}
+
+	key := buf.String()
+	keyGenPool.release(buf, keys)
+	return key
 }
 
 func newKeyGenerationPool(size, blen, slen int) *keyGenerationPool {
