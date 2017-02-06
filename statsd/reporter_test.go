@@ -27,7 +27,7 @@ import (
 )
 
 func TestCapabilities(t *testing.T) {
-	r := NewReporter(nil, nil)
+	r := NewReporter(nil, Options{})
 	assert.True(t, r.Capabilities().Reporting())
 	assert.False(t, r.Capabilities().Tagging())
 }
