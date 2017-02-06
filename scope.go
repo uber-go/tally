@@ -1,4 +1,4 @@
-// Copyright (c) 2016 Uber Technologies, Inc.
+// Copyright (c) 2017 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -137,7 +137,7 @@ func newRootScope(
 		registry: &scopeRegistry{
 			subscopes: make(map[string]*scope),
 		},
-		quit: make(chan struct{}),
+		quit: make(chan struct{}, 1),
 
 		counters: make(map[string]*counter),
 		gauges:   make(map[string]*gauge),

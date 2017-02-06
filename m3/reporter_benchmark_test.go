@@ -18,16 +18,44 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package statsd
+package m3
 
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/apache/thrift/lib/go/thrift"
 )
 
-func TestCapabilities(t *testing.T) {
-	r := NewReporter(nil, nil)
-	assert.True(t, r.Capabilities().Reporting())
-	assert.False(t, r.Capabilities().Tagging())
+const (
+	updaters = 10
+	updates  = 1000
+	numIds   = 10
+
+	testID = "stats.$dc.gauges.m3+" +
+		"servers.my-internal-server-$dc.network.eth0_tx_colls+" +
+		"dc=$dc,domain=production.$zone,env=production,pipe=$pipe,service=servers,type=gauge"
+)
+
+func BenchmarkNewMetric(b *testing.B) {
+	protocolFactory := thrift.NewTCompactProtocolFactory()
+	resourcePool := newResourcePool(protocolFactory)
+	benchReporter := &reporter{resourcePool: resourcePool}
+
+	for n := 0; n < b.N; n++ {
+		benchReporter.newMetric("foo", nil, counterType)
+	}
+}
+
+func BenchmarkCalulateSize(b *testing.B) {
+	protocolFactory := thrift.NewTCompactProtocolFactory()
+	resourcePool := newResourcePool(protocolFactory)
+	benchReporter := &reporter{resourcePool: resourcePool}
+
+	val := int64(123456)
+	met := benchReporter.newMetric("foo", nil, counterType)
+	met.MetricValue.Count.I64Value = &val
+
+	for n := 0; n < b.N; n++ {
+		benchReporter.calculateSize(met)
+	}
 }

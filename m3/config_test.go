@@ -18,16 +18,45 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package statsd
+package m3
 
 import (
 	"testing"
 
+	"github.com/uber-go/tally/m3/thriftudp"
+
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestCapabilities(t *testing.T) {
-	r := NewReporter(nil, nil)
-	assert.True(t, r.Capabilities().Reporting())
-	assert.False(t, r.Capabilities().Tagging())
+func TestConfigSimple(t *testing.T) {
+	c := Configuration{
+		HostPort: "127.0.0.1:9052",
+		Service:  "my-service",
+		Env:      "test",
+	}
+	r, err := c.NewReporter()
+	require.NoError(t, err)
+
+	reporter := r.(*reporter)
+	_, ok := reporter.client.Transport.(*thriftudp.TUDPTransport)
+	assert.True(t, ok)
+	assert.True(t, tagEquals(reporter.commonTags, "service", "my-service"))
+	assert.True(t, tagEquals(reporter.commonTags, "env", "test"))
+}
+
+func TestConfigMulti(t *testing.T) {
+	c := Configuration{
+		HostPorts: []string{"127.0.0.1:9052", "127.0.0.1:9062"},
+		Service:   "my-service",
+		Env:       "test",
+	}
+	r, err := c.NewReporter()
+	require.NoError(t, err)
+
+	reporter := r.(*reporter)
+	_, ok := reporter.client.Transport.(*thriftudp.TMultiUDPTransport)
+	assert.True(t, ok)
+	assert.True(t, tagEquals(reporter.commonTags, "service", "my-service"))
+	assert.True(t, tagEquals(reporter.commonTags, "env", "test"))
 }

@@ -2,7 +2,8 @@ export GO15VENDOREXPERIMENT=1
 
 BENCH_FLAGS ?= -cpuprofile=cpu.pprof -memprofile=mem.pprof -benchmem
 PKGS ?= $(shell glide novendor)
-PKG_FILES ?= *.go example/*.go
+PKG_FILES ?= *.go example/*.go m3
+LINT_IGNORE = m3/thrift
 
 # The linting tools evolve with each Go version, so run them only on the latest
 # stable release.
@@ -37,15 +38,15 @@ lint:
 ifdef SHOULD_LINT
 	@rm -rf lint.log
 	@echo "Checking formatting..."
-	@gofmt -d -s $(PKG_FILES) 2>&1 | tee lint.log
+	@gofmt -d -s $(PKG_FILES) 2>&1 | grep -v $(LINT_IGNORE) | tee lint.log
 	@echo "Installing test dependencies for vet..."
 	@go test -i $(PKGS)
 	@echo "Checking vet..."
-	@$(foreach dir,$(PKG_FILES),go tool vet $(dir) 2>&1 | tee -a lint.log;)
+	@$(foreach dir,$(PKG_FILES),go tool vet $(dir) 2>&1 | grep -v $(LINT_IGNORE) | tee -a lint.log;)
 	@echo "Checking lint..."
-	@$(foreach dir,$(PKGS),golint $(dir) 2>&1 | tee -a lint.log;)
+	@$(foreach dir,$(PKGS),golint $(dir) 2>&1 | grep -v $(LINT_IGNORE) | tee -a lint.log;)
 	@echo "Checking for unresolved FIXMEs..."
-	@git grep -i fixme | grep -v -e vendor -e Makefile | tee -a lint.log
+	@git grep -i fixme | grep -v -e vendor -e Makefile | grep -v $(LINT_IGNORE) | tee -a lint.log
 	@echo "Checking for license headers..."
 	@./check_license.sh | tee -a lint.log
 	@[ ! -s lint.log ]
@@ -55,11 +56,11 @@ endif
 
 .PHONY: test
 test:
-	go test -race $(PKGS)
+	go test -race -v $(PKGS)
 
 .PHONY: cover
 cover:
-	go test -cover -coverprofile cover.out -race .
+	go test -cover -coverprofile cover.out -race -v $(PKGS)
 
 .PHONY: coveralls
 coveralls:
