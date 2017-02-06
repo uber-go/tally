@@ -18,38 +18,62 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package statsd
+package main
 
-const (
-	defaultSampleRate = 1.0
+import (
+	"log"
+	"math/rand"
+	"time"
+
+	"github.com/cactus/go-statsd-client/statsd"
+
+	"github.com/uber-go/tally"
+	statsdreporter "github.com/uber-go/tally/statsd"
 )
 
-// Options represents a set of statsd stats reporter options
-type Options interface {
-	// SampleRate returns the sample rate
-	SampleRate() float32
-
-	// SetSampleRate sets the sample rate and returns new options with the value set
-	SetSampleRate(value float32) Options
-}
-
-// NewOptions creates a new set of statsd stats reporter options
-func NewOptions() Options {
-	return &options{
-		sampleRate: defaultSampleRate,
+// To view statsd emitted metrics locally you can use
+// netcat with "nc 8125 -l -u"
+func main() {
+	statter, err := statsd.NewBufferedClient("127.0.0.1:8125",
+		"stats", 100*time.Millisecond, 1440)
+	if err != nil {
+		log.Fatalf("could not create statsd client: %v", err)
 	}
-}
 
-type options struct {
-	sampleRate float32
-}
+	opts := statsdreporter.Options{}
+	r := statsdreporter.NewReporter(statter, opts)
 
-func (o *options) SampleRate() float32 {
-	return o.sampleRate
-}
+	scope, closer := tally.NewRootScope("my-service", map[string]string{},
+		r, 1*time.Second, tally.DefaultSeparator)
+	defer closer.Close()
 
-func (o *options) SetSampleRate(value float32) Options {
-	opts := *o
-	opts.sampleRate = value
-	return &opts
+	counter := scope.Counter("test-counter")
+
+	gauge := scope.Gauge("test-gauge")
+
+	timer := scope.Timer("test-timer")
+
+	go func() {
+		for {
+			counter.Inc(1)
+			time.Sleep(time.Second)
+		}
+	}()
+
+	go func() {
+		for {
+			gauge.Update(rand.Float64() * 1000)
+			time.Sleep(time.Second)
+		}
+	}()
+
+	go func() {
+		for {
+			sw := timer.Start()
+			time.Sleep(time.Duration(rand.Float64() * float64(time.Second)))
+			sw.Stop()
+		}
+	}()
+
+	select {}
 }
