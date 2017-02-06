@@ -21,11 +21,11 @@
 package m3
 
 import (
+	"github.com/uber-go/tally"
 	"github.com/uber-go/tally/m3/customtransports"
 	m3thrift "github.com/uber-go/tally/m3/thrift"
 
 	"github.com/apache/thrift/lib/go/thrift"
-	"github.com/m3db/m3x/pool"
 )
 
 const (
@@ -40,53 +40,53 @@ const (
 )
 
 type resourcePool struct {
-	batchPool   pool.ObjectPool
-	metricPool  pool.ObjectPool
-	tagPool     pool.ObjectPool
-	valuePool   pool.ObjectPool
-	counterPool pool.ObjectPool
-	gaugePool   pool.ObjectPool
-	timerPool   pool.ObjectPool
-	protoPool   pool.ObjectPool
+	batchPool   *tally.ObjectPool
+	metricPool  *tally.ObjectPool
+	tagPool     *tally.ObjectPool
+	valuePool   *tally.ObjectPool
+	counterPool *tally.ObjectPool
+	gaugePool   *tally.ObjectPool
+	timerPool   *tally.ObjectPool
+	protoPool   *tally.ObjectPool
 }
 
 func newResourcePool(protoFac thrift.TProtocolFactory) *resourcePool {
-	batchPool := pool.NewObjectPool(pool.NewObjectPoolOptions().SetSize(batchPoolSize))
+	batchPool := tally.NewObjectPool(batchPoolSize)
 	batchPool.Init(func() interface{} {
 		return m3thrift.NewMetricBatch()
 	})
 
-	metricPool := pool.NewObjectPool(pool.NewObjectPoolOptions().SetSize(metricPoolSize))
+	metricPool := tally.NewObjectPool(metricPoolSize)
 	metricPool.Init(func() interface{} {
 		return m3thrift.NewMetric()
 	})
 
-	tagPool := pool.NewObjectPool(pool.NewObjectPoolOptions().SetSize(tagPoolSize))
+	tagPool := tally.NewObjectPool(tagPoolSize)
 	tagPool.Init(func() interface{} {
 		return m3thrift.NewMetricTag()
 	})
 
-	valuePool := pool.NewObjectPool(pool.NewObjectPoolOptions().SetSize(valuePoolSize))
+	valuePool := tally.NewObjectPool(valuePoolSize)
 	valuePool.Init(func() interface{} {
 		return m3thrift.NewMetricValue()
 	})
 
-	counterPool := pool.NewObjectPool(pool.NewObjectPoolOptions().SetSize(counterPoolSize))
+	counterPool := tally.NewObjectPool(counterPoolSize)
 	counterPool.Init(func() interface{} {
 		return m3thrift.NewCountValue()
 	})
 
-	gaugePool := pool.NewObjectPool(pool.NewObjectPoolOptions().SetSize(gaugePoolSize))
+	gaugePool := tally.NewObjectPool(gaugePoolSize)
 	gaugePool.Init(func() interface{} {
 		return m3thrift.NewGaugeValue()
 	})
 
-	timerPool := pool.NewObjectPool(pool.NewObjectPoolOptions().SetSize(timerPoolSize))
+	timerPool := tally.NewObjectPool(timerPoolSize)
 	timerPool.Init(func() interface{} {
 		return m3thrift.NewTimerValue()
 	})
 
-	protoPool := pool.NewObjectPool(pool.NewObjectPoolOptions().SetSize(protoPoolSize))
+	protoPool := tally.NewObjectPool(protoPoolSize)
 	protoPool.Init(func() interface{} {
 		return protoFac.GetProtocol(&customtransport.TCalcTransport{})
 	})

@@ -1,5 +1,5 @@
-hash: f9c9c193a345dff5d29b95af96ffd61f6638df2724af5991e36c0d33eb71c555
-updated: 2017-02-04T19:46:25.075493509-05:00
+hash: cdbc433d199ac0d184d56f461f87cb93db4f60658218f85a2b39c4614e4c1c68
+updated: 2017-02-05T22:15:53.246370902-05:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -19,13 +19,6 @@ imports:
   version: 2bc9827a78f95c6665b5fe0abd1fd66b496ae2d8
   subpackages:
   - proto
-- name: github.com/m3db/m3x
-  version: 6c0871e5cd927ceaca827549c91da70503b0fdd8
-  subpackages:
-  - checked
-  - instrument
-  - log
-  - pool
 - name: github.com/matttproud/golang_protobuf_extensions
   version: c12348ce28de40eed0136aa2b644d0ee0650e56c
   subpackages:
