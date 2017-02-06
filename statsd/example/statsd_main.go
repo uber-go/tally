@@ -51,7 +51,7 @@ func main() {
 
 	gauge := scope.Gauge("test-gauge")
 
-	timer := scope.Timer("test-timer-histogram")
+	timer := scope.Timer("test-timer")
 
 	go func() {
 		for {
