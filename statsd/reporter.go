@@ -32,15 +32,23 @@ type cactusStatsReporter struct {
 	sampleRate float32
 }
 
+// Options is a set of options for the tally reporter.
+type Options struct {
+	// SampleRate is the metrics emission sample rate. If you
+	// do not set this value it will be set to 1.
+	SampleRate float32
+}
+
 // NewReporter wraps a statsd.Statter for use with tally. Use either
 // statsd.NewClient or statsd.NewBufferedClient.
 func NewReporter(statsd statsd.Statter, opts Options) tally.StatsReporter {
-	if opts == nil {
-		opts = NewOptions()
+	var nilSampleRate float32
+	if opts.SampleRate == nilSampleRate {
+		opts.SampleRate = 1.0
 	}
 	return &cactusStatsReporter{
 		statter:    statsd,
-		sampleRate: opts.SampleRate(),
+		sampleRate: opts.SampleRate,
 	}
 }
 

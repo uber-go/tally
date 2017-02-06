@@ -106,7 +106,7 @@ func (r *multiCached) AllocateCounter(
 	name string,
 	tags map[string]string,
 ) tally.CachedCount {
-	var metrics []tally.CachedCount
+	metrics := make([]tally.CachedCount, 0, len(r.reporters))
 	for _, r := range r.reporters {
 		metrics = append(metrics, r.AllocateCounter(name, tags))
 	}
@@ -117,7 +117,7 @@ func (r *multiCached) AllocateGauge(
 	name string,
 	tags map[string]string,
 ) tally.CachedGauge {
-	var metrics []tally.CachedGauge
+	metrics := make([]tally.CachedGauge, 0, len(r.reporters))
 	for _, r := range r.reporters {
 		metrics = append(metrics, r.AllocateGauge(name, tags))
 	}
@@ -128,7 +128,7 @@ func (r *multiCached) AllocateTimer(
 	name string,
 	tags map[string]string,
 ) tally.CachedTimer {
-	var metrics []tally.CachedTimer
+	metrics := make([]tally.CachedTimer, 0, len(r.reporters))
 	for _, r := range r.reporters {
 		metrics = append(metrics, r.AllocateTimer(name, tags))
 	}
