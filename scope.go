@@ -291,7 +291,9 @@ func (s *scope) Histogram(name string, b ...Bucket) Histogram {
 		durationBuckets = b
 	}
 
-	key := name + Buckets(valueBuckets).String()
+	key := name +
+		Buckets(valueBuckets).String() +
+		Buckets(durationBuckets).String()
 
 	s.tm.RLock()
 	val, ok := s.histograms[key]
