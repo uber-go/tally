@@ -136,19 +136,12 @@ func (r *testStatsReporter) ReportTimer(name string, tags map[string]string, int
 	r.tg.Done()
 }
 
-func (r *testStatsReporter) AllocateValueHistogram(
+func (r *testStatsReporter) AllocateHistogram(
 	name string,
 	tags map[string]string,
-	buckets []float64,
-) CachedValueHistogram {
-	return nil
-}
-
-func (r *testStatsReporter) AllocateDurationHistogram(
-	name string,
-	tags map[string]string,
-	buckets []time.Duration,
-) CachedDurationHistogram {
+	valueBuckets []float64,
+	durationBuckets []time.Duration,
+) CachedHistogram {
 	return nil
 }
 

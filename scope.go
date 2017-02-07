@@ -300,22 +300,19 @@ func (s *scope) Histogram(name string, b ...Bucket) Histogram {
 		s.tm.Lock()
 		val, ok = s.histograms[key]
 		if !ok {
-			var (
-				cachedValueHistogram    CachedValueHistogram
-				cachedDurationHistogram CachedDurationHistogram
-			)
+			var cachedHistogram CachedHistogram
 			if s.cachedReporter != nil {
-				cachedValueHistogram = s.cachedReporter.AllocateValueHistogram(
-					s.fullyQualifiedName(name), s.tags, Buckets(valueBuckets).Values(),
-				)
-				cachedDurationHistogram = s.cachedReporter.AllocateDurationHistogram(
-					s.fullyQualifiedName(name), s.tags, Buckets(durationBuckets).Durations(),
+				cachedHistogram = s.cachedReporter.AllocateHistogram(
+					s.fullyQualifiedName(name), s.tags,
+					Buckets(valueBuckets).Values(),
+					Buckets(durationBuckets).Durations(),
 				)
 			}
 			val = newHistogram(
 				s.fullyQualifiedName(name), s.tags, s.reporter,
-				Buckets(valueBuckets).Values(), Buckets(durationBuckets).Durations(),
-				cachedValueHistogram, cachedDurationHistogram,
+				Buckets(valueBuckets).Values(),
+				Buckets(durationBuckets).Durations(),
+				cachedHistogram,
 			)
 			s.histograms[name] = val
 		}

@@ -93,19 +93,14 @@ type CachedStatsReporter interface {
 		tags map[string]string,
 	) CachedTimer
 
-	// AllocateValueHistogram pre allocates a value histogram data structure with name & tags.
-	AllocateValueHistogram(
+	// AllocateHistogram pre allocates a histogram data structure with name, tags,
+	// value buckets and duration buckets.
+	AllocateHistogram(
 		name string,
 		tags map[string]string,
-		buckets []float64,
-	) CachedValueHistogram
-
-	// AllocateDurationHistogram pre allocates a duration histogram data structure with name & tags.
-	AllocateDurationHistogram(
-		name string,
-		tags map[string]string,
-		buckets []time.Duration,
-	) CachedDurationHistogram
+		valueBuckets []float64,
+		durationBuckets []time.Duration,
+	) CachedHistogram
 }
 
 // CachedCount interface for reporting an individual counter
@@ -123,12 +118,8 @@ type CachedTimer interface {
 	ReportTimer(interval time.Duration)
 }
 
-// CachedValueHistogram interface for reporting an individual value histogram
-type CachedValueHistogram interface {
+// CachedHistogram interface for reporting an individual histogram
+type CachedHistogram interface {
 	ReportHistogramValue(value float64)
-}
-
-// CachedDurationHistogram interface for reporting an individual duration histogram
-type CachedDurationHistogram interface {
 	ReportHistogramDuration(interval time.Duration)
 }

@@ -244,13 +244,12 @@ func (r *timerNoReporterSink) Flush() {
 }
 
 type histogram struct {
-	name                    string
-	tags                    map[string]string
-	reporter                StatsReporter
-	valueBuckets            []float64
-	durationBuckets         []time.Duration
-	cachedValueHistogram    CachedValueHistogram
-	cachedDurationHistogram CachedDurationHistogram
+	name            string
+	tags            map[string]string
+	reporter        StatsReporter
+	valueBuckets    []float64
+	durationBuckets []time.Duration
+	cachedHistogram CachedHistogram
 }
 
 func newHistogram(
@@ -259,31 +258,29 @@ func newHistogram(
 	r StatsReporter,
 	valueBuckets []float64,
 	durationBuckets []time.Duration,
-	cachedValueHistogram CachedValueHistogram,
-	cachedDurationHistogram CachedDurationHistogram,
+	cachedHistogram CachedHistogram,
 ) *histogram {
 	return &histogram{
-		name:                    name,
-		tags:                    tags,
-		reporter:                r,
-		valueBuckets:            valueBuckets,
-		durationBuckets:         durationBuckets,
-		cachedValueHistogram:    cachedValueHistogram,
-		cachedDurationHistogram: cachedDurationHistogram,
+		name:            name,
+		tags:            tags,
+		reporter:        r,
+		valueBuckets:    valueBuckets,
+		durationBuckets: durationBuckets,
+		cachedHistogram: cachedHistogram,
 	}
 }
 
 func (h *histogram) RecordValue(value float64) {
-	if h.cachedValueHistogram != nil {
-		h.cachedValueHistogram.ReportHistogramValue(value)
+	if h.cachedHistogram != nil {
+		h.cachedHistogram.ReportHistogramValue(value)
 	} else {
 		h.reporter.ReportHistogramValue(h.name, h.tags, h.valueBuckets, value)
 	}
 }
 
 func (h *histogram) RecordDuration(value time.Duration) {
-	if h.cachedDurationHistogram != nil {
-		h.cachedDurationHistogram.ReportHistogramDuration(value)
+	if h.cachedHistogram != nil {
+		h.cachedHistogram.ReportHistogramDuration(value)
 	} else {
 		h.reporter.ReportHistogramDuration(h.name, h.tags, h.durationBuckets, value)
 	}
