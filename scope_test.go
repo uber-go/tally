@@ -136,15 +136,36 @@ func (r *testStatsReporter) ReportTimer(name string, tags map[string]string, int
 	r.tg.Done()
 }
 
+func (r *testStatsReporter) AllocateValueHistogram(
+	name string,
+	tags map[string]string,
+	buckets []float64,
+) CachedValueHistogram {
+	return nil
+}
+
+func (r *testStatsReporter) AllocateDurationHistogram(
+	name string,
+	tags map[string]string,
+	buckets []time.Duration,
+) CachedDurationHistogram {
+	return nil
+}
+
+func (r *testStatsReporter) ReportHistogramValue(name string, tags map[string]string, buckets []float64, value float64) {
+}
+func (r *testStatsReporter) ReportHistogramDuration(name string, tags map[string]string, buckets []time.Duration, interval time.Duration) {
+}
+
 func (r *testStatsReporter) Capabilities() Capabilities {
-	return capabilitiesReportingNoTagging
+	return capabilitiesReportingNoTaggingNoHistograms // TODO: add support for test stats reporter for histograms
 }
 
 func (r *testStatsReporter) Flush() {}
 
 func TestWriteTimerImmediately(t *testing.T) {
 	r := newTestStatsReporter()
-	s, _ := NewRootScope("", nil, r, 0, "")
+	s, _ := NewRootScope(ScopeOptions{Reporter: r}, 0)
 	r.tg.Add(1)
 	s.Timer("ticky").Record(time.Millisecond * 175)
 	r.tg.Wait()
@@ -152,7 +173,7 @@ func TestWriteTimerImmediately(t *testing.T) {
 
 func TestWriteTimerClosureImmediately(t *testing.T) {
 	r := newTestStatsReporter()
-	s, _ := NewRootScope("", nil, r, 0, "")
+	s, _ := NewRootScope(ScopeOptions{Reporter: r}, 0)
 	r.tg.Add(1)
 	tm := s.Timer("ticky")
 	tm.Start().Stop()
@@ -161,7 +182,7 @@ func TestWriteTimerClosureImmediately(t *testing.T) {
 
 func TestWriteReportLoop(t *testing.T) {
 	r := newTestStatsReporter()
-	s, close := NewRootScope("", nil, r, 10, "")
+	s, close := NewRootScope(ScopeOptions{Reporter: r}, 10)
 	defer close.Close()
 
 	r.cg.Add(1)
@@ -178,7 +199,7 @@ func TestWriteReportLoop(t *testing.T) {
 
 func TestCachedReportLoop(t *testing.T) {
 	r := newTestStatsReporter()
-	s, close := NewCachedRootScope("", nil, r, 10, "")
+	s, close := NewRootScope(ScopeOptions{CachedReporter: r}, 10)
 	defer close.Close()
 
 	r.cg.Add(1)
@@ -196,7 +217,7 @@ func TestCachedReportLoop(t *testing.T) {
 func TestWriteOnce(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, _ := NewRootScope("", nil, r, 0, "")
+	root, _ := NewRootScope(ScopeOptions{Reporter: r}, 0)
 	s := root.(*scope)
 
 	r.cg.Add(1)
@@ -226,7 +247,7 @@ func TestWriteOnce(t *testing.T) {
 func TestCachedReporter(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, _ := NewCachedRootScope("", nil, r, 0, "")
+	root, _ := NewRootScope(ScopeOptions{CachedReporter: r}, 0)
 	s := root.(*scope)
 
 	r.cg.Add(1)
@@ -249,7 +270,7 @@ func TestCachedReporter(t *testing.T) {
 func TestRootScopeWithoutPrefix(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, _ := NewRootScope("", nil, r, 0, "")
+	root, _ := NewRootScope(ScopeOptions{Reporter: r}, 0)
 	s := root.(*scope)
 	r.cg.Add(1)
 	s.Counter("bar").Inc(1)
@@ -272,7 +293,7 @@ func TestRootScopeWithoutPrefix(t *testing.T) {
 func TestRootScopeWithPrefix(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, _ := NewRootScope("foo", nil, r, 0, "")
+	root, _ := NewRootScope(ScopeOptions{Prefix: "foo", Reporter: r}, 0)
 	s := root.(*scope)
 	r.cg.Add(1)
 	s.Counter("bar").Inc(1)
@@ -295,7 +316,7 @@ func TestRootScopeWithPrefix(t *testing.T) {
 func TestRootScopeWithDifferentSeparator(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, _ := NewRootScope("foo", nil, r, 0, "_")
+	root, _ := NewRootScope(ScopeOptions{Prefix: "foo", Separator: "_", Reporter: r}, 0)
 	s := root.(*scope)
 	r.cg.Add(1)
 	s.Counter("bar").Inc(1)
@@ -318,7 +339,7 @@ func TestRootScopeWithDifferentSeparator(t *testing.T) {
 func TestSubScope(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, _ := NewRootScope("foo", nil, r, 0, "")
+	root, _ := NewRootScope(ScopeOptions{Prefix: "foo", Reporter: r}, 0)
 	s := root.SubScope("mork").(*scope)
 	r.cg.Add(1)
 	s.Counter("bar").Inc(1)
@@ -342,7 +363,7 @@ func TestTaggedSubScope(t *testing.T) {
 	r := newTestStatsReporter()
 
 	ts := map[string]string{"env": "test"}
-	root, _ := NewRootScope("foo", ts, r, 0, "")
+	root, _ := NewRootScope(ScopeOptions{Prefix: "foo", Tags: ts, Reporter: r}, 0)
 	s := root.(*scope)
 
 	tscope := root.Tagged(map[string]string{"service": "test"}).(*scope)
@@ -403,13 +424,13 @@ func TestSnapshot(t *testing.T) {
 
 func TestCapabilities(t *testing.T) {
 	r := newTestStatsReporter()
-	s, _ := NewRootScope("prefix", nil, r, 0, "")
+	s, _ := NewRootScope(ScopeOptions{Reporter: r}, 0)
 	assert.True(t, s.Capabilities().Reporting())
 	assert.False(t, s.Capabilities().Tagging())
 }
 
 func TestCapabilitiesNoReporter(t *testing.T) {
-	s, _ := NewRootScope("prefix", nil, nil, 0, "")
+	s, _ := NewRootScope(ScopeOptions{}, 0)
 	assert.False(t, s.Capabilities().Reporting())
 	assert.False(t, s.Capabilities().Tagging())
 }
@@ -431,7 +452,7 @@ func newTestMets(scope Scope) testMets {
 func TestReturnByValue(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, _ := NewRootScope("", nil, r, 0, "")
+	root, _ := NewRootScope(ScopeOptions{Reporter: r}, 0)
 	s := root.(*scope)
 	mets := newTestMets(s)
 

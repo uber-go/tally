@@ -29,22 +29,31 @@ import (
 
 var (
 	capabilitiesNone = &capabilities{
-		reporting: false,
-		tagging:   false,
+		reporting:  false,
+		tagging:    false,
+		histograms: false,
 	}
-	capabilitiesReportingNoTagging = &capabilities{
-		reporting: true,
-		tagging:   false,
+	capabilitiesReportingNoTaggingNoHistograms = &capabilities{
+		reporting:  true,
+		tagging:    false,
+		histograms: false,
 	}
-	capabilitiesReportingTagging = &capabilities{
-		reporting: true,
-		tagging:   true,
+	capabilitiesReportingTaggingNoHistograms = &capabilities{
+		reporting:  true,
+		tagging:    true,
+		histograms: false,
+	}
+	capabilitiesReportingTaggingHistograms = &capabilities{
+		reporting:  true,
+		tagging:    true,
+		histograms: true,
 	}
 )
 
 type capabilities struct {
-	reporting bool
-	tagging   bool
+	reporting  bool
+	tagging    bool
+	histograms bool
 }
 
 func (c *capabilities) Reporting() bool {
@@ -53,6 +62,10 @@ func (c *capabilities) Reporting() bool {
 
 func (c *capabilities) Tagging() bool {
 	return c.tagging
+}
+
+func (c *capabilities) Histograms() bool {
+	return c.histograms
 }
 
 type counter struct {
@@ -162,8 +175,8 @@ func newTimer(
 	t := &timer{
 		name:        name,
 		tags:        tags,
-		cachedTimer: cachedTimer,
 		reporter:    r,
+		cachedTimer: cachedTimer,
 	}
 	if r == nil {
 		t.reporter = &timerNoReporterSink{timer: t}
@@ -172,7 +185,7 @@ func newTimer(
 }
 
 func (t *timer) Start() Stopwatch {
-	return Stopwatch{start: globalClock.Now(), timer: t}
+	return timerStopwatch{start: globalClock.Now(), timer: t}
 }
 
 func (t *timer) Record(interval time.Duration) {
@@ -193,6 +206,19 @@ func (t *timer) snapshot() []time.Duration {
 	return snap
 }
 
+type timerStopwatch struct {
+	start   time.Time
+	timer   *timer
+	stopped int32
+}
+
+func (s timerStopwatch) Stop() {
+	if atomic.AddInt32(&s.stopped, 1) == 1 {
+		d := globalClock.Now().Sub(s.start)
+		s.timer.Record(d)
+	}
+}
+
 type timerNoReporterSink struct {
 	sync.RWMutex
 	timer *timer
@@ -207,13 +233,80 @@ func (r *timerNoReporterSink) ReportTimer(name string, tags map[string]string, i
 	r.timer.unreported.values = append(r.timer.unreported.values, interval)
 	r.timer.unreported.Unlock()
 }
+func (r *timerNoReporterSink) ReportHistogramValue(name string, tags map[string]string, buckets []float64, value float64) {
+}
+func (r *timerNoReporterSink) ReportHistogramDuration(name string, tags map[string]string, buckets []time.Duration, interval time.Duration) {
+}
 func (r *timerNoReporterSink) Capabilities() Capabilities {
-	return capabilitiesReportingTagging
+	return capabilitiesReportingTaggingNoHistograms
 }
 func (r *timerNoReporterSink) Flush() {
 }
 
-// NullStatsReporter is an implementatin of StatsReporter than simply does nothing.
+type histogram struct {
+	name                    string
+	tags                    map[string]string
+	reporter                StatsReporter
+	valueBuckets            []float64
+	durationBuckets         []time.Duration
+	cachedValueHistogram    CachedValueHistogram
+	cachedDurationHistogram CachedDurationHistogram
+}
+
+func newHistogram(
+	name string,
+	tags map[string]string,
+	r StatsReporter,
+	valueBuckets []float64,
+	durationBuckets []time.Duration,
+	cachedValueHistogram CachedValueHistogram,
+	cachedDurationHistogram CachedDurationHistogram,
+) *histogram {
+	return &histogram{
+		name:                    name,
+		tags:                    tags,
+		reporter:                r,
+		valueBuckets:            valueBuckets,
+		durationBuckets:         durationBuckets,
+		cachedValueHistogram:    cachedValueHistogram,
+		cachedDurationHistogram: cachedDurationHistogram,
+	}
+}
+
+func (h *histogram) RecordValue(value float64) {
+	if h.cachedValueHistogram != nil {
+		h.cachedValueHistogram.ReportHistogramValue(value)
+	} else {
+		h.reporter.ReportHistogramValue(h.name, h.tags, h.valueBuckets, value)
+	}
+}
+
+func (h *histogram) RecordDuration(value time.Duration) {
+	if h.cachedDurationHistogram != nil {
+		h.cachedDurationHistogram.ReportHistogramDuration(value)
+	} else {
+		h.reporter.ReportHistogramDuration(h.name, h.tags, h.durationBuckets, value)
+	}
+}
+
+func (h *histogram) Start() Stopwatch {
+	return histogramStopwatch{start: globalClock.Now(), histogram: h}
+}
+
+type histogramStopwatch struct {
+	start     time.Time
+	histogram *histogram
+	stopped   int32
+}
+
+func (s histogramStopwatch) Stop() {
+	if atomic.AddInt32(&s.stopped, 1) == 1 {
+		d := globalClock.Now().Sub(s.start)
+		s.histogram.RecordDuration(d)
+	}
+}
+
+// NullStatsReporter is an implementation of StatsReporter than simply does nothing.
 var NullStatsReporter StatsReporter = nullStatsReporter{}
 
 func (r nullStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
@@ -222,8 +315,12 @@ func (r nullStatsReporter) ReportGauge(name string, tags map[string]string, valu
 }
 func (r nullStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
 }
+func (r nullStatsReporter) ReportHistogramValue(name string, tags map[string]string, buckets []float64, value float64) {
+}
+func (r nullStatsReporter) ReportHistogramDuration(name string, tags map[string]string, buckets []time.Duration, interval time.Duration) {
+}
 func (r nullStatsReporter) Capabilities() Capabilities {
-	return capabilitiesReportingNoTagging
+	return capabilitiesNone
 }
 func (r nullStatsReporter) Flush() {
 }

@@ -17,44 +17,15 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
-
 package tally
 
-import "testing"
+import (
+	"testing"
 
-func BenchmarkNameGeneration(b *testing.B) {
-	root, _ := NewRootScope(ScopeOptions{
-		Prefix:   "funkytown",
-		Reporter: NullStatsReporter,
-	}, 0)
-	s := root.(*scope)
-	for n := 0; n < b.N; n++ {
-		s.fullyQualifiedName("take.me.to")
-	}
-}
+	"github.com/stretchr/testify/assert"
+)
 
-func BenchmarkNameGenerationTagged(b *testing.B) {
-	root, _ := NewRootScope(ScopeOptions{
-		Prefix: "funkytown",
-		Tags: map[string]string{
-			"style":     "funky",
-			"hair":      "wavy",
-			"jefferson": "starship",
-		},
-		Reporter: NullStatsReporter,
-	}, 0)
-	s := root.(*scope)
-	for n := 0; n < b.N; n++ {
-		s.fullyQualifiedName("take.me.to")
-	}
-}
-
-func BenchmarkNameGenerationNoPrefix(b *testing.B) {
-	root, _ := NewRootScope(ScopeOptions{
-		Reporter: NullStatsReporter,
-	}, 0)
-	s := root.(*scope)
-	for n := 0; n < b.N; n++ {
-		s.fullyQualifiedName("im.all.alone")
-	}
+func TestLinearValueBuckets(t *testing.T) {
+	result := LinearValueBuckets(1, 1, 3)
+	assert.Equal(t, "[1.000000 2.000000 3.000000]", Buckets(result).String())
 }

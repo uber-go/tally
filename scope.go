@@ -31,7 +31,7 @@ import (
 
 var (
 	// NoopScope is a scope that does nothing
-	NoopScope, _ = NewRootScope("", nil, NullStatsReporter, 0, "")
+	NoopScope, _ = NewRootScope(ScopeOptions{Reporter: NullStatsReporter}, 0)
 	// DefaultSeparator is the default separator used to join nested scopes
 	DefaultSeparator = "."
 
@@ -39,12 +39,14 @@ var (
 )
 
 type scope struct {
-	separator      string
-	prefix         string
-	tags           map[string]string
-	reporter       StatsReporter
-	cachedReporter CachedStatsReporter
-	baseReporter   BaseStatsReporter
+	separator              string
+	prefix                 string
+	tags                   map[string]string
+	reporter               StatsReporter
+	cachedReporter         CachedStatsReporter
+	baseReporter           BaseStatsReporter
+	defaultValueBuckets    []Bucket
+	defaultDurationBuckets []Bucket
 
 	registry *scopeRegistry
 	quit     chan struct{}
@@ -53,9 +55,10 @@ type scope struct {
 	gm sync.RWMutex
 	tm sync.RWMutex
 
-	counters map[string]*counter
-	gauges   map[string]*gauge
-	timers   map[string]*timer
+	counters   map[string]*counter
+	gauges     map[string]*gauge
+	timers     map[string]*timer
+	histograms map[string]*histogram
 }
 
 type scopeRegistry struct {
@@ -65,83 +68,74 @@ type scopeRegistry struct {
 
 var scopeRegistryKey = KeyForPrefixedStringMap
 
-// NewRootScope creates a new Scope around a given stats reporter with the
-// given prefix
-func NewRootScope(
-	prefix string,
-	tags map[string]string,
-	reporter StatsReporter,
-	interval time.Duration,
-	separator string,
-) (Scope, io.Closer) {
-	s := newRootScope(prefix, tags, reporter, nil, interval, separator)
-	return s, s
+// ScopeOptions is a set of options to construct a scope.
+type ScopeOptions struct {
+	Tags                   map[string]string
+	Prefix                 string
+	Reporter               StatsReporter
+	CachedReporter         CachedStatsReporter
+	Separator              string
+	DefaultValueBuckets    []Bucket
+	DefaultDurationBuckets []Bucket
 }
 
-// NewCachedRootScope creates a new Scope using a more performant
-// cached stats reporter with the given prefix
-func NewCachedRootScope(
-	prefix string,
-	tags map[string]string,
-	reporter CachedStatsReporter,
-	interval time.Duration,
-	separator string,
-) (Scope, io.Closer) {
-	s := newRootScope(prefix, tags, nil, reporter, interval, separator)
+// NewRootScope creates a new root Scope with a set of options and
+// a reporting interval.
+// Must provide either a StatsReporter or a CachedStatsReporter.
+func NewRootScope(opts ScopeOptions, interval time.Duration) (Scope, io.Closer) {
+	s := newRootScope(opts, interval)
 	return s, s
 }
 
 // NewTestScope creates a new Scope without a stats reporter with the
 // given prefix and adds the ability to take snapshots of metrics emitted
-// to it
+// to it.
 func NewTestScope(
 	prefix string,
 	tags map[string]string,
 ) TestScope {
-	return newRootScope(prefix, tags, nil, nil, 0, DefaultSeparator)
+	return newRootScope(ScopeOptions{Prefix: prefix, Tags: tags}, 0)
 }
 
-func newRootScope(
-	prefix string,
-	tags map[string]string,
-	reporter StatsReporter,
-	cachedReporter CachedStatsReporter,
-	interval time.Duration,
-	separator string,
-) *scope {
-	if tags == nil {
-		tags = make(map[string]string)
+func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
+	if opts.Tags == nil {
+		opts.Tags = make(map[string]string)
 	}
-	sep := DefaultSeparator
-	if separator != "" {
-		sep = separator
+	if opts.Separator == "" {
+		opts.Separator = DefaultSeparator
 	}
 
 	var baseReporter BaseStatsReporter
-	if reporter != nil {
-		baseReporter = reporter
-	} else if cachedReporter != nil {
-		baseReporter = cachedReporter
+	if opts.Reporter != nil {
+		baseReporter = opts.Reporter
+	} else if opts.CachedReporter != nil {
+		baseReporter = opts.CachedReporter
 	}
 
+	// TODO: validate that opts.DefaultValueBuckets is valid
+	// TODO: validate that opts.DefaultHistogramBuckets is valid
+
 	s := &scope{
-		separator: sep,
-		prefix:    prefix,
+		separator: opts.Separator,
+		prefix:    opts.Prefix,
 		// NB(r): Take a copy of the tags on creation
 		// so that it cannot be modified after set.
-		tags:           copyStringMap(tags),
-		reporter:       reporter,
-		cachedReporter: cachedReporter,
-		baseReporter:   baseReporter,
+		tags:                   copyStringMap(opts.Tags),
+		reporter:               opts.Reporter,
+		cachedReporter:         opts.CachedReporter,
+		baseReporter:           baseReporter,
+		defaultValueBuckets:    opts.DefaultValueBuckets,
+		defaultDurationBuckets: opts.DefaultDurationBuckets,
 
 		registry: &scopeRegistry{
 			subscopes: make(map[string]*scope),
 		},
 		quit: make(chan struct{}, 1),
 
-		counters: make(map[string]*counter),
-		gauges:   make(map[string]*gauge),
-		timers:   make(map[string]*timer),
+		counters:   make(map[string]*counter),
+		gauges:     make(map[string]*gauge),
+		timers:     make(map[string]*timer),
+		histograms: make(map[string]*histogram),
 	}
 
 	// Register the root scope
@@ -223,14 +217,13 @@ func (s *scope) Counter(name string) Counter {
 		s.cm.Lock()
 		val, ok = s.counters[name]
 		if !ok {
+			var cachedCounter CachedCount
 			if s.cachedReporter != nil {
-				cachedCounter := s.cachedReporter.AllocateCounter(
+				cachedCounter = s.cachedReporter.AllocateCounter(
 					s.fullyQualifiedName(name), s.tags,
 				)
-				val = newCounter(cachedCounter)
-			} else {
-				val = newCounter(nil)
 			}
+			val = newCounter(cachedCounter)
 			s.counters[name] = val
 		}
 		s.cm.Unlock()
@@ -246,14 +239,13 @@ func (s *scope) Gauge(name string) Gauge {
 		s.gm.Lock()
 		val, ok = s.gauges[name]
 		if !ok {
+			var cachedGauge CachedGauge
 			if s.cachedReporter != nil {
-				cachedGauge := s.cachedReporter.AllocateGauge(
+				cachedGauge = s.cachedReporter.AllocateGauge(
 					s.fullyQualifiedName(name), s.tags,
 				)
-				val = newGauge(cachedGauge)
-			} else {
-				val = newGauge(nil)
 			}
+			val = newGauge(cachedGauge)
 			s.gauges[name] = val
 		}
 		s.gm.Unlock()
@@ -269,19 +261,63 @@ func (s *scope) Timer(name string) Timer {
 		s.tm.Lock()
 		val, ok = s.timers[name]
 		if !ok {
+			var cachedTimer CachedTimer
 			if s.cachedReporter != nil {
-				cachedTimer := s.cachedReporter.AllocateTimer(
+				cachedTimer = s.cachedReporter.AllocateTimer(
 					s.fullyQualifiedName(name), s.tags,
 				)
-				val = newTimer(
-					s.fullyQualifiedName(name), s.tags, s.reporter, cachedTimer,
+			}
+			val = newTimer(
+				s.fullyQualifiedName(name), s.tags, s.reporter, cachedTimer,
+			)
+			s.timers[name] = val
+		}
+		s.tm.Unlock()
+	}
+	return val
+}
+
+func (s *scope) Histogram(name string, b ...Bucket) Histogram {
+	var (
+		valueBuckets    []Bucket
+		durationBuckets []Bucket
+	)
+	if len(b) == 0 {
+		valueBuckets = s.defaultValueBuckets
+		durationBuckets = s.defaultDurationBuckets
+	} else {
+		// TODO: verify valid buckets
+		valueBuckets = b
+		durationBuckets = b
+	}
+
+	key := name + Buckets(valueBuckets).String()
+
+	s.tm.RLock()
+	val, ok := s.histograms[key]
+	s.tm.RUnlock()
+	if !ok {
+		s.tm.Lock()
+		val, ok = s.histograms[key]
+		if !ok {
+			var (
+				cachedValueHistogram    CachedValueHistogram
+				cachedDurationHistogram CachedDurationHistogram
+			)
+			if s.cachedReporter != nil {
+				cachedValueHistogram = s.cachedReporter.AllocateValueHistogram(
+					s.fullyQualifiedName(name), s.tags, Buckets(valueBuckets).Values(),
 				)
-			} else {
-				val = newTimer(
-					s.fullyQualifiedName(name), s.tags, s.reporter, nil,
+				cachedDurationHistogram = s.cachedReporter.AllocateDurationHistogram(
+					s.fullyQualifiedName(name), s.tags, Buckets(durationBuckets).Durations(),
 				)
 			}
-			s.timers[name] = val
+			val = newHistogram(
+				s.fullyQualifiedName(name), s.tags, s.reporter,
+				Buckets(valueBuckets).Values(), Buckets(durationBuckets).Durations(),
+				cachedValueHistogram, cachedDurationHistogram,
+			)
+			s.histograms[name] = val
 		}
 		s.tm.Unlock()
 	}
@@ -388,6 +424,7 @@ func (s *scope) Snapshot() Snapshot {
 			}
 		}
 		ss.tm.RUnlock()
+		// TODO: histograms in snapshot
 	}
 	s.registry.RUnlock()
 

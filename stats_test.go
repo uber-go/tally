@@ -43,8 +43,13 @@ func (r *statsTestReporter) ReportTimer(name string, tags map[string]string, int
 	r.last = interval
 }
 
+func (r *statsTestReporter) ReportHistogramValue(name string, tags map[string]string, buckets []float64, value float64) {
+}
+func (r *statsTestReporter) ReportHistogramDuration(name string, tags map[string]string, buckets []time.Duration, interval time.Duration) {
+}
+
 func (r *statsTestReporter) Capabilities() Capabilities {
-	return capabilitiesReportingNoTagging
+	return capabilitiesReportingNoTaggingNoHistograms
 }
 
 func (r *statsTestReporter) Flush() {}
