@@ -25,125 +25,98 @@ import (
 	"time"
 )
 
-// Buckets is a slice of buckets
-type Buckets []Bucket
+// Defaults is a type that can represent a constant.
+type Defaults int
 
-func (b Buckets) String() string {
-	values := make([]string, len(b))
+// DefaultBuckets can be passed to specify to default buckets.
+const DefaultBuckets = Defaults(0)
+
+func (v Defaults) String() string {
+	return "[defaults]"
+}
+
+// AsValues implements Buckets.
+func (v Defaults) AsValues() []float64 { return nil }
+
+// AsDurations implements Buckets.
+func (v Defaults) AsDurations() []time.Duration { return nil }
+
+// Values is a set of float64 values that implements Buckets.
+type Values []float64
+
+func (v Values) String() string {
+	values := make([]string, len(v))
 	for i := range values {
-		values[i] = b[i].String()
+		values[i] = fmt.Sprintf("%f", v[i])
 	}
 	return fmt.Sprintf("%v", values)
 }
 
-// Values returns the slice of buckets as values
-func (b Buckets) Values() []float64 {
-	values := make([]float64, len(b))
+// AsValues implements Buckets.
+func (v Values) AsValues() []float64 {
+	return []float64(v)
+}
+
+// AsDurations implements Buckets.
+func (v Values) AsDurations() []time.Duration {
+	values := make([]time.Duration, len(v))
 	for i := range values {
-		values[i] = b[i].Value()
+		values[i] = time.Duration(v[i] * float64(time.Second))
 	}
 	return values
 }
 
-// Durations returns the slice of buckets as durations
-func (b Buckets) Durations() []time.Duration {
-	values := make([]time.Duration, len(b))
+// Durations is a set of float64 values that implements Buckets.
+type Durations []time.Duration
+
+func (v Durations) String() string {
+	values := make([]string, len(v))
 	for i := range values {
-		values[i] = b[i].Duration()
+		values[i] = v[i].String()
+	}
+	return fmt.Sprintf("%v", values)
+}
+
+// AsValues implements Buckets.
+func (v Durations) AsValues() []float64 {
+	values := make([]float64, len(v))
+	for i := range values {
+		values[i] = float64(v[i]) / float64(time.Second)
 	}
 	return values
 }
 
-// ValueBucket is a value bucket
-type ValueBucket float64
-
-// BucketType implements Bucket
-func (v ValueBucket) BucketType() BucketType {
-	return ValueBucketType
-}
-
-// Value implements Bucket
-func (v ValueBucket) Value() float64 {
-	return float64(v)
-}
-
-// String implements Bucket
-func (v ValueBucket) String() string {
-	return fmt.Sprintf("%f", v)
-}
-
-// Duration implements Bucket
-func (v ValueBucket) Duration() time.Duration {
-	return time.Duration(v.Value() * float64(time.Second))
-}
-
-// DurationBucket is a duration bucket
-type DurationBucket time.Duration
-
-// BucketType implements Bucket
-func (d DurationBucket) BucketType() BucketType {
-	return DurationBucketType
-}
-
-// Value implements Bucket
-func (d DurationBucket) Value() float64 {
-	return float64(d.Duration() / time.Second)
-}
-
-// Duration implements Bucket
-func (d DurationBucket) Duration() time.Duration {
-	return time.Duration(d)
-}
-
-// String implements Bucket
-func (d DurationBucket) String() string {
-	return d.Duration().String()
-}
-
-// ValueBuckets returns a slice of value buckets.
-func ValueBuckets(values ...float64) []Bucket {
-	buckets := make([]Bucket, len(values))
-	for i, v := range values {
-		buckets[i] = ValueBucket(v)
-	}
-	return buckets
-}
-
-// DurationBuckets returns a slice of duration buckets.
-func DurationBuckets(values ...time.Duration) []Bucket {
-	buckets := make([]Bucket, len(values))
-	for i, v := range values {
-		buckets[i] = DurationBucket(v)
-	}
-	return buckets
+// AsDurations implements Buckets.
+func (v Durations) AsDurations() []time.Duration {
+	return []time.Duration(v)
 }
 
 // LinearValueBuckets creates a set of linear value buckets.
-func LinearValueBuckets(start, width float64, count int) []Bucket {
+func LinearValueBuckets(start, width float64, count int) Values {
 	if count <= 0 {
 		panic("count needs to be > 0")
 	}
-	buckets := make([]Bucket, count)
+	buckets := make([]float64, count)
 	for i := range buckets {
-		buckets[i] = ValueBucket(start + (float64(i) * width))
+		buckets[i] = start + (float64(i) * width)
 	}
-	return buckets
+	return Values(buckets)
 }
 
 // LinearDurationBuckets creates a set of linear duration buckets.
-func LinearDurationBuckets(start, width time.Duration, count int) []Bucket {
+func LinearDurationBuckets(start, width time.Duration, count int) Durations {
 	if count <= 0 {
 		panic("count needs to be > 0")
 	}
-	buckets := make([]Bucket, count)
+	buckets := make([]time.Duration, count)
 	for i := range buckets {
-		buckets[i] = DurationBucket(start + (time.Duration(i) * width))
+		buckets[i] = start + (time.Duration(i) * width)
 	}
-	return buckets
+	return Durations(buckets)
 }
 
 // ExponentialValueBuckets creates a set of exponential value buckets.
-func ExponentialValueBuckets(start, factor float64, count int) []Bucket {
+func ExponentialValueBuckets(start, factor float64, count int) Values {
 	if count <= 0 {
 		panic("count needs to be > 0")
 	}
@@ -153,17 +126,17 @@ func ExponentialValueBuckets(start, factor float64, count int) []Bucket {
 	if factor <= 1 {
 		panic("factor needs to be > 1")
 	}
-	buckets := make([]Bucket, count)
+	buckets := make([]float64, count)
 	curr := start
 	for i := range buckets {
-		buckets[i] = ValueBucket(curr)
+		buckets[i] = curr
 		curr *= factor
 	}
-	return buckets
+	return Values(buckets)
 }
 
 // ExponentialDurationBuckets creates a set of exponential duration buckets.
-func ExponentialDurationBuckets(start time.Duration, factor float64, count int) []Bucket {
+func ExponentialDurationBuckets(start time.Duration, factor float64, count int) Durations {
 	if count <= 0 {
 		panic("count needs to be > 0")
 	}
@@ -173,11 +146,11 @@ func ExponentialDurationBuckets(start time.Duration, factor float64, count int) 
 	if factor <= 1 {
 		panic("factor needs to be > 1")
 	}
-	buckets := make([]Bucket, count)
+	buckets := make([]time.Duration, count)
 	curr := start
 	for i := range buckets {
-		buckets[i] = DurationBucket(curr)
+		buckets[i] = curr
 		curr = time.Duration(float64(curr) * factor)
 	}
-	return buckets
+	return Durations(buckets)
 }

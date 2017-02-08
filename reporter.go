@@ -57,7 +57,7 @@ type StatsReporter interface {
 	ReportHistogramValue(
 		name string,
 		tags map[string]string,
-		buckets []float64,
+		buckets Buckets,
 		value float64,
 	)
 
@@ -65,7 +65,7 @@ type StatsReporter interface {
 	ReportHistogramDuration(
 		name string,
 		tags map[string]string,
-		buckets []time.Duration,
+		buckets Buckets,
 		interval time.Duration,
 	)
 }
@@ -98,8 +98,7 @@ type CachedStatsReporter interface {
 	AllocateHistogram(
 		name string,
 		tags map[string]string,
-		valueBuckets []float64,
-		durationBuckets []time.Duration,
+		buckets Buckets,
 	) CachedHistogram
 }
 

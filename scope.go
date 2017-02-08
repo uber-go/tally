@@ -39,14 +39,13 @@ var (
 )
 
 type scope struct {
-	separator              string
-	prefix                 string
-	tags                   map[string]string
-	reporter               StatsReporter
-	cachedReporter         CachedStatsReporter
-	baseReporter           BaseStatsReporter
-	defaultValueBuckets    []Bucket
-	defaultDurationBuckets []Bucket
+	separator      string
+	prefix         string
+	tags           map[string]string
+	reporter       StatsReporter
+	cachedReporter CachedStatsReporter
+	baseReporter   BaseStatsReporter
+	defaultBuckets Buckets
 
 	registry *scopeRegistry
 	quit     chan struct{}
@@ -70,13 +69,12 @@ var scopeRegistryKey = KeyForPrefixedStringMap
 
 // ScopeOptions is a set of options to construct a scope.
 type ScopeOptions struct {
-	Tags                   map[string]string
-	Prefix                 string
-	Reporter               StatsReporter
-	CachedReporter         CachedStatsReporter
-	Separator              string
-	DefaultValueBuckets    []Bucket
-	DefaultDurationBuckets []Bucket
+	Tags           map[string]string
+	Prefix         string
+	Reporter       StatsReporter
+	CachedReporter CachedStatsReporter
+	Separator      string
+	DefaultBuckets Buckets
 }
 
 // NewRootScope creates a new root Scope with a set of options and
@@ -120,12 +118,11 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		prefix:    opts.Prefix,
 		// NB(r): Take a copy of the tags on creation
 		// so that it cannot be modified after set.
-		tags:                   copyStringMap(opts.Tags),
-		reporter:               opts.Reporter,
-		cachedReporter:         opts.CachedReporter,
-		baseReporter:           baseReporter,
-		defaultValueBuckets:    opts.DefaultValueBuckets,
-		defaultDurationBuckets: opts.DefaultDurationBuckets,
+		tags:           copyStringMap(opts.Tags),
+		reporter:       opts.Reporter,
+		cachedReporter: opts.CachedReporter,
+		baseReporter:   baseReporter,
+		defaultBuckets: opts.DefaultBuckets,
 
 		registry: &scopeRegistry{
 			subscopes: make(map[string]*scope),
@@ -277,23 +274,14 @@ func (s *scope) Timer(name string) Timer {
 	return val
 }
 
-func (s *scope) Histogram(name string, b ...Bucket) Histogram {
-	var (
-		valueBuckets    []Bucket
-		durationBuckets []Bucket
-	)
-	if len(b) == 0 {
-		valueBuckets = s.defaultValueBuckets
-		durationBuckets = s.defaultDurationBuckets
-	} else {
-		// TODO: verify valid buckets
-		valueBuckets = b
-		durationBuckets = b
+func (s *scope) Histogram(name string, b Buckets) Histogram {
+	if b == DefaultBuckets {
+		b = s.defaultBuckets
 	}
 
-	key := name +
-		Buckets(valueBuckets).String() +
-		Buckets(durationBuckets).String()
+	// TODO: verify valid buckets
+
+	key := name + b.String()
 
 	s.tm.RLock()
 	val, ok := s.histograms[key]
@@ -305,16 +293,11 @@ func (s *scope) Histogram(name string, b ...Bucket) Histogram {
 			var cachedHistogram CachedHistogram
 			if s.cachedReporter != nil {
 				cachedHistogram = s.cachedReporter.AllocateHistogram(
-					s.fullyQualifiedName(name), s.tags,
-					Buckets(valueBuckets).Values(),
-					Buckets(durationBuckets).Durations(),
+					s.fullyQualifiedName(name), s.tags, b,
 				)
 			}
 			val = newHistogram(
-				s.fullyQualifiedName(name), s.tags, s.reporter,
-				Buckets(valueBuckets).Values(),
-				Buckets(durationBuckets).Durations(),
-				cachedHistogram,
+				s.fullyQualifiedName(name), s.tags, s.reporter, b, cachedHistogram,
 			)
 			s.histograms[name] = val
 		}

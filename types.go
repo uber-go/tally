@@ -39,16 +39,14 @@ type Scope interface {
 
 	// Histogram returns the Histogram object corresponding to the name.
 	// To use default value and duration buckets configured for the scope
-	// simply do not pass any buckets.
-	// You can use tally.ValueBucket(x) for individual value buckets.
-	// You can use tally.DurationBucket(x) for individual duration buckets.
-	// You can use tally.ValueBuckets(x, y, ...)... for value buckets.
-	// You can use tally.DurationBuckets(x, y, ...)... for duration buckets.
-	// You can use tally.LinearValueBuckets(start, width, count)... for linear values.
-	// You can use tally.LinearDurationBuckets(start, width, count)... for linear durations.
-	// You can use tally.ExponentialValueBuckets(start, factor, count)... for exponential values.
-	// You can use tally.ExponentialDurationBuckets(start, factor, count)... for exponential durations.
-	Histogram(name string, buckets ...Bucket) Histogram
+	// simply pass tally.DefaultBuckets.
+	// You can use tally.Values(x, y, ...) for value buckets.
+	// You can use tally.Durations(x, y, ...) for duration buckets.
+	// You can use tally.LinearValueBuckets(start, width, count) for linear values.
+	// You can use tally.LinearDurationBuckets(start, width, count) for linear durations.
+	// You can use tally.ExponentialValueBuckets(start, factor, count) for exponential values.
+	// You can use tally.ExponentialDurationBuckets(start, factor, count) for exponential durations.
+	Histogram(name string, buckets Buckets) Histogram
 
 	// Tagged returns a new child scope with the given tags and current tags.
 	Tagged(tags map[string]string) Scope
@@ -96,34 +94,22 @@ type Histogram interface {
 	Start() Stopwatch
 }
 
-// BucketType represents a histogram bucket type.
-type BucketType uint
-
-const (
-	// ValueBucketType is a float64 histogram bucket type.
-	ValueBucketType BucketType = iota
-	// DurationBucketType is a time duration histogram bucket type.
-	DurationBucketType
-)
-
-// Bucket represents a histgram bucket.
-type Bucket interface {
-	fmt.Stringer
-
-	// BucketType returns the type of bucket, value or duration.
-	BucketType() BucketType
-
-	// Value returns the value of the bucket as float64.
-	Value() float64
-
-	// Duration returns the duration of the bucket as time.Duration.
-	Duration() time.Duration
-}
-
 // Stopwatch is a helper for simpler tracking of elapsed time.
 type Stopwatch interface {
 	// Stop records the difference between the current clock and start time.
 	Stop()
+}
+
+// Buckets is an interface that can represent a set of buckets
+// either as float64s or as durations.
+type Buckets interface {
+	fmt.Stringer
+
+	// AsValues returns a representation of the buckets as float64s
+	AsValues() []float64
+
+	// AsDurations returns a representation of the buckets as time.Durations
+	AsDurations() []time.Duration
 }
 
 // Capabilities is a description of metrics reporting capabilities.

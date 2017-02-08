@@ -233,9 +233,9 @@ func (r *timerNoReporterSink) ReportTimer(name string, tags map[string]string, i
 	r.timer.unreported.values = append(r.timer.unreported.values, interval)
 	r.timer.unreported.Unlock()
 }
-func (r *timerNoReporterSink) ReportHistogramValue(name string, tags map[string]string, buckets []float64, value float64) {
+func (r *timerNoReporterSink) ReportHistogramValue(name string, tags map[string]string, buckets Buckets, value float64) {
 }
-func (r *timerNoReporterSink) ReportHistogramDuration(name string, tags map[string]string, buckets []time.Duration, interval time.Duration) {
+func (r *timerNoReporterSink) ReportHistogramDuration(name string, tags map[string]string, buckets Buckets, interval time.Duration) {
 }
 func (r *timerNoReporterSink) Capabilities() Capabilities {
 	return capabilitiesReportingTaggingNoHistograms
@@ -247,8 +247,7 @@ type histogram struct {
 	name            string
 	tags            map[string]string
 	reporter        StatsReporter
-	valueBuckets    []float64
-	durationBuckets []time.Duration
+	buckets         Buckets
 	cachedHistogram CachedHistogram
 }
 
@@ -256,16 +255,14 @@ func newHistogram(
 	name string,
 	tags map[string]string,
 	r StatsReporter,
-	valueBuckets []float64,
-	durationBuckets []time.Duration,
+	buckets Buckets,
 	cachedHistogram CachedHistogram,
 ) *histogram {
 	return &histogram{
 		name:            name,
 		tags:            tags,
 		reporter:        r,
-		valueBuckets:    valueBuckets,
-		durationBuckets: durationBuckets,
+		buckets:         buckets,
 		cachedHistogram: cachedHistogram,
 	}
 }
@@ -274,7 +271,7 @@ func (h *histogram) RecordValue(value float64) {
 	if h.cachedHistogram != nil {
 		h.cachedHistogram.ReportHistogramValue(value)
 	} else {
-		h.reporter.ReportHistogramValue(h.name, h.tags, h.valueBuckets, value)
+		h.reporter.ReportHistogramValue(h.name, h.tags, h.buckets, value)
 	}
 }
 
@@ -282,7 +279,7 @@ func (h *histogram) RecordDuration(value time.Duration) {
 	if h.cachedHistogram != nil {
 		h.cachedHistogram.ReportHistogramDuration(value)
 	} else {
-		h.reporter.ReportHistogramDuration(h.name, h.tags, h.durationBuckets, value)
+		h.reporter.ReportHistogramDuration(h.name, h.tags, h.buckets, value)
 	}
 }
 
@@ -312,9 +309,9 @@ func (r nullStatsReporter) ReportGauge(name string, tags map[string]string, valu
 }
 func (r nullStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
 }
-func (r nullStatsReporter) ReportHistogramValue(name string, tags map[string]string, buckets []float64, value float64) {
+func (r nullStatsReporter) ReportHistogramValue(name string, tags map[string]string, buckets Buckets, value float64) {
 }
-func (r nullStatsReporter) ReportHistogramDuration(name string, tags map[string]string, buckets []time.Duration, interval time.Duration) {
+func (r nullStatsReporter) ReportHistogramDuration(name string, tags map[string]string, buckets Buckets, interval time.Duration) {
 }
 func (r nullStatsReporter) Capabilities() Capabilities {
 	return capabilitiesNone

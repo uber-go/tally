@@ -139,15 +139,14 @@ func (r *testStatsReporter) ReportTimer(name string, tags map[string]string, int
 func (r *testStatsReporter) AllocateHistogram(
 	name string,
 	tags map[string]string,
-	valueBuckets []float64,
-	durationBuckets []time.Duration,
+	buckets Buckets,
 ) CachedHistogram {
 	return nil
 }
 
-func (r *testStatsReporter) ReportHistogramValue(name string, tags map[string]string, buckets []float64, value float64) {
+func (r *testStatsReporter) ReportHistogramValue(name string, tags map[string]string, buckets Buckets, value float64) {
 }
-func (r *testStatsReporter) ReportHistogramDuration(name string, tags map[string]string, buckets []time.Duration, interval time.Duration) {
+func (r *testStatsReporter) ReportHistogramDuration(name string, tags map[string]string, buckets Buckets, interval time.Duration) {
 }
 
 func (r *testStatsReporter) Capabilities() Capabilities {

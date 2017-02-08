@@ -28,7 +28,8 @@ import (
 )
 
 type statsTestReporter struct {
-	last interface{}
+	last    interface{}
+	buckets Buckets
 }
 
 func (r *statsTestReporter) ReportCounter(name string, tags map[string]string, value int64) {
@@ -43,9 +44,13 @@ func (r *statsTestReporter) ReportTimer(name string, tags map[string]string, int
 	r.last = interval
 }
 
-func (r *statsTestReporter) ReportHistogramValue(name string, tags map[string]string, buckets []float64, value float64) {
+func (r *statsTestReporter) ReportHistogramValue(name string, tags map[string]string, buckets Buckets, value float64) {
+	r.last = value
+	r.buckets = buckets
 }
-func (r *statsTestReporter) ReportHistogramDuration(name string, tags map[string]string, buckets []time.Duration, interval time.Duration) {
+func (r *statsTestReporter) ReportHistogramDuration(name string, tags map[string]string, buckets Buckets, interval time.Duration) {
+	r.last = interval
+	r.buckets = buckets
 }
 
 func (r *statsTestReporter) Capabilities() Capabilities {
@@ -94,4 +99,17 @@ func TestTimer(t *testing.T) {
 
 	timer.Record(128 * time.Millisecond)
 	assert.Equal(t, 128*time.Millisecond, r.last)
+}
+
+func TestHistogram(t *testing.T) {
+	r := &statsTestReporter{}
+	h := newHistogram("h1", nil, r, DefaultBuckets, nil)
+
+	h.RecordValue(42.42)
+	assert.Equal(t, 42.42, r.last)
+	assert.Equal(t, DefaultBuckets, r.buckets)
+
+	h.RecordDuration(42 * time.Millisecond)
+	assert.Equal(t, 42*time.Millisecond, r.last)
+	assert.Equal(t, DefaultBuckets, r.buckets)
 }
