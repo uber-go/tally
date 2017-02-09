@@ -466,6 +466,10 @@ func TestTaggedSubScope(t *testing.T) {
 	scope.Counter("beep").Inc(1)
 	r.cg.Add(1)
 	tscope.Counter("boop").Inc(1)
+	r.hg.Add(1)
+	scope.Histogram("baz", LinearValueBuckets(0, 10, 10)).RecordValue(42.42)
+	r.hg.Add(1)
+	tscope.Histogram("bar", LinearValueBuckets(0, 10, 10)).RecordValue(42.42)
 
 	s.report(r)
 	tscope.report(r)
@@ -479,6 +483,15 @@ func TestTaggedSubScope(t *testing.T) {
 		"env":     "test",
 		"service": "test",
 	}, r.counters["foo.boop"].tags)
+
+	assert.EqualValues(t, 1, r.histograms["foo.baz"].valueSamples[50.0])
+	assert.EqualValues(t, ts, r.histograms["foo.baz"].tags)
+
+	assert.EqualValues(t, 1, r.histograms["foo.bar"].valueSamples[50.0])
+	assert.EqualValues(t, map[string]string{
+		"env":     "test",
+		"service": "test",
+	}, r.histograms["foo.bar"].tags)
 }
 
 func TestSnapshot(t *testing.T) {

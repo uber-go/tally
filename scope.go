@@ -375,6 +375,7 @@ func (s *scope) subscope(prefix string, tags map[string]string) Scope {
 		reporter:       s.reporter,
 		cachedReporter: s.cachedReporter,
 		baseReporter:   s.baseReporter,
+		defaultBuckets: s.defaultBuckets,
 		registry:       s.registry,
 
 		counters:   make(map[string]*counter),
