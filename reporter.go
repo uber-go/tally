@@ -53,20 +53,24 @@ type StatsReporter interface {
 		interval time.Duration,
 	)
 
-	// ReportHistogramValue reports a histogram value
-	ReportHistogramValue(
+	// ReportHistogramValueSamples reports histogram samples for a bucket
+	ReportHistogramValueSamples(
 		name string,
 		tags map[string]string,
 		buckets Buckets,
-		value float64,
+		bucketLowerBound,
+		bucketUpperBound float64,
+		samples int64,
 	)
 
-	// ReportHistogramDuration reports a histogram duration
-	ReportHistogramDuration(
+	// ReportHistogramDurationSamples reports histogram samples for a bucket
+	ReportHistogramDurationSamples(
 		name string,
 		tags map[string]string,
 		buckets Buckets,
-		interval time.Duration,
+		bucketLowerBound,
+		bucketUpperBound time.Duration,
+		samples int64,
 	)
 }
 
@@ -117,8 +121,17 @@ type CachedTimer interface {
 	ReportTimer(interval time.Duration)
 }
 
-// CachedHistogram interface for reporting an individual histogram
+// CachedHistogram interface for reporting histogram samples to buckets
 type CachedHistogram interface {
-	ReportHistogramValue(value float64)
-	ReportHistogramDuration(interval time.Duration)
+	ValueBucket(
+		bucketLowerBound, bucketUpperBound float64,
+	) CachedHistogramBucket
+	DurationBucket(
+		bucketLowerBound, bucketUpperBound time.Duration,
+	) CachedHistogramBucket
+}
+
+// CachedHistogramBucket interface for reporting histogram samples to a specific bucket
+type CachedHistogramBucket interface {
+	ReportSamples(value int64)
 }

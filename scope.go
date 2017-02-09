@@ -53,6 +53,7 @@ type scope struct {
 	cm sync.RWMutex
 	gm sync.RWMutex
 	tm sync.RWMutex
+	hm sync.RWMutex
 
 	counters   map[string]*counter
 	gauges     map[string]*gauge
@@ -161,6 +162,12 @@ func (s *scope) report(r StatsReporter) {
 
 	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
 
+	s.hm.RLock()
+	for name, histogram := range s.histograms {
+		histogram.report(s.fullyQualifiedName(name), s.tags, r)
+	}
+	s.hm.RUnlock()
+
 	r.Flush()
 }
 
@@ -178,6 +185,12 @@ func (s *scope) cachedReport(c CachedStatsReporter) {
 	s.gm.RUnlock()
 
 	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
+
+	s.hm.RLock()
+	for _, histogram := range s.histograms {
+		histogram.cachedReport()
+	}
+	s.hm.RUnlock()
 
 	c.Flush()
 }
@@ -283,11 +296,11 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 
 	key := name + b.String()
 
-	s.tm.RLock()
+	s.hm.RLock()
 	val, ok := s.histograms[key]
-	s.tm.RUnlock()
+	s.hm.RUnlock()
 	if !ok {
-		s.tm.Lock()
+		s.hm.Lock()
 		val, ok = s.histograms[key]
 		if !ok {
 			var cachedHistogram CachedHistogram
@@ -301,7 +314,7 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 			)
 			s.histograms[name] = val
 		}
-		s.tm.Unlock()
+		s.hm.Unlock()
 	}
 	return val
 }

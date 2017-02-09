@@ -144,9 +144,24 @@ func (r *testStatsReporter) AllocateHistogram(
 	return nil
 }
 
-func (r *testStatsReporter) ReportHistogramValue(name string, tags map[string]string, buckets Buckets, value float64) {
+func (r *testStatsReporter) ReportHistogramValueSamples(
+	name string,
+	tags map[string]string,
+	buckets Buckets,
+	bucketLowerBound,
+	bucketUpperBound float64,
+	samples int64,
+) {
 }
-func (r *testStatsReporter) ReportHistogramDuration(name string, tags map[string]string, buckets Buckets, interval time.Duration) {
+
+func (r *testStatsReporter) ReportHistogramDurationSamples(
+	name string,
+	tags map[string]string,
+	buckets Buckets,
+	bucketLowerBound,
+	bucketUpperBound time.Duration,
+	samples int64,
+) {
 }
 
 func (r *testStatsReporter) Capabilities() Capabilities {

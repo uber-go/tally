@@ -105,6 +105,9 @@ type Stopwatch interface {
 type Buckets interface {
 	fmt.Stringer
 
+	// Len returns the count of buckets
+	Len() int
+
 	// AsValues returns a representation of the buckets as float64s
 	AsValues() []float64
 
