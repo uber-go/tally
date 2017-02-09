@@ -30,4 +30,5 @@ func TestCapabilities(t *testing.T) {
 	r := NewReporter(nil, Options{})
 	assert.True(t, r.Capabilities().Reporting())
 	assert.False(t, r.Capabilities().Tagging())
+	assert.True(t, r.Capabilities().Histograms())
 }

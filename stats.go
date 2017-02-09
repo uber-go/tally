@@ -214,7 +214,7 @@ type timerStopwatch struct {
 }
 
 func (s timerStopwatch) Stop() {
-	if atomic.AddInt32(&s.stopped, 1) == 1 {
+	if atomic.CompareAndSwapInt32(&s.stopped, 0, 1) {
 		d := globalClock.Now().Sub(s.start)
 		s.timer.Record(d)
 	}
@@ -450,7 +450,7 @@ type histogramStopwatch struct {
 }
 
 func (s histogramStopwatch) Stop() {
-	if atomic.AddInt32(&s.stopped, 1) == 1 {
+	if atomic.CompareAndSwapInt32(&s.stopped, 0, 1) {
 		d := globalClock.Now().Sub(s.start)
 		s.histogram.RecordDuration(d)
 	}

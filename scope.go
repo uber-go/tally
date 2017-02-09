@@ -36,6 +36,24 @@ var (
 	DefaultSeparator = "."
 
 	globalClock = clock.New()
+
+	defaultScopeBuckets = Durations([]time.Duration{
+		0 * time.Millisecond,
+		10 * time.Millisecond,
+		25 * time.Millisecond,
+		50 * time.Millisecond,
+		75 * time.Millisecond,
+		100 * time.Millisecond,
+		200 * time.Millisecond,
+		300 * time.Millisecond,
+		400 * time.Millisecond,
+		500 * time.Millisecond,
+		600 * time.Millisecond,
+		800 * time.Millisecond,
+		1 * time.Second,
+		2 * time.Second,
+		5 * time.Second,
+	})
 )
 
 type scope struct {
@@ -111,8 +129,9 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		baseReporter = opts.CachedReporter
 	}
 
-	// TODO: validate that opts.DefaultValueBuckets is valid
-	// TODO: validate that opts.DefaultHistogramBuckets is valid
+	if opts.DefaultBuckets == nil || opts.DefaultBuckets.Len() < 1 {
+		opts.DefaultBuckets = defaultScopeBuckets
+	}
 
 	s := &scope{
 		separator: opts.Separator,
@@ -292,16 +311,12 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 		b = s.defaultBuckets
 	}
 
-	// TODO: verify valid buckets
-
-	key := name + b.String()
-
 	s.hm.RLock()
-	val, ok := s.histograms[key]
+	val, ok := s.histograms[name]
 	s.hm.RUnlock()
 	if !ok {
 		s.hm.Lock()
-		val, ok = s.histograms[key]
+		val, ok = s.histograms[name]
 		if !ok {
 			var cachedHistogram CachedHistogram
 			if s.cachedReporter != nil {
@@ -362,9 +377,10 @@ func (s *scope) subscope(prefix string, tags map[string]string) Scope {
 		baseReporter:   s.baseReporter,
 		registry:       s.registry,
 
-		counters: make(map[string]*counter),
-		gauges:   make(map[string]*gauge),
-		timers:   make(map[string]*timer),
+		counters:   make(map[string]*counter),
+		gauges:     make(map[string]*gauge),
+		timers:     make(map[string]*timer),
+		histograms: make(map[string]*histogram),
 	}
 
 	s.registry.subscopes[key] = subscope
