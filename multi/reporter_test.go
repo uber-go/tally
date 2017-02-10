@@ -183,6 +183,26 @@ func (r *capturingStatsReporter) ReportTimer(
 	r.timers = append(r.timers, capturedTimer{name, tags, value})
 }
 
+func (r *capturingStatsReporter) ReportHistogramValueSamples(
+	name string,
+	tags map[string]string,
+	buckets tally.Buckets,
+	bucketLowerBound,
+	bucketUpperBound float64,
+	samples int64,
+) {
+}
+
+func (r *capturingStatsReporter) ReportHistogramDurationSamples(
+	name string,
+	tags map[string]string,
+	buckets tally.Buckets,
+	bucketLowerBound,
+	bucketUpperBound time.Duration,
+	samples int64,
+) {
+}
+
 func (r *capturingStatsReporter) AllocateCounter(
 	name string,
 	tags map[string]string,
@@ -210,6 +230,14 @@ func (r *capturingStatsReporter) AllocateTimer(
 	}}
 }
 
+func (r *capturingStatsReporter) AllocateHistogram(
+	name string,
+	tags map[string]string,
+	buckets tally.Buckets,
+) tally.CachedHistogram {
+	return nil
+}
+
 func (r *capturingStatsReporter) Capabilities() tally.Capabilities {
 	r.capabilities++
 	return r
@@ -221,6 +249,10 @@ func (r *capturingStatsReporter) Reporting() bool {
 
 func (r *capturingStatsReporter) Tagging() bool {
 	return true
+}
+
+func (r *capturingStatsReporter) Histograms() bool {
+	return false
 }
 
 func (r *capturingStatsReporter) Flush() {

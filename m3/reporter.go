@@ -317,12 +317,24 @@ func (r *reporter) AllocateHistogram(
 }
 
 func (r *reporter) valueBucketString(v float64) string {
+	if v == math.MaxFloat64 {
+		return "infinity"
+	}
+	if v == -math.MaxFloat64 {
+		return "-infinity"
+	}
 	return fmt.Sprintf(r.bucketValFmt, v)
 }
 
 func (r *reporter) durationBucketString(d time.Duration) string {
 	if d == 0 {
 		return "0"
+	}
+	if d == time.Duration(math.MaxInt64) {
+		return "infinity"
+	}
+	if d == time.Duration(math.MinInt64) {
+		return "-infinity"
 	}
 	return d.String()
 }

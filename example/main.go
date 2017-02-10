@@ -45,6 +45,30 @@ func (r *printStatsReporter) ReportTimer(name string, tags map[string]string, in
 	fmt.Printf("timer %s %s\n", name, interval.String())
 }
 
+func (r *printStatsReporter) ReportHistogramValueSamples(
+	name string,
+	tags map[string]string,
+	buckets tally.Buckets,
+	bucketLowerBound,
+	bucketUpperBound float64,
+	samples int64,
+) {
+	fmt.Printf("histogram %s bucket lower %f upper %f samples %d\n",
+		name, bucketLowerBound, bucketUpperBound, samples)
+}
+
+func (r *printStatsReporter) ReportHistogramDurationSamples(
+	name string,
+	tags map[string]string,
+	buckets tally.Buckets,
+	bucketLowerBound,
+	bucketUpperBound time.Duration,
+	samples int64,
+) {
+	fmt.Printf("histogram %s bucket lower %s upper %s samples %d\n",
+		name, bucketLowerBound.String(), bucketUpperBound.String(), samples)
+}
+
 func (r *printStatsReporter) Capabilities() tally.Capabilities {
 	return r
 }
@@ -57,13 +81,19 @@ func (r *printStatsReporter) Tagging() bool {
 	return false
 }
 
+func (r *printStatsReporter) Histograms() bool {
+	return true
+}
+
 func (r *printStatsReporter) Flush() {
 	fmt.Printf("flush\n")
 }
 
 func main() {
 	reporter := newPrintStatsReporter()
-	rootScope, closer := tally.NewRootScope("", nil, reporter, time.Second, tally.DefaultSeparator)
+	rootScope, closer := tally.NewRootScope(tally.ScopeOptions{
+		Reporter: reporter,
+	}, time.Second)
 	defer closer.Close()
 	subScope := rootScope.SubScope("requests")
 
