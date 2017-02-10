@@ -22,6 +22,7 @@ package tally
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"time"
 )
@@ -128,6 +129,64 @@ func (v Durations) AsValues() []float64 {
 func (v Durations) AsDurations() []time.Duration {
 	sort.Sort(v) // Always sort first
 	return []time.Duration(v)
+}
+
+// BucketPairs creates a set of bucket pairs from a set
+// of buckets describing the lower and upper bounds for
+// each derived bucket.
+func BucketPairs(buckets Buckets) []BucketPair {
+	var (
+		asValueBuckets    = buckets.AsValues()
+		asDurationBuckets = buckets.AsDurations()
+	)
+	var pairs []BucketPair
+	if buckets.Len() > 0 {
+		pairs = append(pairs, bucketPair{
+			-math.MaxFloat64, asValueBuckets[0],
+			time.Duration(math.MinInt64), asDurationBuckets[0]})
+
+		prevValueBucket, prevDurationBucket :=
+			asValueBuckets[0], asDurationBuckets[0]
+		for i := 1; i < buckets.Len(); i++ {
+			pairs = append(pairs, bucketPair{
+				prevValueBucket, asValueBuckets[i],
+				prevDurationBucket, asDurationBuckets[i]})
+			prevValueBucket, prevDurationBucket =
+				asValueBuckets[i], asDurationBuckets[i]
+		}
+
+		pairs = append(pairs, bucketPair{
+			prevValueBucket, math.MaxFloat64,
+			prevDurationBucket, time.Duration(math.MaxInt64)})
+	} else {
+		pairs = append(pairs, bucketPair{
+			-math.MaxFloat64, math.MaxFloat64,
+			time.Duration(math.MinInt64), time.Duration(math.MaxInt64)})
+	}
+	return pairs
+}
+
+type bucketPair struct {
+	lowerBoundValue    float64
+	upperBoundValue    float64
+	lowerBoundDuration time.Duration
+	upperBoundDuration time.Duration
+}
+
+func (p bucketPair) LowerBoundValue() float64 {
+	return p.lowerBoundValue
+}
+
+func (p bucketPair) UpperBoundValue() float64 {
+	return p.upperBoundValue
+}
+
+func (p bucketPair) LowerBoundDuration() time.Duration {
+	return p.lowerBoundDuration
+}
+
+func (p bucketPair) UpperBoundDuration() time.Duration {
+	return p.upperBoundDuration
 }
 
 // LinearValueBuckets creates a set of linear value buckets.

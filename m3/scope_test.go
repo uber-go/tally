@@ -51,9 +51,11 @@ func newTestReporterScope(
 	})
 	require.NoError(t, err)
 
-	scope, closer := tally.NewCachedRootScope(
-		scopePrefix, scopeTags, r, shortInterval,
-		tally.DefaultSeparator)
+	scope, closer := tally.NewRootScope(tally.ScopeOptions{
+		Prefix:         scopePrefix,
+		Tags:           scopeTags,
+		CachedReporter: r,
+	}, shortInterval)
 
 	return r, scope, func() {
 		assert.NoError(t, closer.Close())
@@ -163,13 +165,10 @@ func BenchmarkScopeReportTimer(b *testing.B) {
 		return
 	}
 
-	scope, closer := tally.NewCachedRootScope(
-		"bench",
-		nil,
-		backend,
-		1*time.Second,
-		tally.DefaultSeparator,
-	)
+	scope, closer := tally.NewRootScope(tally.ScopeOptions{
+		Prefix:         "bench",
+		CachedReporter: backend,
+	}, 1*time.Second)
 
 	perEndpointScope := scope.Tagged(
 		map[string]string{

@@ -306,39 +306,12 @@ func newHistogram(
 		reporter:      reporter,
 		specification: buckets,
 	}
-
-	var (
-		asValueBuckets    = buckets.AsValues()
-		asDurationBuckets = buckets.AsDurations()
-	)
-	if buckets.Len() > 0 {
+	for _, pair := range BucketPairs(buckets) {
 		h.addBucket(newHistogramBucket(h,
-			-math.MaxFloat64, asValueBuckets[0],
-			time.Duration(math.MinInt64), asDurationBuckets[0],
-			cachedHistogram))
-
-		prevValueBucket, prevDurationBucket :=
-			asValueBuckets[0], asDurationBuckets[0]
-		for i := 1; i < buckets.Len(); i++ {
-			h.addBucket(newHistogramBucket(h,
-				prevValueBucket, asValueBuckets[i],
-				prevDurationBucket, asDurationBuckets[i],
-				cachedHistogram))
-			prevValueBucket, prevDurationBucket =
-				asValueBuckets[i], asDurationBuckets[i]
-		}
-
-		h.addBucket(newHistogramBucket(h,
-			prevValueBucket, math.MaxFloat64,
-			prevDurationBucket, time.Duration(math.MaxInt64),
-			cachedHistogram))
-	} else {
-		h.addBucket(newHistogramBucket(h,
-			-math.MaxFloat64, math.MaxFloat64,
-			time.Duration(math.MinInt64), time.Duration(math.MaxInt64),
+			pair.LowerBoundValue(), pair.UpperBoundValue(),
+			pair.LowerBoundDuration(), pair.UpperBoundDuration(),
 			cachedHistogram))
 	}
-
 	return h
 }
 

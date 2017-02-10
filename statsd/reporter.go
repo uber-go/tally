@@ -31,10 +31,10 @@ import (
 )
 
 const (
-	// DefaultHistogramBucketPrecision is the default
+	// DefaultHistogramBucketNamePrecision is the default
 	// precision to use when formatting the metric name
 	// with the histogram bucket bound values.
-	DefaultHistogramBucketPrecision = uint(6)
+	DefaultHistogramBucketNamePrecision = uint(6)
 )
 
 type cactusStatsReporter struct {
@@ -49,10 +49,10 @@ type Options struct {
 	// do not set this value it will be set to 1.
 	SampleRate float32
 
-	// HistogramBucketPrecision is the precision to use when
+	// HistogramBucketNamePrecision is the precision to use when
 	// formatting the metric name with the histogram bucket bound values.
 	// By default this will be set to the const DefaultHistogramBucketPrecision.
-	HistogramBucketPrecision uint
+	HistogramBucketNamePrecision uint
 }
 
 // NewReporter wraps a statsd.Statter for use with tally. Use either
@@ -62,13 +62,13 @@ func NewReporter(statsd statsd.Statter, opts Options) tally.StatsReporter {
 	if opts.SampleRate == nilSampleRate {
 		opts.SampleRate = 1.0
 	}
-	if opts.HistogramBucketPrecision == 0 {
-		opts.HistogramBucketPrecision = DefaultHistogramBucketPrecision
+	if opts.HistogramBucketNamePrecision == 0 {
+		opts.HistogramBucketNamePrecision = DefaultHistogramBucketNamePrecision
 	}
 	return &cactusStatsReporter{
 		statter:    statsd,
 		sampleRate: opts.SampleRate,
-		bucketFmt:  "%." + strconv.Itoa(int(opts.HistogramBucketPrecision)) + "f",
+		bucketFmt:  "%." + strconv.Itoa(int(opts.HistogramBucketNamePrecision)) + "f",
 	}
 }
 

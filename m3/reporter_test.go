@@ -71,7 +71,7 @@ func TestReporter(t *testing.T) {
 		}
 		r, err := NewReporter(Options{
 			HostPorts:          []string{server.Addr},
-			Service:            "testService",
+			Service:            "test-service",
 			CommonTags:         commonTags,
 			IncludeHost:        includeHost,
 			Protocol:           protocol,
@@ -105,7 +105,7 @@ func TestReporter(t *testing.T) {
 			require.Equal(t, len(commonTags)+1, len(batch.GetCommonTags()))
 			for tag := range batch.GetCommonTags() {
 				if tag.GetTagName() == ServiceTag {
-					require.Equal(t, "testService", tag.GetTagValue())
+					require.Equal(t, "test-service", tag.GetTagValue())
 				} else {
 					require.Equal(t, commonTags[tag.GetTagName()], tag.GetTagValue())
 				}
@@ -161,7 +161,7 @@ func TestMultiReporter(t *testing.T) {
 	}
 	r, err := NewReporter(Options{
 		HostPorts:  dests,
-		Service:    "testService",
+		Service:    "test-service",
 		CommonTags: commonTags,
 	})
 	require.NoError(t, err)
@@ -180,7 +180,7 @@ func TestNewReporterErrors(t *testing.T) {
 	// Test freeBytes (maxPacketSizeBytes - numOverheadBytes) is negative
 	_, err = NewReporter(Options{
 		HostPorts:          []string{"127.0.0.1"},
-		Service:            "testService",
+		Service:            "test-service",
 		MaxQueueSize:       10,
 		MaxPacketSizeBytes: 2 << 5,
 	})
@@ -188,7 +188,7 @@ func TestNewReporterErrors(t *testing.T) {
 	// Test invalid addr
 	_, err = NewReporter(Options{
 		HostPorts: []string{"fakeAddress"},
-		Service:   "testService",
+		Service:   "test-service",
 	})
 	assert.Error(t, err)
 }
@@ -203,7 +203,7 @@ func TestReporterFinalFlush(t *testing.T) {
 
 	r, err := NewReporter(Options{
 		HostPorts:          []string{server.Addr},
-		Service:            "testService",
+		Service:            "test-service",
 		CommonTags:         defaultCommonTags,
 		MaxQueueSize:       queueSize,
 		MaxPacketSizeBytes: maxPacketSize,
@@ -222,6 +222,88 @@ func TestReporterFinalFlush(t *testing.T) {
 	require.Equal(t, 1, len(server.Service.getBatches()[0].GetMetrics()))
 }
 
+func TestReporterHistogram(t *testing.T) {
+	var wg sync.WaitGroup
+	server := newFakeM3Server(t, &wg, true, Compact)
+	go server.Serve()
+	defer server.Close()
+
+	r, err := NewReporter(Options{
+		HostPorts:          []string{server.Addr},
+		Service:            "test-service",
+		CommonTags:         defaultCommonTags,
+		MaxQueueSize:       queueSize,
+		MaxPacketSizeBytes: maxPacketSize,
+		Interval:           0,
+	})
+	require.NoError(t, err)
+
+	wg.Add(1)
+
+	h := r.AllocateHistogram("my-histogram", map[string]string{
+		"foo": "bar",
+	}, tally.Durations([]time.Duration{
+		0 * time.Millisecond,
+		25 * time.Millisecond,
+		50 * time.Millisecond,
+		75 * time.Millisecond,
+		100 * time.Millisecond,
+	}))
+	b := h.DurationBucket(0*time.Millisecond, 25*time.Millisecond)
+	b.ReportSamples(7)
+	b = h.DurationBucket(50*time.Millisecond, 75*time.Millisecond)
+	b.ReportSamples(3)
+	r.Close()
+
+	wg.Wait()
+
+	require.Equal(t, 1, len(server.Service.getBatches()))
+	require.NotNil(t, server.Service.getBatches()[0])
+	require.Equal(t, 2, len(server.Service.getBatches()[0].GetMetrics()))
+
+	// Verify first bucket
+	counter := server.Service.getBatches()[0].GetMetrics()[0]
+	require.Equal(t, "my-histogram", counter.GetName())
+	require.True(t, counter.IsSetTags())
+	require.Equal(t, 3, len(counter.GetTags()))
+	for tag := range counter.GetTags() {
+		require.Equal(t, map[string]string{
+			"foo":      "bar",
+			"bucketid": "1",
+			"bucket":   "0-25ms",
+		}[tag.GetTagName()], tag.GetTagValue())
+	}
+	require.True(t, counter.IsSetMetricValue())
+	val := counter.GetMetricValue()
+	require.True(t, val.IsSetCount())
+	require.False(t, val.IsSetGauge())
+	require.False(t, val.IsSetTimer())
+	count := val.GetCount()
+	require.True(t, count.IsSetI64Value())
+	require.EqualValues(t, int64(7), count.GetI64Value())
+
+	// Verify second bucket
+	counter = server.Service.getBatches()[0].GetMetrics()[1]
+	require.Equal(t, "my-histogram", counter.GetName())
+	require.True(t, counter.IsSetTags())
+	require.Equal(t, 3, len(counter.GetTags()))
+	for tag := range counter.GetTags() {
+		require.Equal(t, map[string]string{
+			"foo":      "bar",
+			"bucketid": "3",
+			"bucket":   "50ms-75ms",
+		}[tag.GetTagName()], tag.GetTagValue())
+	}
+	require.True(t, counter.IsSetMetricValue())
+	val = counter.GetMetricValue()
+	require.True(t, val.IsSetCount())
+	require.False(t, val.IsSetGauge())
+	require.False(t, val.IsSetTimer())
+	count = val.GetCount()
+	require.True(t, count.IsSetI64Value())
+	require.EqualValues(t, int64(3), count.GetI64Value())
+}
+
 func TestBatchSizes(t *testing.T) {
 	server := newSimpleServer(t)
 	go server.serve()
@@ -234,7 +316,7 @@ func TestBatchSizes(t *testing.T) {
 	maxPacketSize := int32(1440)
 	r, err := NewReporter(Options{
 		HostPorts:          []string{server.addr()},
-		Service:            "testService",
+		Service:            "test-service",
 		CommonTags:         commonTags,
 		MaxQueueSize:       10000,
 		MaxPacketSizeBytes: maxPacketSize,
@@ -300,7 +382,7 @@ func TestReporterSpecifyService(t *testing.T) {
 	}
 	r, err := NewReporter(Options{
 		HostPorts:    []string{"127.0.0.1:1000"},
-		Service:      "testService",
+		Service:      "test-service",
 		CommonTags:   commonTags,
 		IncludeHost:  includeHost,
 		MaxQueueSize: 10, MaxPacketSizeBytes: 100,
@@ -332,7 +414,7 @@ func TestIncludeHost(t *testing.T) {
 	commonTags := map[string]string{"env": "test"}
 	r, err := NewReporter(Options{
 		HostPorts:   []string{server.Addr},
-		Service:     "testService",
+		Service:     "test-service",
 		CommonTags:  commonTags,
 		IncludeHost: false,
 	})
@@ -344,7 +426,7 @@ func TestIncludeHost(t *testing.T) {
 
 	r, err = NewReporter(Options{
 		HostPorts:   []string{server.Addr},
-		Service:     "testService",
+		Service:     "test-service",
 		CommonTags:  commonTags,
 		IncludeHost: true,
 	})
@@ -358,7 +440,7 @@ func TestIncludeHost(t *testing.T) {
 func TestReporterHasReportingAndTaggingCapability(t *testing.T) {
 	r, err := NewReporter(Options{
 		HostPorts:  []string{"127.0.0.1:9052"},
-		Service:    "testService",
+		Service:    "test-service",
 		CommonTags: defaultCommonTags,
 	})
 	require.Nil(t, err)

@@ -115,6 +115,15 @@ type Buckets interface {
 	AsDurations() []time.Duration
 }
 
+// BucketPair describes the lower and upper bounds
+// for a derived bucket from a buckets set.
+type BucketPair interface {
+	LowerBoundValue() float64
+	UpperBoundValue() float64
+	LowerBoundDuration() time.Duration
+	UpperBoundDuration() time.Duration
+}
+
 // Capabilities is a description of metrics reporting capabilities.
 type Capabilities interface {
 	// Reporting returns whether the reporter has the ability to actively report.
