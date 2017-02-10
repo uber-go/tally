@@ -26,10 +26,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/uber-go/tally"
+
 	prom "github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
-	"github.com/uber-go/tally"
 )
 
 const (

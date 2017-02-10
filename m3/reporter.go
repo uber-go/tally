@@ -26,6 +26,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -34,8 +35,6 @@ import (
 	"github.com/uber-go/tally/m3/customtransports"
 	m3thrift "github.com/uber-go/tally/m3/thrift"
 	"github.com/uber-go/tally/m3/thriftudp"
-
-	"sort"
 
 	"github.com/apache/thrift/lib/go/thrift"
 )
@@ -65,12 +64,13 @@ const (
 	// precision to use when formatting the metric tag
 	// with the histogram bucket bound values.
 	DefaultHistogramBucketTagPrecision = uint(6)
-	// HistogramBucketID is the histogram bucket ID tag name
+	// HistogramBucketIDTagName is the histogram bucket ID tag name
 	HistogramBucketIDTagName = "bucketid"
 	// HistogramBucketNameTagName is the histogram bucket name tag name
 	HistogramBucketNameTagName = "bucket"
 
-	emitMetricBatchOverhead = 19
+	emitMetricBatchOverhead    = 19
+	minMetricBucketIDTagLength = 4
 )
 
 // Initialize max vars in init function to avoid lint error.
@@ -279,9 +279,11 @@ func (r *reporter) AllocateHistogram(
 		cachedValueBuckets    []cachedMetric
 		cachedDurationBuckets []cachedMetric
 	)
-	bucketLenStr := strconv.Itoa(buckets.Len())
-	bucketLenStrLen := strconv.Itoa(len(bucketLenStr))
-	bucketIDFmt := "%0" + bucketLenStrLen + "d"
+	bucketIDLen := len(strconv.Itoa(buckets.Len()))
+	bucketIDLen = int(math.Max(float64(bucketIDLen),
+		float64(minMetricBucketIDTagLength)))
+	bucketIDLenStr := strconv.Itoa(bucketIDLen)
+	bucketIDFmt := "%0" + bucketIDLenStr + "d"
 	for i := 0; i < buckets.Len(); i++ {
 		lookupByDuration[i] = int(durations[i])
 	}

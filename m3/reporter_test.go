@@ -269,7 +269,7 @@ func TestReporterHistogram(t *testing.T) {
 	for tag := range counter.GetTags() {
 		require.Equal(t, map[string]string{
 			"foo":      "bar",
-			"bucketid": "1",
+			"bucketid": "0001",
 			"bucket":   "0-25ms",
 		}[tag.GetTagName()], tag.GetTagValue())
 	}
@@ -290,7 +290,7 @@ func TestReporterHistogram(t *testing.T) {
 	for tag := range counter.GetTags() {
 		require.Equal(t, map[string]string{
 			"foo":      "bar",
-			"bucketid": "3",
+			"bucketid": "0003",
 			"bucket":   "50ms-75ms",
 		}[tag.GetTagName()], tag.GetTagValue())
 	}
