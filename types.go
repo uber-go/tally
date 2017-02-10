@@ -40,8 +40,8 @@ type Scope interface {
 	// Histogram returns the Histogram object corresponding to the name.
 	// To use default value and duration buckets configured for the scope
 	// simply pass tally.DefaultBuckets.
-	// You can use tally.Values(x, y, ...) for value buckets.
-	// You can use tally.Durations(x, y, ...) for duration buckets.
+	// You can use tally.ValueBuckets(x, y, ...) for value buckets.
+	// You can use tally.DurationBuckets(x, y, ...) for duration buckets.
 	// You can use tally.LinearValueBuckets(start, width, count) for linear values.
 	// You can use tally.LinearDurationBuckets(start, width, count) for linear durations.
 	// You can use tally.ExponentialValueBuckets(start, factor, count) for exponential values.

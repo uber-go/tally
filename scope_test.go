@@ -549,13 +549,13 @@ func TestScopeDefaultBuckets(t *testing.T) {
 	r := newTestStatsReporter()
 
 	root, _ := NewRootScope(ScopeOptions{
-		DefaultBuckets: Durations([]time.Duration{
+		DefaultBuckets: DurationBuckets{
 			0 * time.Millisecond,
 			30 * time.Millisecond,
 			60 * time.Millisecond,
 			90 * time.Millisecond,
 			120 * time.Millisecond,
-		}),
+		},
 		Reporter: r,
 	}, 0)
 	s := root.(*scope)

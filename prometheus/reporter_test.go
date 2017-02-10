@@ -262,14 +262,14 @@ func TestHistogramBucketValues(t *testing.T) {
 		Registerer: registry,
 	})
 
-	buckets := tally.Durations([]time.Duration{
+	buckets := tally.DurationBuckets{
 		0 * time.Millisecond,
 		50 * time.Millisecond,
 		250 * time.Millisecond,
 		1000 * time.Millisecond,
 		2500 * time.Millisecond,
 		10000 * time.Millisecond,
-	})
+	}
 
 	name := "test_histogram"
 	tags := map[string]string{

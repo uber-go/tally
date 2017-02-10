@@ -37,7 +37,7 @@ var (
 
 	globalClock = clock.New()
 
-	defaultScopeBuckets = Durations([]time.Duration{
+	defaultScopeBuckets = DurationBuckets{
 		0 * time.Millisecond,
 		10 * time.Millisecond,
 		25 * time.Millisecond,
@@ -53,7 +53,7 @@ var (
 		1 * time.Second,
 		2 * time.Second,
 		5 * time.Second,
-	})
+	}
 )
 
 type scope struct {

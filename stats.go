@@ -277,7 +277,7 @@ func (r *timerNoReporterSink) Flush() {
 }
 
 type histogram struct {
-	htype            uint32
+	htype            histogramType
 	name             string
 	tags             map[string]string
 	reporter         StatsReporter
@@ -287,10 +287,11 @@ type histogram struct {
 	lookupByDuration []int
 }
 
+type histogramType int
+
 const (
-	undeclaredHistogramType = uint32(0)
-	valueHistogramType      = uint32(1)
-	durationHistogramType   = uint32(2)
+	valueHistogramType histogramType = iota
+	durationHistogramType
 )
 
 func newHistogram(
@@ -300,7 +301,12 @@ func newHistogram(
 	buckets Buckets,
 	cachedHistogram CachedHistogram,
 ) *histogram {
+	htype := valueHistogramType
+	if _, ok := buckets.(DurationBuckets); ok {
+		htype = durationHistogramType
+	}
 	h := &histogram{
+		htype:         htype,
 		name:          name,
 		tags:          tags,
 		reporter:      reporter,
@@ -322,13 +328,12 @@ func (h *histogram) addBucket(b histogramBucket) {
 }
 
 func (h *histogram) report(name string, tags map[string]string, r StatsReporter) {
-	htype := atomic.LoadUint32(&h.htype)
 	for i := range h.buckets {
 		samples := h.buckets[i].samples.value()
 		if samples == 0 {
 			continue
 		}
-		switch htype {
+		switch h.htype {
 		case valueHistogramType:
 			r.ReportHistogramValueSamples(name, tags, h.specification,
 				h.buckets[i].valueLowerBound, h.buckets[i].valueUpperBound,
@@ -342,13 +347,12 @@ func (h *histogram) report(name string, tags map[string]string, r StatsReporter)
 }
 
 func (h *histogram) cachedReport() {
-	htype := atomic.LoadUint32(&h.htype)
 	for i := range h.buckets {
 		samples := h.buckets[i].samples.value()
 		if samples == 0 {
 			continue
 		}
-		switch htype {
+		switch h.htype {
 		case valueHistogramType:
 			h.buckets[i].cachedValueBucket.ReportSamples(samples)
 		case durationHistogramType:
@@ -360,19 +364,11 @@ func (h *histogram) cachedReport() {
 func (h *histogram) RecordValue(value float64) {
 	idx := sort.SearchFloat64s(h.lookupByValue, value)
 	h.buckets[idx].samples.Inc(1)
-	h.declare(valueHistogramType)
 }
 
 func (h *histogram) RecordDuration(value time.Duration) {
 	idx := sort.SearchInts(h.lookupByDuration, int(value))
 	h.buckets[idx].samples.Inc(1)
-	h.declare(durationHistogramType)
-}
-
-func (h *histogram) declare(htype uint32) {
-	if atomic.LoadUint32(&h.htype) == undeclaredHistogramType {
-		atomic.StoreUint32(&h.htype, htype) // First declaration wins
-	}
 }
 
 func (h *histogram) Start() Stopwatch {

@@ -26,7 +26,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -273,20 +272,14 @@ func (r *reporter) AllocateHistogram(
 	buckets tally.Buckets,
 ) tally.CachedHistogram {
 	var (
-		durations             = buckets.AsDurations()
-		lookupByValue         = buckets.AsValues()
-		lookupByDuration      = make([]int, buckets.Len())
-		cachedValueBuckets    []cachedMetric
-		cachedDurationBuckets []cachedMetric
+		cachedValueBuckets    []cachedHistogramBucket
+		cachedDurationBuckets []cachedHistogramBucket
 	)
 	bucketIDLen := len(strconv.Itoa(buckets.Len()))
 	bucketIDLen = int(math.Max(float64(bucketIDLen),
 		float64(minMetricBucketIDTagLength)))
 	bucketIDLenStr := strconv.Itoa(bucketIDLen)
 	bucketIDFmt := "%0" + bucketIDLenStr + "d"
-	for i := 0; i < buckets.Len(); i++ {
-		lookupByDuration[i] = int(durations[i])
-	}
 	for i, pair := range tally.BucketPairs(buckets) {
 		valueTags, durationTags :=
 			make(map[string]string), make(map[string]string)
@@ -303,7 +296,9 @@ func (r *reporter) AllocateHistogram(
 			r.valueBucketString(pair.UpperBoundValue()))
 
 		cachedValueBuckets = append(cachedValueBuckets,
-			r.allocateCounter(name, valueTags))
+			cachedHistogramBucket{pair.UpperBoundValue(),
+				pair.UpperBoundDuration(),
+				r.allocateCounter(name, valueTags)})
 
 		durationTags[idTagName] = fmt.Sprintf(bucketIDFmt, i)
 		durationTags[nameTagName] = fmt.Sprintf("%s-%s",
@@ -311,10 +306,11 @@ func (r *reporter) AllocateHistogram(
 			r.durationBucketString(pair.UpperBoundDuration()))
 
 		cachedDurationBuckets = append(cachedDurationBuckets,
-			r.allocateCounter(name, durationTags))
+			cachedHistogramBucket{pair.UpperBoundValue(),
+				pair.UpperBoundDuration(),
+				r.allocateCounter(name, durationTags)})
 	}
 	return cachedHistogram{r, name, tags, buckets,
-		lookupByValue, lookupByDuration,
 		cachedValueBuckets, cachedDurationBuckets}
 }
 
@@ -545,29 +541,56 @@ func (c cachedMetric) ReportSamples(value int64) {
 	c.reporter.reportCopyMetric(c.metric, c.size, counterType, value, 0)
 }
 
+type noopMetric struct {
+}
+
+func (c noopMetric) ReportCount(value int64) {
+}
+
+func (c noopMetric) ReportGauge(value float64) {
+}
+
+func (c noopMetric) ReportTimer(interval time.Duration) {
+}
+
+func (c noopMetric) ReportSamples(value int64) {
+}
+
 type cachedHistogram struct {
 	r                     *reporter
 	name                  string
 	tags                  map[string]string
 	buckets               tally.Buckets
-	lookupByValue         []float64
-	lookupByDuration      []int
-	cachedValueBuckets    []cachedMetric
-	cachedDurationBuckets []cachedMetric
+	cachedValueBuckets    []cachedHistogramBucket
+	cachedDurationBuckets []cachedHistogramBucket
+}
+
+type cachedHistogramBucket struct {
+	valueUpperBound    float64
+	durationUpperBound time.Duration
+	metric             cachedMetric
 }
 
 func (h cachedHistogram) ValueBucket(
 	bucketLowerBound, bucketUpperBound float64,
 ) tally.CachedHistogramBucket {
-	idx := sort.SearchFloat64s(h.lookupByValue, bucketUpperBound)
-	return h.cachedValueBuckets[idx]
+	for _, b := range h.cachedValueBuckets {
+		if b.valueUpperBound >= bucketUpperBound {
+			return b.metric
+		}
+	}
+	return noopMetric{}
 }
 
 func (h cachedHistogram) DurationBucket(
 	bucketLowerBound, bucketUpperBound time.Duration,
 ) tally.CachedHistogramBucket {
-	idx := sort.SearchInts(h.lookupByDuration, int(bucketUpperBound))
-	return h.cachedDurationBuckets[idx]
+	for _, b := range h.cachedDurationBuckets {
+		if b.durationUpperBound >= bucketUpperBound {
+			return b.metric
+		}
+	}
+	return noopMetric{}
 }
 
 type sizedMetric struct {

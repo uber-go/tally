@@ -46,25 +46,25 @@ func (v Defaults) AsValues() []float64 { return nil }
 // AsDurations implements Buckets.
 func (v Defaults) AsDurations() []time.Duration { return nil }
 
-// Values is a set of float64 values that implements Buckets.
-type Values []float64
+// ValueBuckets is a set of float64 values that implements Buckets.
+type ValueBuckets []float64
 
 // Implements sort.Interface
-func (v Values) Len() int {
+func (v ValueBuckets) Len() int {
 	return len(v)
 }
 
 // Implements sort.Interface
-func (v Values) Swap(i, j int) {
+func (v ValueBuckets) Swap(i, j int) {
 	v[i], v[j] = v[j], v[i]
 }
 
 // Implements sort.Interface
-func (v Values) Less(i, j int) bool {
+func (v ValueBuckets) Less(i, j int) bool {
 	return v[i] < v[j]
 }
 
-func (v Values) String() string {
+func (v ValueBuckets) String() string {
 	values := make([]string, len(v))
 	for i := range values {
 		values[i] = fmt.Sprintf("%f", v[i])
@@ -73,13 +73,13 @@ func (v Values) String() string {
 }
 
 // AsValues implements Buckets.
-func (v Values) AsValues() []float64 {
+func (v ValueBuckets) AsValues() []float64 {
 	sort.Sort(v) // Always sort first
 	return []float64(v)
 }
 
 // AsDurations implements Buckets.
-func (v Values) AsDurations() []time.Duration {
+func (v ValueBuckets) AsDurations() []time.Duration {
 	sort.Sort(v) // Always sort first
 	values := make([]time.Duration, len(v))
 	for i := range values {
@@ -88,25 +88,25 @@ func (v Values) AsDurations() []time.Duration {
 	return values
 }
 
-// Durations is a set of float64 values that implements Buckets.
-type Durations []time.Duration
+// DurationBuckets is a set of time.Duration values that implements Buckets.
+type DurationBuckets []time.Duration
 
 // Implements sort.Interface
-func (v Durations) Len() int {
+func (v DurationBuckets) Len() int {
 	return len(v)
 }
 
 // Implements sort.Interface
-func (v Durations) Swap(i, j int) {
+func (v DurationBuckets) Swap(i, j int) {
 	v[i], v[j] = v[j], v[i]
 }
 
 // Implements sort.Interface
-func (v Durations) Less(i, j int) bool {
+func (v DurationBuckets) Less(i, j int) bool {
 	return v[i] < v[j]
 }
 
-func (v Durations) String() string {
+func (v DurationBuckets) String() string {
 	sort.Sort(v) // Always sort first
 	values := make([]string, len(v))
 	for i := range values {
@@ -116,7 +116,7 @@ func (v Durations) String() string {
 }
 
 // AsValues implements Buckets.
-func (v Durations) AsValues() []float64 {
+func (v DurationBuckets) AsValues() []float64 {
 	sort.Sort(v) // Always sort first
 	values := make([]float64, len(v))
 	for i := range values {
@@ -126,7 +126,7 @@ func (v Durations) AsValues() []float64 {
 }
 
 // AsDurations implements Buckets.
-func (v Durations) AsDurations() []time.Duration {
+func (v DurationBuckets) AsDurations() []time.Duration {
 	sort.Sort(v) // Always sort first
 	return []time.Duration(v)
 }
@@ -190,7 +190,7 @@ func (p bucketPair) UpperBoundDuration() time.Duration {
 }
 
 // LinearValueBuckets creates a set of linear value buckets.
-func LinearValueBuckets(start, width float64, count int) Values {
+func LinearValueBuckets(start, width float64, count int) ValueBuckets {
 	if count <= 0 {
 		panic("count needs to be > 0")
 	}
@@ -198,11 +198,11 @@ func LinearValueBuckets(start, width float64, count int) Values {
 	for i := range buckets {
 		buckets[i] = start + (float64(i) * width)
 	}
-	return Values(buckets)
+	return ValueBuckets(buckets)
 }
 
 // LinearDurationBuckets creates a set of linear duration buckets.
-func LinearDurationBuckets(start, width time.Duration, count int) Durations {
+func LinearDurationBuckets(start, width time.Duration, count int) DurationBuckets {
 	if count <= 0 {
 		panic("count needs to be > 0")
 	}
@@ -210,11 +210,11 @@ func LinearDurationBuckets(start, width time.Duration, count int) Durations {
 	for i := range buckets {
 		buckets[i] = start + (time.Duration(i) * width)
 	}
-	return Durations(buckets)
+	return DurationBuckets(buckets)
 }
 
 // ExponentialValueBuckets creates a set of exponential value buckets.
-func ExponentialValueBuckets(start, factor float64, count int) Values {
+func ExponentialValueBuckets(start, factor float64, count int) ValueBuckets {
 	if count <= 0 {
 		panic("count needs to be > 0")
 	}
@@ -230,11 +230,11 @@ func ExponentialValueBuckets(start, factor float64, count int) Values {
 		buckets[i] = curr
 		curr *= factor
 	}
-	return Values(buckets)
+	return ValueBuckets(buckets)
 }
 
 // ExponentialDurationBuckets creates a set of exponential duration buckets.
-func ExponentialDurationBuckets(start time.Duration, factor float64, count int) Durations {
+func ExponentialDurationBuckets(start time.Duration, factor float64, count int) DurationBuckets {
 	if count <= 0 {
 		panic("count needs to be > 0")
 	}
@@ -250,5 +250,5 @@ func ExponentialDurationBuckets(start time.Duration, factor float64, count int) 
 		buckets[i] = curr
 		curr = time.Duration(float64(curr) * factor)
 	}
-	return Durations(buckets)
+	return DurationBuckets(buckets)
 }

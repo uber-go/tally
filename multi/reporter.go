@@ -247,7 +247,7 @@ func (r multiBaseReporters) Capabilities() tally.Capabilities {
 	for _, r := range r {
 		c.reporting = c.reporting && r.Capabilities().Reporting()
 		c.tagging = c.tagging && r.Capabilities().Tagging()
-		c.histograms = c.tagging && r.Capabilities().Histograms()
+		c.histograms = c.histograms && r.Capabilities().Histograms()
 	}
 	return c
 }

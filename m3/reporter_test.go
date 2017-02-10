@@ -242,13 +242,13 @@ func TestReporterHistogram(t *testing.T) {
 
 	h := r.AllocateHistogram("my-histogram", map[string]string{
 		"foo": "bar",
-	}, tally.Durations([]time.Duration{
+	}, tally.DurationBuckets{
 		0 * time.Millisecond,
 		25 * time.Millisecond,
 		50 * time.Millisecond,
 		75 * time.Millisecond,
 		100 * time.Millisecond,
-	}))
+	})
 	b := h.DurationBucket(0*time.Millisecond, 25*time.Millisecond)
 	b.ReportSamples(7)
 	b = h.DurationBucket(50*time.Millisecond, 75*time.Millisecond)
