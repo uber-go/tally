@@ -167,7 +167,7 @@ func TestMultiReporter(t *testing.T) {
 	require.NoError(t, err)
 	defer r.Close()
 
-	reporter, ok := r.(*reporter)
+	reporter, ok := r.(*thriftReporter)
 	require.True(t, ok)
 	multitransport, ok := reporter.client.Transport.(*thriftudp.TMultiUDPTransport)
 	require.NotNil(t, multitransport)
@@ -308,7 +308,7 @@ func TestReporterSpecifyService(t *testing.T) {
 	require.NoError(t, err)
 	defer r.Close()
 
-	reporter, ok := r.(*reporter)
+	reporter, ok := r.(*thriftReporter)
 	require.True(t, ok)
 	assert.Equal(t, 3, len(reporter.commonTags))
 	for tag := range reporter.commonTags {
@@ -338,7 +338,7 @@ func TestIncludeHost(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer r.Close()
-	withoutHost, ok := r.(*reporter)
+	withoutHost, ok := r.(*thriftReporter)
 	require.True(t, ok)
 	assert.False(t, tagIncluded(withoutHost.commonTags, "host"))
 
@@ -350,7 +350,7 @@ func TestIncludeHost(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer r.Close()
-	withHost, ok := r.(*reporter)
+	withHost, ok := r.(*thriftReporter)
 	require.True(t, ok)
 	assert.True(t, tagIncluded(withHost.commonTags, "host"))
 }

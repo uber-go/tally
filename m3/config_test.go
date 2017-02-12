@@ -38,7 +38,7 @@ func TestConfigSimple(t *testing.T) {
 	r, err := c.NewReporter()
 	require.NoError(t, err)
 
-	reporter := r.(*reporter)
+	reporter := r.(*thriftReporter)
 	_, ok := reporter.client.Transport.(*thriftudp.TUDPTransport)
 	assert.True(t, ok)
 	assert.True(t, tagEquals(reporter.commonTags, "service", "my-service"))
@@ -54,7 +54,7 @@ func TestConfigMulti(t *testing.T) {
 	r, err := c.NewReporter()
 	require.NoError(t, err)
 
-	reporter := r.(*reporter)
+	reporter := r.(*thriftReporter)
 	_, ok := reporter.client.Transport.(*thriftudp.TMultiUDPTransport)
 	assert.True(t, ok)
 	assert.True(t, tagEquals(reporter.commonTags, "service", "my-service"))

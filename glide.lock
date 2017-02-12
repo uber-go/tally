@@ -1,5 +1,5 @@
 hash: cdbc433d199ac0d184d56f461f87cb93db4f60658218f85a2b39c4614e4c1c68
-updated: 2017-02-05T22:15:53.246370902-05:00
+updated: 2017-02-11T16:30:12.270530306-05:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -16,7 +16,7 @@ imports:
 - name: github.com/facebookgo/clock
   version: 600d898af40aa09a7a93ecb9265d87b0504b6f03
 - name: github.com/golang/protobuf
-  version: 2bc9827a78f95c6665b5fe0abd1fd66b496ae2d8
+  version: 3852dcfda249c2097355a6aabb199a28d97b30df
   subpackages:
   - proto
 - name: github.com/matttproud/golang_protobuf_extensions
@@ -33,13 +33,13 @@ imports:
   subpackages:
   - go
 - name: github.com/prometheus/common
-  version: 6d76b79f239843a04e8ad8dfd8fcadfa3920236f
+  version: dd2f054febf4a6c00f2343686efb775948a8bff4
   subpackages:
   - expfmt
   - internal/bitbucket.org/ww/goautoneg
   - model
 - name: github.com/prometheus/procfs
-  version: fcdb11ccb4389efb1b210b7ffb623ab71c5fdd60
+  version: 1878d9fbb537119d24b21ca07effd591627cd160
 - name: github.com/uber-go/atomic
   version: e682c1008ac17bf26d2e4b5ad6cdd08520ed0b22
 testImports:

@@ -61,7 +61,7 @@ func newTestReporterScope(
 		// Ensure reporter is closed too
 		var open, readStatus bool
 		select {
-		case _, open = <-r.(*reporter).metCh:
+		case _, open = <-r.(*thriftReporter).metCh:
 			readStatus = true
 		default:
 		}
