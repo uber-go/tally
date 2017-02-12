@@ -39,7 +39,7 @@ const (
 func BenchmarkNewMetric(b *testing.B) {
 	protocolFactory := thrift.NewTCompactProtocolFactory()
 	resourcePool := newResourcePool(protocolFactory)
-	benchReporter := &reporter{resourcePool: resourcePool}
+	benchReporter := &thriftReporter{resourcePool: resourcePool}
 
 	for n := 0; n < b.N; n++ {
 		benchReporter.newMetric("foo", nil, counterType)
@@ -49,7 +49,7 @@ func BenchmarkNewMetric(b *testing.B) {
 func BenchmarkCalulateSize(b *testing.B) {
 	protocolFactory := thrift.NewTCompactProtocolFactory()
 	resourcePool := newResourcePool(protocolFactory)
-	benchReporter := &reporter{resourcePool: resourcePool}
+	benchReporter := &thriftReporter{resourcePool: resourcePool}
 
 	val := int64(123456)
 	met := benchReporter.newMetric("foo", nil, counterType)
