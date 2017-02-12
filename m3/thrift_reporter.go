@@ -89,7 +89,7 @@ type thriftReporter struct {
 	resourcePool *resourcePool
 	closeChan    chan struct{}
 
-	metCh chan sizedMetric
+	metCh chan sizedThriftMetric
 }
 
 // newThriftReporter creates a new M3 reporter which emits metrics using a Thrift encoding.
@@ -121,19 +121,19 @@ func newThriftReporter(opts Options) (Reporter, error) {
 	// Create common tags
 	tags := resourcePool.getTagList()
 	for k, v := range opts.CommonTags {
-		tags[createTag(resourcePool, k, v)] = true
+		tags[createThriftTag(resourcePool, k, v)] = true
 	}
 	if opts.CommonTags[ServiceTag] == "" {
 		if opts.Service == "" {
 			return nil, fmt.Errorf("%s common tag is required", ServiceTag)
 		}
-		tags[createTag(resourcePool, ServiceTag, opts.Service)] = true
+		tags[createThriftTag(resourcePool, ServiceTag, opts.Service)] = true
 	}
 	if opts.CommonTags[EnvTag] == "" {
 		if opts.Env == "" {
 			return nil, fmt.Errorf("%s common tag is required", EnvTag)
 		}
-		tags[createTag(resourcePool, EnvTag, opts.Env)] = true
+		tags[createThriftTag(resourcePool, EnvTag, opts.Env)] = true
 	}
 	if opts.IncludeHost {
 		if opts.CommonTags[HostTag] == "" {
@@ -141,7 +141,7 @@ func newThriftReporter(opts Options) (Reporter, error) {
 			if err != nil {
 				return nil, fmt.Errorf("error resolving host tag: %v", err)
 			}
-			tags[createTag(resourcePool, HostTag, hostname)] = true
+			tags[createThriftTag(resourcePool, HostTag, hostname)] = true
 		}
 	}
 
@@ -168,7 +168,7 @@ func newThriftReporter(opts Options) (Reporter, error) {
 		commonTags:   tags,
 		freeBytes:    freeBytes,
 		resourcePool: resourcePool,
-		metCh:        make(chan sizedMetric, opts.MaxQueueSize),
+		metCh:        make(chan sizedThriftMetric, opts.MaxQueueSize),
 	}
 
 	r.processors.Add(1)
@@ -183,7 +183,7 @@ func (r *thriftReporter) AllocateCounter(
 ) tally.CachedCount {
 	counter := r.newMetric(name, tags, counterType)
 	size := r.calculateSize(counter)
-	return cachedMetric{counter, r, size}
+	return cachedThriftMetric{counter, r, size}
 }
 
 // AllocateGauge implements tally.CachedStatsReporter.
@@ -192,7 +192,7 @@ func (r *thriftReporter) AllocateGauge(
 ) tally.CachedGauge {
 	gauge := r.newMetric(name, tags, gaugeType)
 	size := r.calculateSize(gauge)
-	return cachedMetric{gauge, r, size}
+	return cachedThriftMetric{gauge, r, size}
 }
 
 // AllocateTimer implements tally.CachedStatsReporter.
@@ -201,7 +201,7 @@ func (r *thriftReporter) AllocateTimer(
 ) tally.CachedTimer {
 	timer := r.newMetric(name, tags, timerType)
 	size := r.calculateSize(timer)
-	return cachedMetric{timer, r, size}
+	return cachedThriftMetric{timer, r, size}
 }
 
 func (r *thriftReporter) newMetric(
@@ -285,14 +285,14 @@ func (r *thriftReporter) reportCopyMetric(
 	}
 
 	select {
-	case r.metCh <- sizedMetric{copy, size}:
+	case r.metCh <- sizedThriftMetric{copy, size}:
 	default:
 	}
 }
 
 // Flush implements tally.CachedStatsReporter.
 func (r *thriftReporter) Flush() {
-	r.metCh <- sizedMetric{}
+	r.metCh <- sizedThriftMetric{}
 }
 
 // Close waits for metrics to be flushed before closing the backend.
@@ -368,7 +368,7 @@ func (r *thriftReporter) flush(
 	return mets[:0]
 }
 
-func createTag(
+func createThriftTag(
 	pool *resourcePool,
 	tagName, tagValue string,
 ) *m3thrift.MetricTag {
@@ -381,26 +381,26 @@ func createTag(
 	return tag
 }
 
-type cachedMetric struct {
+type cachedThriftMetric struct {
 	metric   *m3thrift.Metric
 	reporter *thriftReporter
 	size     int32
 }
 
-func (c cachedMetric) ReportCount(value int64) {
+func (c cachedThriftMetric) ReportCount(value int64) {
 	c.reporter.reportCopyMetric(c.metric, c.size, counterType, value, 0)
 }
 
-func (c cachedMetric) ReportGauge(value float64) {
+func (c cachedThriftMetric) ReportGauge(value float64) {
 	c.reporter.reportCopyMetric(c.metric, c.size, gaugeType, 0, value)
 }
 
-func (c cachedMetric) ReportTimer(interval time.Duration) {
+func (c cachedThriftMetric) ReportTimer(interval time.Duration) {
 	val := int64(interval)
 	c.reporter.reportCopyMetric(c.metric, c.size, timerType, val, 0)
 }
 
-type sizedMetric struct {
+type sizedThriftMetric struct {
 	m    *m3thrift.Metric
 	size int32
 }

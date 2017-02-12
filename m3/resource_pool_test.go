@@ -39,7 +39,7 @@ func TestM3ResourcePoolMetric(t *testing.T) {
 	cv := p.getCount()
 	cmv.Count = cv
 	cv.I64Value = &v
-	cm.Tags = map[*m3thrift.MetricTag]bool{createTag(p, "t1", "v1"): true}
+	cm.Tags = map[*m3thrift.MetricTag]bool{createThriftTag(p, "t1", "v1"): true}
 
 	gm := p.getMetric()
 	gmv := p.getValue()

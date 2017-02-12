@@ -28,7 +28,7 @@ import (
 	"github.com/uber-go/tally"
 )
 
-// Encoding describes what format metrics should be encoded when sent over the wire.
+// Encoding describes what format metrics should be encoded in when sent over the wire.
 type Encoding int
 
 // The M3 reporter supports both Thrift and Messagepack encoding. Undeclared is the default
