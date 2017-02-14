@@ -370,11 +370,19 @@ func (h *histogram) cachedReport() {
 }
 
 func (h *histogram) RecordValue(value float64) {
+	// Find the highest inclusive of the bucket upper bound
+	// and emit directly to it. Since we use BucketPairs to derive
+	// buckets there will always be an inclusive bucket as
+	// we always have a math.MaxFloat64 bucket.
 	idx := sort.SearchFloat64s(h.lookupByValue, value)
 	h.buckets[idx].samples.Inc(1)
 }
 
 func (h *histogram) RecordDuration(value time.Duration) {
+	// Find the highest inclusive of the bucket upper bound
+	// and emit directly to it. Since we use BucketPairs to derive
+	// buckets there will always be an inclusive bucket as
+	// we always have a math.MaxInt64 bucket.
 	idx := sort.SearchInts(h.lookupByDuration, int(value))
 	h.buckets[idx].samples.Inc(1)
 }

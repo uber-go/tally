@@ -279,7 +279,8 @@ func TestWriteReportLoop(t *testing.T) {
 	r.tg.Add(1)
 	s.Timer("ticky").Record(time.Millisecond * 175)
 	r.hg.Add(1)
-	s.Histogram("baz", LinearValueBuckets(0, 10, 10)).RecordValue(42.42)
+	s.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
 
 	r.WaitAll()
 }
@@ -296,7 +297,8 @@ func TestCachedReportLoop(t *testing.T) {
 	r.tg.Add(1)
 	s.Timer("ticky").Record(time.Millisecond * 175)
 	r.hg.Add(1)
-	s.Histogram("baz", LinearValueBuckets(0, 10, 10)).RecordValue(42.42)
+	s.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
 
 	r.WaitAll()
 }
@@ -314,7 +316,8 @@ func TestWriteOnce(t *testing.T) {
 	r.tg.Add(1)
 	s.Timer("ticky").Record(time.Millisecond * 175)
 	r.hg.Add(1)
-	s.Histogram("baz", LinearValueBuckets(0, 10, 10)).RecordValue(42.42)
+	s.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
 
 	s.report(r)
 	r.WaitAll()
@@ -345,9 +348,9 @@ func TestCachedReporter(t *testing.T) {
 	r.tg.Add(1)
 	s.Timer("ticky").Record(time.Millisecond * 175)
 	r.hg.Add(2)
-	s.Histogram("baz", LinearValueBuckets(0, 10, 10)).
+	s.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
 		RecordValue(42.42)
-	s.Histogram("qux", LinearDurationBuckets(0, 10*time.Millisecond, 10)).
+	s.Histogram("qux", MustMakeLinearDurationBuckets(0, 10*time.Millisecond, 10)).
 		RecordDuration(42 * time.Millisecond)
 
 	s.cachedReport(r)
@@ -373,7 +376,8 @@ func TestRootScopeWithoutPrefix(t *testing.T) {
 	r.tg.Add(1)
 	s.Timer("blork").Record(time.Millisecond * 175)
 	r.hg.Add(1)
-	s.Histogram("baz", LinearValueBuckets(0, 10, 10)).RecordValue(42.42)
+	s.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
 
 	s.report(r)
 	r.WaitAll()
@@ -397,7 +401,8 @@ func TestRootScopeWithPrefix(t *testing.T) {
 	r.tg.Add(1)
 	s.Timer("blork").Record(time.Millisecond * 175)
 	r.hg.Add(1)
-	s.Histogram("baz", LinearValueBuckets(0, 10, 10)).RecordValue(42.42)
+	s.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
 
 	s.report(r)
 	r.WaitAll()
@@ -421,7 +426,8 @@ func TestRootScopeWithDifferentSeparator(t *testing.T) {
 	r.tg.Add(1)
 	s.Timer("blork").Record(time.Millisecond * 175)
 	r.hg.Add(1)
-	s.Histogram("baz", LinearValueBuckets(0, 10, 10)).RecordValue(42.42)
+	s.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
 
 	s.report(r)
 	r.WaitAll()
@@ -445,7 +451,8 @@ func TestSubScope(t *testing.T) {
 	r.tg.Add(1)
 	s.Timer("blork").Record(time.Millisecond * 175)
 	r.hg.Add(1)
-	s.Histogram("baz", LinearValueBuckets(0, 10, 10)).RecordValue(42.42)
+	s.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
 
 	s.report(r)
 	r.WaitAll()
@@ -471,9 +478,11 @@ func TestTaggedSubScope(t *testing.T) {
 	r.cg.Add(1)
 	tscope.Counter("boop").Inc(1)
 	r.hg.Add(1)
-	scope.Histogram("baz", LinearValueBuckets(0, 10, 10)).RecordValue(42.42)
+	scope.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
 	r.hg.Add(1)
-	tscope.Histogram("bar", LinearValueBuckets(0, 10, 10)).RecordValue(42.42)
+	tscope.Histogram("bar", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
 
 	s.report(r)
 	tscope.report(r)

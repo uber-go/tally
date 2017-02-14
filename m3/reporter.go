@@ -59,14 +59,14 @@ const (
 	DefaultMaxQueueSize = 4096
 	// DefaultMaxPacketSize is the default M3 reporter max packet size.
 	DefaultMaxPacketSize = int32(1440)
+	// DefaultHistogramBucketIDName is the default histogram bucket ID tag name
+	DefaultHistogramBucketIDName = "bucketid"
+	// DefaultHistogramBucketName is the default histogram bucket name tag name
+	DefaultHistogramBucketName = "bucket"
 	// DefaultHistogramBucketTagPrecision is the default
 	// precision to use when formatting the metric tag
 	// with the histogram bucket bound values.
 	DefaultHistogramBucketTagPrecision = uint(6)
-	// HistogramBucketIDTagName is the histogram bucket ID tag name
-	HistogramBucketIDTagName = "bucketid"
-	// HistogramBucketNameTagName is the histogram bucket name tag name
-	HistogramBucketNameTagName = "bucket"
 
 	emitMetricBatchOverhead    = 19
 	minMetricBucketIDTagLength = 4
@@ -106,18 +106,20 @@ type Reporter interface {
 // remote M3 collector, metrics are batched together and emitted
 // via either thrift compact or binary protocol in batch UDP packets.
 type reporter struct {
-	client       *m3thrift.M3Client
-	curBatch     *m3thrift.MetricBatch
-	curBatchLock sync.Mutex
-	calc         *customtransport.TCalcTransport
-	calcProto    thrift.TProtocol
-	calcLock     sync.Mutex
-	commonTags   map[*m3thrift.MetricTag]bool
-	freeBytes    int32
-	processors   sync.WaitGroup
-	resourcePool *resourcePool
-	bucketValFmt string
-	closeChan    chan struct{}
+	client          *m3thrift.M3Client
+	curBatch        *m3thrift.MetricBatch
+	curBatchLock    sync.Mutex
+	calc            *customtransport.TCalcTransport
+	calcProto       thrift.TProtocol
+	calcLock        sync.Mutex
+	commonTags      map[*m3thrift.MetricTag]bool
+	freeBytes       int32
+	processors      sync.WaitGroup
+	resourcePool    *resourcePool
+	bucketIDTagName string
+	bucketTagName   string
+	bucketValFmt    string
+	closeChan       chan struct{}
 
 	metCh chan sizedMetric
 }
@@ -132,6 +134,8 @@ type Options struct {
 	Protocol                    Protocol
 	MaxQueueSize                int
 	MaxPacketSizeBytes          int32
+	HistogramBucketIDName       string
+	HistogramBucketName         string
 	HistogramBucketTagPrecision uint
 }
 
@@ -142,6 +146,12 @@ func NewReporter(opts Options) (Reporter, error) {
 	}
 	if opts.MaxPacketSizeBytes <= 0 {
 		opts.MaxPacketSizeBytes = DefaultMaxPacketSize
+	}
+	if opts.HistogramBucketIDName == "" {
+		opts.HistogramBucketIDName = DefaultHistogramBucketIDName
+	}
+	if opts.HistogramBucketName == "" {
+		opts.HistogramBucketName = DefaultHistogramBucketName
 	}
 	if opts.HistogramBucketTagPrecision == 0 {
 		opts.HistogramBucketTagPrecision = DefaultHistogramBucketTagPrecision
@@ -214,15 +224,17 @@ func NewReporter(opts Options) (Reporter, error) {
 	}
 
 	r := &reporter{
-		client:       client,
-		curBatch:     batch,
-		calc:         calc,
-		calcProto:    proto,
-		commonTags:   tags,
-		freeBytes:    freeBytes,
-		resourcePool: resourcePool,
-		bucketValFmt: "%." + strconv.Itoa(int(opts.HistogramBucketTagPrecision)) + "f",
-		metCh:        make(chan sizedMetric, opts.MaxQueueSize),
+		client:          client,
+		curBatch:        batch,
+		calc:            calc,
+		calcProto:       proto,
+		commonTags:      tags,
+		freeBytes:       freeBytes,
+		resourcePool:    resourcePool,
+		bucketIDTagName: opts.HistogramBucketIDName,
+		bucketTagName:   opts.HistogramBucketName,
+		bucketValFmt:    "%." + strconv.Itoa(int(opts.HistogramBucketTagPrecision)) + "f",
+		metCh:           make(chan sizedMetric, opts.MaxQueueSize),
 	}
 
 	r.processors.Add(1)
@@ -286,12 +298,10 @@ func (r *reporter) AllocateHistogram(
 			valueTags[k], durationTags[k] = v, v
 		}
 
-		idTagName := HistogramBucketIDTagName
 		idTagValue := fmt.Sprintf(bucketIDFmt, i)
-		nameTagName := HistogramBucketNameTagName
 
-		valueTags[idTagName] = idTagValue
-		valueTags[nameTagName] = fmt.Sprintf("%s-%s",
+		valueTags[r.bucketIDTagName] = idTagValue
+		valueTags[r.bucketTagName] = fmt.Sprintf("%s-%s",
 			r.valueBucketString(pair.LowerBoundValue()),
 			r.valueBucketString(pair.UpperBoundValue()))
 
@@ -300,8 +310,8 @@ func (r *reporter) AllocateHistogram(
 				pair.UpperBoundDuration(),
 				r.allocateCounter(name, valueTags)})
 
-		durationTags[idTagName] = idTagValue
-		durationTags[nameTagName] = fmt.Sprintf("%s-%s",
+		durationTags[r.bucketIDTagName] = idTagValue
+		durationTags[r.bucketTagName] = fmt.Sprintf("%s-%s",
 			r.durationBucketString(pair.LowerBoundDuration()),
 			r.durationBucketString(pair.UpperBoundDuration()))
 

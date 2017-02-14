@@ -127,7 +127,7 @@ func TestTimer(t *testing.T) {
 
 func TestHistogramValueSamples(t *testing.T) {
 	r := newStatsTestReporter()
-	buckets := LinearValueBuckets(0, 10, 10)
+	buckets := MustMakeLinearValueBuckets(0, 10, 10)
 	h := newHistogram("h1", nil, r, buckets, nil)
 
 	var offset float64
@@ -148,7 +148,7 @@ func TestHistogramValueSamples(t *testing.T) {
 
 func TestHistogramDurationSamples(t *testing.T) {
 	r := newStatsTestReporter()
-	buckets := LinearDurationBuckets(0, 10*time.Millisecond, 10)
+	buckets := MustMakeLinearDurationBuckets(0, 10*time.Millisecond, 10)
 	h := newHistogram("h1", nil, r, buckets, nil)
 
 	var offset time.Duration

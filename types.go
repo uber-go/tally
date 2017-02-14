@@ -40,13 +40,13 @@ type Scope interface {
 
 	// Histogram returns the Histogram object corresponding to the name.
 	// To use default value and duration buckets configured for the scope
-	// simply pass tally.DefaultBuckets.
-	// You can use tally.ValueBuckets(x, y, ...) for value buckets.
-	// You can use tally.DurationBuckets(x, y, ...) for duration buckets.
-	// You can use tally.LinearValueBuckets(start, width, count) for linear values.
-	// You can use tally.LinearDurationBuckets(start, width, count) for linear durations.
-	// You can use tally.ExponentialValueBuckets(start, factor, count) for exponential values.
-	// You can use tally.ExponentialDurationBuckets(start, factor, count) for exponential durations.
+	// simply pass tally.DefaultBuckets or nil.
+	// You can use tally.ValueBuckets{x, y, ...} for value buckets.
+	// You can use tally.DurationBuckets{x, y, ...} for duration buckets.
+	// You can use tally.MustMakeLinearValueBuckets(start, width, count) for linear values.
+	// You can use tally.MustMakeLinearDurationBuckets(start, width, count) for linear durations.
+	// You can use tally.MustMakeExponentialValueBuckets(start, factor, count) for exponential values.
+	// You can use tally.MustMakeExponentialDurationBuckets(start, factor, count) for exponential durations.
 	Histogram(name string, buckets Buckets) Histogram
 
 	// Tagged returns a new child scope with the given tags and current tags.

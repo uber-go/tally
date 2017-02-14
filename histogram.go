@@ -21,14 +21,21 @@
 package tally
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sort"
 	"time"
 )
 
-// DefaultBuckets can be passed to specify to default buckets.
-var DefaultBuckets Buckets
+var (
+	// DefaultBuckets can be passed to specify to default buckets.
+	DefaultBuckets Buckets
+
+	errBucketsCountNeedsGreaterThanZero = errors.New("n needs to be > 0")
+	errBucketsStartNeedsGreaterThanZero = errors.New("start needs to be > 0")
+	errBucketsFactorNeedsGreaterThanOne = errors.New("factor needs to be > 1")
+)
 
 // ValueBuckets is a set of float64 values that implements Buckets.
 type ValueBuckets []float64
@@ -151,22 +158,31 @@ func BucketPairs(buckets Buckets) []BucketPair {
 		pairs             = make([]BucketPair, 0, buckets.Len()+2)
 	)
 	pairs = append(pairs, bucketPair{
-		-math.MaxFloat64, asValueBuckets[0],
-		time.Duration(math.MinInt64), asDurationBuckets[0]})
+		lowerBoundValue:    -math.MaxFloat64,
+		upperBoundValue:    asValueBuckets[0],
+		lowerBoundDuration: time.Duration(math.MinInt64),
+		upperBoundDuration: asDurationBuckets[0],
+	})
 
 	prevValueBucket, prevDurationBucket :=
 		asValueBuckets[0], asDurationBuckets[0]
 	for i := 1; i < buckets.Len(); i++ {
 		pairs = append(pairs, bucketPair{
-			prevValueBucket, asValueBuckets[i],
-			prevDurationBucket, asDurationBuckets[i]})
+			lowerBoundValue:    prevValueBucket,
+			upperBoundValue:    asValueBuckets[i],
+			lowerBoundDuration: prevDurationBucket,
+			upperBoundDuration: asDurationBuckets[i],
+		})
 		prevValueBucket, prevDurationBucket =
 			asValueBuckets[i], asDurationBuckets[i]
 	}
 
 	pairs = append(pairs, bucketPair{
-		prevValueBucket, math.MaxFloat64,
-		prevDurationBucket, time.Duration(math.MaxInt64)})
+		lowerBoundValue:    prevValueBucket,
+		upperBoundValue:    math.MaxFloat64,
+		lowerBoundDuration: prevDurationBucket,
+		upperBoundDuration: time.Duration(math.MaxInt64),
+	})
 
 	return pairs
 }
@@ -195,65 +211,105 @@ func (p bucketPair) UpperBoundDuration() time.Duration {
 }
 
 // LinearValueBuckets creates a set of linear value buckets.
-func LinearValueBuckets(start, width float64, count int) ValueBuckets {
-	if count <= 0 {
-		panic("count needs to be > 0")
+func LinearValueBuckets(start, width float64, n int) (ValueBuckets, error) {
+	if n <= 0 {
+		return nil, errBucketsCountNeedsGreaterThanZero
 	}
-	buckets := make([]float64, count)
+	buckets := make([]float64, n)
 	for i := range buckets {
 		buckets[i] = start + (float64(i) * width)
 	}
-	return ValueBuckets(buckets)
+	return ValueBuckets(buckets), nil
+}
+
+// MustMakeLinearValueBuckets creates a set of linear value buckets
+// or panics.
+func MustMakeLinearValueBuckets(start, width float64, n int) ValueBuckets {
+	buckets, err := LinearValueBuckets(start, width, n)
+	if err != nil {
+		panic(err)
+	}
+	return buckets
 }
 
 // LinearDurationBuckets creates a set of linear duration buckets.
-func LinearDurationBuckets(start, width time.Duration, count int) DurationBuckets {
-	if count <= 0 {
-		panic("count needs to be > 0")
+func LinearDurationBuckets(start, width time.Duration, n int) (DurationBuckets, error) {
+	if n <= 0 {
+		return nil, errBucketsCountNeedsGreaterThanZero
 	}
-	buckets := make([]time.Duration, count)
+	buckets := make([]time.Duration, n)
 	for i := range buckets {
 		buckets[i] = start + (time.Duration(i) * width)
 	}
-	return DurationBuckets(buckets)
+	return DurationBuckets(buckets), nil
+}
+
+// MustMakeLinearDurationBuckets creates a set of linear duration buckets.
+// or panics.
+func MustMakeLinearDurationBuckets(start, width time.Duration, n int) DurationBuckets {
+	buckets, err := LinearDurationBuckets(start, width, n)
+	if err != nil {
+		panic(err)
+	}
+	return buckets
 }
 
 // ExponentialValueBuckets creates a set of exponential value buckets.
-func ExponentialValueBuckets(start, factor float64, count int) ValueBuckets {
-	if count <= 0 {
-		panic("count needs to be > 0")
+func ExponentialValueBuckets(start, factor float64, n int) (ValueBuckets, error) {
+	if n <= 0 {
+		return nil, errBucketsCountNeedsGreaterThanZero
 	}
 	if start <= 0 {
-		panic("start needs to be > 0")
+		return nil, errBucketsStartNeedsGreaterThanZero
 	}
 	if factor <= 1 {
-		panic("factor needs to be > 1")
+		return nil, errBucketsFactorNeedsGreaterThanOne
 	}
-	buckets := make([]float64, count)
+	buckets := make([]float64, n)
 	curr := start
 	for i := range buckets {
 		buckets[i] = curr
 		curr *= factor
 	}
-	return ValueBuckets(buckets)
+	return ValueBuckets(buckets), nil
+}
+
+// MustMakeExponentialValueBuckets creates a set of exponential value buckets
+// or panics.
+func MustMakeExponentialValueBuckets(start, factor float64, n int) ValueBuckets {
+	buckets, err := ExponentialValueBuckets(start, factor, n)
+	if err != nil {
+		panic(err)
+	}
+	return buckets
 }
 
 // ExponentialDurationBuckets creates a set of exponential duration buckets.
-func ExponentialDurationBuckets(start time.Duration, factor float64, count int) DurationBuckets {
-	if count <= 0 {
-		panic("count needs to be > 0")
+func ExponentialDurationBuckets(start time.Duration, factor float64, n int) (DurationBuckets, error) {
+	if n <= 0 {
+		return nil, errBucketsCountNeedsGreaterThanZero
 	}
 	if start <= 0 {
-		panic("start needs to be > 0")
+		return nil, errBucketsStartNeedsGreaterThanZero
 	}
 	if factor <= 1 {
-		panic("factor needs to be > 1")
+		return nil, errBucketsFactorNeedsGreaterThanOne
 	}
-	buckets := make([]time.Duration, count)
+	buckets := make([]time.Duration, n)
 	curr := start
 	for i := range buckets {
 		buckets[i] = curr
 		curr = time.Duration(float64(curr) * factor)
 	}
-	return DurationBuckets(buckets)
+	return DurationBuckets(buckets), nil
+}
+
+// MustMakeExponentialDurationBuckets creates a set of exponential value buckets
+// or panics.
+func MustMakeExponentialDurationBuckets(start time.Duration, factor float64, n int) DurationBuckets {
+	buckets, err := ExponentialDurationBuckets(start, factor, n)
+	if err != nil {
+		panic(err)
+	}
+	return buckets
 }

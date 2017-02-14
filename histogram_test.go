@@ -42,11 +42,12 @@ func TestBucketPairsDefaultsToNegInfinityToInfinity(t *testing.T) {
 
 func TestBucketPairsDurationBucketsInsertsMissingZero(t *testing.T) {
 	initial := 10
-	buckets := LinearDurationBuckets(
+	buckets, err := LinearDurationBuckets(
 		10*time.Millisecond,
 		10*time.Millisecond,
 		initial,
 	)
+	require.NoError(t, err)
 	require.Equal(t, initial, len(buckets))
 
 	pairs := BucketPairs(buckets)
@@ -59,6 +60,7 @@ func TestBucketPairsDurationBucketsInsertsMissingZero(t *testing.T) {
 }
 
 func TestLinearValueBuckets(t *testing.T) {
-	result := LinearValueBuckets(1, 1, 3)
+	result, err := LinearValueBuckets(1, 1, 3)
+	require.NoError(t, err)
 	assert.Equal(t, "[1.000000 2.000000 3.000000]", Buckets(result).String())
 }
