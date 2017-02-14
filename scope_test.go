@@ -344,8 +344,11 @@ func TestCachedReporter(t *testing.T) {
 	s.Gauge("zed").Update(1)
 	r.tg.Add(1)
 	s.Timer("ticky").Record(time.Millisecond * 175)
-	r.hg.Add(1)
-	s.Histogram("baz", LinearValueBuckets(0, 10, 10)).RecordValue(42.42)
+	r.hg.Add(2)
+	s.Histogram("baz", LinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
+	s.Histogram("qux", LinearDurationBuckets(0, 10*time.Millisecond, 10)).
+		RecordDuration(42 * time.Millisecond)
 
 	s.cachedReport(r)
 	r.WaitAll()
@@ -354,6 +357,7 @@ func TestCachedReporter(t *testing.T) {
 	assert.EqualValues(t, 1, r.gauges["zed"].val)
 	assert.EqualValues(t, time.Millisecond*175, r.timers["ticky"].val)
 	assert.EqualValues(t, 1, r.histograms["baz"].valueSamples[50.0])
+	assert.EqualValues(t, 1, r.histograms["qux"].durationSamples[50*time.Millisecond])
 }
 
 func TestRootScopeWithoutPrefix(t *testing.T) {
@@ -492,6 +496,28 @@ func TestTaggedSubScope(t *testing.T) {
 		"env":     "test",
 		"service": "test",
 	}, r.histograms["foo.bar"].tags)
+}
+
+func TestTaggedExistingReturnsSameScope(t *testing.T) {
+	r := newTestStatsReporter()
+
+	for _, initialTags := range []map[string]string{
+		nil,
+		map[string]string{"env": "test"},
+	} {
+		root, _ := NewRootScope(ScopeOptions{Prefix: "foo", Tags: initialTags, Reporter: r}, 0)
+
+		rootScope := root.(*scope)
+		fooScope := root.Tagged(map[string]string{"foo": "bar"}).(*scope)
+
+		assert.NotEqual(t, rootScope, fooScope)
+		assert.Equal(t, fooScope, fooScope.Tagged(nil))
+
+		fooBarScope := fooScope.Tagged(map[string]string{"bar": "baz"}).(*scope)
+
+		assert.NotEqual(t, fooScope, fooBarScope)
+		assert.Equal(t, fooBarScope, fooScope.Tagged(map[string]string{"bar": "baz"}).(*scope))
+	}
 }
 
 func TestSnapshot(t *testing.T) {

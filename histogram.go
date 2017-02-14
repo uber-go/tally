@@ -135,34 +135,55 @@ func (v DurationBuckets) AsDurations() []time.Duration {
 // of buckets describing the lower and upper bounds for
 // each derived bucket.
 func BucketPairs(buckets Buckets) []BucketPair {
+	if buckets == nil || buckets.Len() < 1 {
+		return []BucketPair{
+			bucketPair{
+				-math.MaxFloat64, math.MaxFloat64,
+				time.Duration(math.MinInt64), time.Duration(math.MaxInt64)},
+		}
+	}
+
+	if durationBuckets, ok := buckets.(DurationBuckets); ok {
+		// If using duration buckets separating negative times and
+		// positive times is very much desirable as depending on the
+		// reporter will create buckets "-infinity,0" and "0,{first_bucket}"
+		// instead of just "-infinity,{first_bucket}" which for time
+		// durations is not desirable nor pragmatic
+		hasZero := false
+		for _, b := range buckets.AsDurations() {
+			if b == 0 {
+				hasZero = true
+				break
+			}
+		}
+		if !hasZero {
+			buckets = append(DurationBuckets{0}, durationBuckets...)
+		}
+	}
+
 	var (
 		asValueBuckets    = buckets.AsValues()
 		asDurationBuckets = buckets.AsDurations()
+		pairs             []BucketPair
 	)
-	var pairs []BucketPair
-	if buckets.Len() > 0 {
-		pairs = append(pairs, bucketPair{
-			-math.MaxFloat64, asValueBuckets[0],
-			time.Duration(math.MinInt64), asDurationBuckets[0]})
+	pairs = append(pairs, bucketPair{
+		-math.MaxFloat64, asValueBuckets[0],
+		time.Duration(math.MinInt64), asDurationBuckets[0]})
 
-		prevValueBucket, prevDurationBucket :=
-			asValueBuckets[0], asDurationBuckets[0]
-		for i := 1; i < buckets.Len(); i++ {
-			pairs = append(pairs, bucketPair{
-				prevValueBucket, asValueBuckets[i],
-				prevDurationBucket, asDurationBuckets[i]})
-			prevValueBucket, prevDurationBucket =
-				asValueBuckets[i], asDurationBuckets[i]
-		}
-
+	prevValueBucket, prevDurationBucket :=
+		asValueBuckets[0], asDurationBuckets[0]
+	for i := 1; i < buckets.Len(); i++ {
 		pairs = append(pairs, bucketPair{
-			prevValueBucket, math.MaxFloat64,
-			prevDurationBucket, time.Duration(math.MaxInt64)})
-	} else {
-		pairs = append(pairs, bucketPair{
-			-math.MaxFloat64, math.MaxFloat64,
-			time.Duration(math.MinInt64), time.Duration(math.MaxInt64)})
+			prevValueBucket, asValueBuckets[i],
+			prevDurationBucket, asDurationBuckets[i]})
+		prevValueBucket, prevDurationBucket =
+			asValueBuckets[i], asDurationBuckets[i]
 	}
+
+	pairs = append(pairs, bucketPair{
+		prevValueBucket, math.MaxFloat64,
+		prevDurationBucket, time.Duration(math.MaxInt64)})
+
 	return pairs
 }
 

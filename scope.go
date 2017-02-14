@@ -307,7 +307,7 @@ func (s *scope) Timer(name string) Timer {
 }
 
 func (s *scope) Histogram(name string, b Buckets) Histogram {
-	if b == DefaultBuckets {
+	if b == DefaultBuckets || b == nil {
 		b = s.defaultBuckets
 	}
 
@@ -343,11 +343,7 @@ func (s *scope) SubScope(prefix string) Scope {
 }
 
 func (s *scope) subscope(prefix string, tags map[string]string) Scope {
-	if len(tags) == 0 {
-		tags = s.tags
-	} else {
-		tags = mergeRightTags(s.tags, tags)
-	}
+	tags = mergeRightTags(s.tags, tags)
 	key := scopeRegistryKey(prefix, tags)
 
 	s.registry.RLock()

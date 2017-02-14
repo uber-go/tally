@@ -21,10 +21,42 @@
 package tally
 
 import (
+	"math"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestBucketPairsDefaultsToNegInfinityToInfinity(t *testing.T) {
+	pairs := BucketPairs(nil)
+	require.Equal(t, 1, len(pairs))
+
+	assert.Equal(t, -math.MaxFloat64, pairs[0].LowerBoundValue())
+	assert.Equal(t, math.MaxFloat64, pairs[0].UpperBoundValue())
+
+	assert.Equal(t, time.Duration(math.MinInt64), pairs[0].LowerBoundDuration())
+	assert.Equal(t, time.Duration(math.MaxInt64), pairs[0].UpperBoundDuration())
+}
+
+func TestBucketPairsDurationBucketsInsertsMissingZero(t *testing.T) {
+	initial := 10
+	buckets := LinearDurationBuckets(
+		10*time.Millisecond,
+		10*time.Millisecond,
+		initial,
+	)
+	require.Equal(t, initial, len(buckets))
+
+	pairs := BucketPairs(buckets)
+	assert.Equal(t, initial+2, len(pairs))
+	assert.Equal(t, time.Duration(math.MinInt64), pairs[0].LowerBoundDuration())
+	assert.Equal(t, time.Duration(0), pairs[0].UpperBoundDuration())
+
+	assert.Equal(t, 100*time.Millisecond, pairs[len(pairs)-1].LowerBoundDuration())
+	assert.Equal(t, time.Duration(math.MaxInt64), pairs[len(pairs)-1].UpperBoundDuration())
+}
 
 func TestLinearValueBuckets(t *testing.T) {
 	result := LinearValueBuckets(1, 1, 3)
