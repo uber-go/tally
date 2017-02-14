@@ -503,7 +503,7 @@ func TestTaggedExistingReturnsSameScope(t *testing.T) {
 
 	for _, initialTags := range []map[string]string{
 		nil,
-		map[string]string{"env": "test"},
+		{"env": "test"},
 	} {
 		root, _ := NewRootScope(ScopeOptions{Prefix: "foo", Tags: initialTags, Reporter: r}, 0)
 
