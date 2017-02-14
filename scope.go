@@ -307,7 +307,7 @@ func (s *scope) Timer(name string) Timer {
 }
 
 func (s *scope) Histogram(name string, b Buckets) Histogram {
-	if b == DefaultBuckets || b == nil {
+	if b == nil {
 		b = s.defaultBuckets
 	}
 

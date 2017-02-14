@@ -189,3 +189,57 @@ func BenchmarkScopeReportTimer(b *testing.B) {
 	closer.Close()
 	b.StartTimer()
 }
+
+func BenchmarkScopeReportHistogram(b *testing.B) {
+	backend, err := NewReporter(Options{
+		HostPorts:          []string{"127.0.0.1:4444"},
+		Service:            "my-service",
+		MaxQueueSize:       10000,
+		MaxPacketSizeBytes: maxPacketSize,
+		Env:                "test",
+	})
+	if err != nil {
+		b.Error(err.Error())
+		return
+	}
+
+	scope, closer := tally.NewRootScope(tally.ScopeOptions{
+		Prefix:         "bench",
+		CachedReporter: backend,
+	}, 1*time.Second)
+
+	perEndpointScope := scope.Tagged(
+		map[string]string{
+			"endpointid": "health",
+			"handlerid":  "health",
+		},
+	)
+	buckets := tally.DurationBuckets{
+		0 * time.Millisecond,
+		10 * time.Millisecond,
+		25 * time.Millisecond,
+		50 * time.Millisecond,
+		75 * time.Millisecond,
+		100 * time.Millisecond,
+		200 * time.Millisecond,
+		300 * time.Millisecond,
+		400 * time.Millisecond,
+		500 * time.Millisecond,
+		600 * time.Millisecond,
+		800 * time.Millisecond,
+		1 * time.Second,
+		2 * time.Second,
+		5 * time.Second,
+	}
+
+	histogram := perEndpointScope.Histogram("inbound.latency", buckets)
+	b.ResetTimer()
+
+	bucketsLen := len(buckets)
+	for i := 0; i < b.N; i++ {
+		histogram.RecordDuration(buckets[i%bucketsLen])
+	}
+
+	b.StopTimer()
+	closer.Close()
+}

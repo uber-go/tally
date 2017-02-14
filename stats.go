@@ -305,19 +305,27 @@ func newHistogram(
 	if _, ok := buckets.(DurationBuckets); ok {
 		htype = durationHistogramType
 	}
+
+	pairs := BucketPairs(buckets)
+
 	h := &histogram{
-		htype:         htype,
-		name:          name,
-		tags:          tags,
-		reporter:      reporter,
-		specification: buckets,
+		htype:            htype,
+		name:             name,
+		tags:             tags,
+		reporter:         reporter,
+		specification:    buckets,
+		buckets:          make([]histogramBucket, 0, len(pairs)),
+		lookupByValue:    make([]float64, 0, len(pairs)),
+		lookupByDuration: make([]int, 0, len(pairs)),
 	}
-	for _, pair := range BucketPairs(buckets) {
+
+	for _, pair := range pairs {
 		h.addBucket(newHistogramBucket(h,
 			pair.LowerBoundValue(), pair.UpperBoundValue(),
 			pair.LowerBoundDuration(), pair.UpperBoundDuration(),
 			cachedHistogram))
 	}
+
 	return h
 }
 

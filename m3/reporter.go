@@ -133,7 +133,6 @@ type Options struct {
 	MaxQueueSize                int
 	MaxPacketSizeBytes          int32
 	HistogramBucketTagPrecision uint
-	Interval                    time.Duration
 }
 
 // NewReporter creates a new M3 reporter.
@@ -288,9 +287,10 @@ func (r *reporter) AllocateHistogram(
 		}
 
 		idTagName := HistogramBucketIDTagName
+		idTagValue := fmt.Sprintf(bucketIDFmt, i)
 		nameTagName := HistogramBucketNameTagName
 
-		valueTags[idTagName] = fmt.Sprintf(bucketIDFmt, i)
+		valueTags[idTagName] = idTagValue
 		valueTags[nameTagName] = fmt.Sprintf("%s-%s",
 			r.valueBucketString(pair.LowerBoundValue()),
 			r.valueBucketString(pair.UpperBoundValue()))
@@ -300,7 +300,7 @@ func (r *reporter) AllocateHistogram(
 				pair.UpperBoundDuration(),
 				r.allocateCounter(name, valueTags)})
 
-		durationTags[idTagName] = fmt.Sprintf(bucketIDFmt, i)
+		durationTags[idTagName] = idTagValue
 		durationTags[nameTagName] = fmt.Sprintf("%s-%s",
 			r.durationBucketString(pair.LowerBoundDuration()),
 			r.durationBucketString(pair.UpperBoundDuration()))

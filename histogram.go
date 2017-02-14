@@ -27,24 +27,8 @@ import (
 	"time"
 )
 
-// Defaults is a type that can represent a constant.
-type Defaults int
-
 // DefaultBuckets can be passed to specify to default buckets.
-const DefaultBuckets = Defaults(0)
-
-func (v Defaults) String() string {
-	return "[defaults]"
-}
-
-// Len implements Buckets.
-func (v Defaults) Len() int { return 0 }
-
-// AsValues implements Buckets.
-func (v Defaults) AsValues() []float64 { return nil }
-
-// AsDurations implements Buckets.
-func (v Defaults) AsDurations() []time.Duration { return nil }
+var DefaultBuckets Buckets
 
 // ValueBuckets is a set of float64 values that implements Buckets.
 type ValueBuckets []float64
@@ -69,18 +53,17 @@ func (v ValueBuckets) String() string {
 	for i := range values {
 		values[i] = fmt.Sprintf("%f", v[i])
 	}
-	return fmt.Sprintf("%v", values)
+	return fmt.Sprint(values)
 }
 
 // AsValues implements Buckets.
 func (v ValueBuckets) AsValues() []float64 {
-	sort.Sort(v) // Always sort first
 	return []float64(v)
 }
 
-// AsDurations implements Buckets.
+// AsDurations implements Buckets and returns time.Duration
+// representations of the float64 values divided by time.Second.
 func (v ValueBuckets) AsDurations() []time.Duration {
-	sort.Sort(v) // Always sort first
 	values := make([]time.Duration, len(v))
 	for i := range values {
 		values[i] = time.Duration(v[i] * float64(time.Second))
@@ -107,7 +90,6 @@ func (v DurationBuckets) Less(i, j int) bool {
 }
 
 func (v DurationBuckets) String() string {
-	sort.Sort(v) // Always sort first
 	values := make([]string, len(v))
 	for i := range values {
 		values[i] = v[i].String()
@@ -115,9 +97,9 @@ func (v DurationBuckets) String() string {
 	return fmt.Sprintf("%v", values)
 }
 
-// AsValues implements Buckets.
+// AsValues implements Buckets and returns float64
+// representations of the time.Duration values divided by time.Second.
 func (v DurationBuckets) AsValues() []float64 {
-	sort.Sort(v) // Always sort first
 	values := make([]float64, len(v))
 	for i := range values {
 		values[i] = float64(v[i]) / float64(time.Second)
@@ -127,7 +109,6 @@ func (v DurationBuckets) AsValues() []float64 {
 
 // AsDurations implements Buckets.
 func (v DurationBuckets) AsDurations() []time.Duration {
-	sort.Sort(v) // Always sort first
 	return []time.Duration(v)
 }
 
@@ -161,10 +142,13 @@ func BucketPairs(buckets Buckets) []BucketPair {
 		}
 	}
 
+	// Sort before iterating to create pairs
+	sort.Sort(buckets)
+
 	var (
 		asValueBuckets    = buckets.AsValues()
 		asDurationBuckets = buckets.AsDurations()
-		pairs             []BucketPair
+		pairs             = make([]BucketPair, 0, buckets.Len()+2)
 	)
 	pairs = append(pairs, bucketPair{
 		-math.MaxFloat64, asValueBuckets[0],

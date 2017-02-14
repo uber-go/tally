@@ -234,7 +234,6 @@ func TestReporterHistogram(t *testing.T) {
 		CommonTags:         defaultCommonTags,
 		MaxQueueSize:       queueSize,
 		MaxPacketSizeBytes: maxPacketSize,
-		Interval:           0,
 	})
 	require.NoError(t, err)
 
@@ -280,7 +279,7 @@ func TestReporterHistogram(t *testing.T) {
 	require.False(t, val.IsSetTimer())
 	count := val.GetCount()
 	require.True(t, count.IsSetI64Value())
-	require.EqualValues(t, int64(7), count.GetI64Value())
+	require.Equal(t, int64(7), count.GetI64Value())
 
 	// Verify second bucket
 	counter = server.Service.getBatches()[0].GetMetrics()[1]
@@ -301,7 +300,7 @@ func TestReporterHistogram(t *testing.T) {
 	require.False(t, val.IsSetTimer())
 	count = val.GetCount()
 	require.True(t, count.IsSetI64Value())
-	require.EqualValues(t, int64(3), count.GetI64Value())
+	require.Equal(t, int64(3), count.GetI64Value())
 }
 
 func TestBatchSizes(t *testing.T) {

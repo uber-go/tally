@@ -22,6 +22,7 @@ package tally
 
 import (
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -104,9 +105,7 @@ type Stopwatch interface {
 // either as float64s or as durations.
 type Buckets interface {
 	fmt.Stringer
-
-	// Len returns the count of buckets
-	Len() int
+	sort.Interface
 
 	// AsValues returns a representation of the buckets as float64s
 	AsValues() []float64
