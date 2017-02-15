@@ -126,8 +126,11 @@ func BucketPairs(buckets Buckets) []BucketPair {
 	if buckets == nil || buckets.Len() < 1 {
 		return []BucketPair{
 			bucketPair{
-				-math.MaxFloat64, math.MaxFloat64,
-				time.Duration(math.MinInt64), time.Duration(math.MaxInt64)},
+				lowerBoundValue:    -math.MaxFloat64,
+				upperBoundValue:    math.MaxFloat64,
+				lowerBoundDuration: time.Duration(math.MinInt64),
+				upperBoundDuration: time.Duration(math.MaxInt64),
+			},
 		}
 	}
 
