@@ -33,16 +33,40 @@ func newPrintStatsReporter() tally.StatsReporter {
 	return &printStatsReporter{}
 }
 
-func (r *printStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
+func (r *printStatsReporter) ReportCounter(name string, _ map[string]string, value int64) {
 	fmt.Printf("count %s %d\n", name, value)
 }
 
-func (r *printStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
+func (r *printStatsReporter) ReportGauge(name string, _ map[string]string, value float64) {
 	fmt.Printf("gauge %s %f\n", name, value)
 }
 
-func (r *printStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
+func (r *printStatsReporter) ReportTimer(name string, _ map[string]string, interval time.Duration) {
 	fmt.Printf("timer %s %s\n", name, interval.String())
+}
+
+func (r *printStatsReporter) ReportHistogramValueSamples(
+	name string,
+	_ map[string]string,
+	_ tally.Buckets,
+	bucketLowerBound,
+	bucketUpperBound float64,
+	samples int64,
+) {
+	fmt.Printf("histogram %s bucket lower %f upper %f samples %d\n",
+		name, bucketLowerBound, bucketUpperBound, samples)
+}
+
+func (r *printStatsReporter) ReportHistogramDurationSamples(
+	name string,
+	_ map[string]string,
+	_ tally.Buckets,
+	bucketLowerBound,
+	bucketUpperBound time.Duration,
+	samples int64,
+) {
+	fmt.Printf("histogram %s bucket lower %v upper %v samples %d\n",
+		name, bucketLowerBound, bucketUpperBound, samples)
 }
 
 func (r *printStatsReporter) Capabilities() tally.Capabilities {
@@ -57,13 +81,19 @@ func (r *printStatsReporter) Tagging() bool {
 	return false
 }
 
+func (r *printStatsReporter) Histograms() bool {
+	return true
+}
+
 func (r *printStatsReporter) Flush() {
 	fmt.Printf("flush\n")
 }
 
 func main() {
 	reporter := newPrintStatsReporter()
-	rootScope, closer := tally.NewRootScope("", nil, reporter, time.Second, tally.DefaultSeparator)
+	rootScope, closer := tally.NewRootScope(tally.ScopeOptions{
+		Reporter: reporter,
+	}, time.Second)
 	defer closer.Close()
 	subScope := rootScope.SubScope("requests")
 

@@ -31,11 +31,29 @@ import (
 
 var (
 	// NoopScope is a scope that does nothing
-	NoopScope, _ = NewRootScope("", nil, NullStatsReporter, 0, "")
+	NoopScope, _ = NewRootScope(ScopeOptions{Reporter: NullStatsReporter}, 0)
 	// DefaultSeparator is the default separator used to join nested scopes
 	DefaultSeparator = "."
 
 	globalClock = clock.New()
+
+	defaultScopeBuckets = DurationBuckets{
+		0 * time.Millisecond,
+		10 * time.Millisecond,
+		25 * time.Millisecond,
+		50 * time.Millisecond,
+		75 * time.Millisecond,
+		100 * time.Millisecond,
+		200 * time.Millisecond,
+		300 * time.Millisecond,
+		400 * time.Millisecond,
+		500 * time.Millisecond,
+		600 * time.Millisecond,
+		800 * time.Millisecond,
+		1 * time.Second,
+		2 * time.Second,
+		5 * time.Second,
+	}
 )
 
 type scope struct {
@@ -45,6 +63,7 @@ type scope struct {
 	reporter       StatsReporter
 	cachedReporter CachedStatsReporter
 	baseReporter   BaseStatsReporter
+	defaultBuckets Buckets
 
 	registry *scopeRegistry
 	quit     chan struct{}
@@ -52,10 +71,12 @@ type scope struct {
 	cm sync.RWMutex
 	gm sync.RWMutex
 	tm sync.RWMutex
+	hm sync.RWMutex
 
-	counters map[string]*counter
-	gauges   map[string]*gauge
-	timers   map[string]*timer
+	counters   map[string]*counter
+	gauges     map[string]*gauge
+	timers     map[string]*timer
+	histograms map[string]*histogram
 }
 
 type scopeRegistry struct {
@@ -65,83 +86,73 @@ type scopeRegistry struct {
 
 var scopeRegistryKey = KeyForPrefixedStringMap
 
-// NewRootScope creates a new Scope around a given stats reporter with the
-// given prefix
-func NewRootScope(
-	prefix string,
-	tags map[string]string,
-	reporter StatsReporter,
-	interval time.Duration,
-	separator string,
-) (Scope, io.Closer) {
-	s := newRootScope(prefix, tags, reporter, nil, interval, separator)
-	return s, s
+// ScopeOptions is a set of options to construct a scope.
+type ScopeOptions struct {
+	Tags           map[string]string
+	Prefix         string
+	Reporter       StatsReporter
+	CachedReporter CachedStatsReporter
+	Separator      string
+	DefaultBuckets Buckets
 }
 
-// NewCachedRootScope creates a new Scope using a more performant
-// cached stats reporter with the given prefix
-func NewCachedRootScope(
-	prefix string,
-	tags map[string]string,
-	reporter CachedStatsReporter,
-	interval time.Duration,
-	separator string,
-) (Scope, io.Closer) {
-	s := newRootScope(prefix, tags, nil, reporter, interval, separator)
+// NewRootScope creates a new root Scope with a set of options and
+// a reporting interval.
+// Must provide either a StatsReporter or a CachedStatsReporter.
+func NewRootScope(opts ScopeOptions, interval time.Duration) (Scope, io.Closer) {
+	s := newRootScope(opts, interval)
 	return s, s
 }
 
 // NewTestScope creates a new Scope without a stats reporter with the
 // given prefix and adds the ability to take snapshots of metrics emitted
-// to it
+// to it.
 func NewTestScope(
 	prefix string,
 	tags map[string]string,
 ) TestScope {
-	return newRootScope(prefix, tags, nil, nil, 0, DefaultSeparator)
+	return newRootScope(ScopeOptions{Prefix: prefix, Tags: tags}, 0)
 }
 
-func newRootScope(
-	prefix string,
-	tags map[string]string,
-	reporter StatsReporter,
-	cachedReporter CachedStatsReporter,
-	interval time.Duration,
-	separator string,
-) *scope {
-	if tags == nil {
-		tags = make(map[string]string)
+func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
+	if opts.Tags == nil {
+		opts.Tags = make(map[string]string)
 	}
-	sep := DefaultSeparator
-	if separator != "" {
-		sep = separator
+	if opts.Separator == "" {
+		opts.Separator = DefaultSeparator
 	}
 
 	var baseReporter BaseStatsReporter
-	if reporter != nil {
-		baseReporter = reporter
-	} else if cachedReporter != nil {
-		baseReporter = cachedReporter
+	if opts.Reporter != nil {
+		baseReporter = opts.Reporter
+	} else if opts.CachedReporter != nil {
+		baseReporter = opts.CachedReporter
+	}
+
+	if opts.DefaultBuckets == nil || opts.DefaultBuckets.Len() < 1 {
+		opts.DefaultBuckets = defaultScopeBuckets
 	}
 
 	s := &scope{
-		separator: sep,
-		prefix:    prefix,
+		separator: opts.Separator,
+		prefix:    opts.Prefix,
 		// NB(r): Take a copy of the tags on creation
 		// so that it cannot be modified after set.
-		tags:           copyStringMap(tags),
-		reporter:       reporter,
-		cachedReporter: cachedReporter,
+		tags:           copyStringMap(opts.Tags),
+		reporter:       opts.Reporter,
+		cachedReporter: opts.CachedReporter,
 		baseReporter:   baseReporter,
+		defaultBuckets: opts.DefaultBuckets,
 
 		registry: &scopeRegistry{
 			subscopes: make(map[string]*scope),
 		},
 		quit: make(chan struct{}, 1),
 
-		counters: make(map[string]*counter),
-		gauges:   make(map[string]*gauge),
-		timers:   make(map[string]*timer),
+		counters:   make(map[string]*counter),
+		gauges:     make(map[string]*gauge),
+		timers:     make(map[string]*timer),
+		histograms: make(map[string]*histogram),
 	}
 
 	// Register the root scope
@@ -170,6 +181,12 @@ func (s *scope) report(r StatsReporter) {
 
 	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
 
+	s.hm.RLock()
+	for name, histogram := range s.histograms {
+		histogram.report(s.fullyQualifiedName(name), s.tags, r)
+	}
+	s.hm.RUnlock()
+
 	r.Flush()
 }
 
@@ -187,6 +204,12 @@ func (s *scope) cachedReport(c CachedStatsReporter) {
 	s.gm.RUnlock()
 
 	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
+
+	s.hm.RLock()
+	for _, histogram := range s.histograms {
+		histogram.cachedReport()
+	}
+	s.hm.RUnlock()
 
 	c.Flush()
 }
@@ -223,14 +246,13 @@ func (s *scope) Counter(name string) Counter {
 		s.cm.Lock()
 		val, ok = s.counters[name]
 		if !ok {
+			var cachedCounter CachedCount
 			if s.cachedReporter != nil {
-				cachedCounter := s.cachedReporter.AllocateCounter(
+				cachedCounter = s.cachedReporter.AllocateCounter(
 					s.fullyQualifiedName(name), s.tags,
 				)
-				val = newCounter(cachedCounter)
-			} else {
-				val = newCounter(nil)
 			}
+			val = newCounter(cachedCounter)
 			s.counters[name] = val
 		}
 		s.cm.Unlock()
@@ -246,14 +268,13 @@ func (s *scope) Gauge(name string) Gauge {
 		s.gm.Lock()
 		val, ok = s.gauges[name]
 		if !ok {
+			var cachedGauge CachedGauge
 			if s.cachedReporter != nil {
-				cachedGauge := s.cachedReporter.AllocateGauge(
+				cachedGauge = s.cachedReporter.AllocateGauge(
 					s.fullyQualifiedName(name), s.tags,
 				)
-				val = newGauge(cachedGauge)
-			} else {
-				val = newGauge(nil)
 			}
+			val = newGauge(cachedGauge)
 			s.gauges[name] = val
 		}
 		s.gm.Unlock()
@@ -269,21 +290,46 @@ func (s *scope) Timer(name string) Timer {
 		s.tm.Lock()
 		val, ok = s.timers[name]
 		if !ok {
+			var cachedTimer CachedTimer
 			if s.cachedReporter != nil {
-				cachedTimer := s.cachedReporter.AllocateTimer(
+				cachedTimer = s.cachedReporter.AllocateTimer(
 					s.fullyQualifiedName(name), s.tags,
 				)
-				val = newTimer(
-					s.fullyQualifiedName(name), s.tags, s.reporter, cachedTimer,
-				)
-			} else {
-				val = newTimer(
-					s.fullyQualifiedName(name), s.tags, s.reporter, nil,
-				)
 			}
+			val = newTimer(
+				s.fullyQualifiedName(name), s.tags, s.reporter, cachedTimer,
+			)
 			s.timers[name] = val
 		}
 		s.tm.Unlock()
+	}
+	return val
+}
+
+func (s *scope) Histogram(name string, b Buckets) Histogram {
+	if b == nil {
+		b = s.defaultBuckets
+	}
+
+	s.hm.RLock()
+	val, ok := s.histograms[name]
+	s.hm.RUnlock()
+	if !ok {
+		s.hm.Lock()
+		val, ok = s.histograms[name]
+		if !ok {
+			var cachedHistogram CachedHistogram
+			if s.cachedReporter != nil {
+				cachedHistogram = s.cachedReporter.AllocateHistogram(
+					s.fullyQualifiedName(name), s.tags, b,
+				)
+			}
+			val = newHistogram(
+				s.fullyQualifiedName(name), s.tags, s.reporter, b, cachedHistogram,
+			)
+			s.histograms[name] = val
+		}
+		s.hm.Unlock()
 	}
 	return val
 }
@@ -297,11 +343,7 @@ func (s *scope) SubScope(prefix string) Scope {
 }
 
 func (s *scope) subscope(prefix string, tags map[string]string) Scope {
-	if len(tags) == 0 {
-		tags = s.tags
-	} else {
-		tags = mergeRightTags(s.tags, tags)
-	}
+	tags = mergeRightTags(s.tags, tags)
 	key := scopeRegistryKey(prefix, tags)
 
 	s.registry.RLock()
@@ -329,11 +371,13 @@ func (s *scope) subscope(prefix string, tags map[string]string) Scope {
 		reporter:       s.reporter,
 		cachedReporter: s.cachedReporter,
 		baseReporter:   s.baseReporter,
+		defaultBuckets: s.defaultBuckets,
 		registry:       s.registry,
 
-		counters: make(map[string]*counter),
-		gauges:   make(map[string]*gauge),
-		timers:   make(map[string]*timer),
+		counters:   make(map[string]*counter),
+		gauges:     make(map[string]*gauge),
+		timers:     make(map[string]*timer),
+		histograms: make(map[string]*histogram),
 	}
 
 	s.registry.subscopes[key] = subscope
@@ -388,6 +432,7 @@ func (s *scope) Snapshot() Snapshot {
 			}
 		}
 		ss.tm.RUnlock()
+		// TODO: histograms in snapshot
 	}
 	s.registry.RUnlock()
 

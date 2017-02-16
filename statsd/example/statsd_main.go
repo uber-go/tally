@@ -25,10 +25,10 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/cactus/go-statsd-client/statsd"
-
 	"github.com/uber-go/tally"
 	statsdreporter "github.com/uber-go/tally/statsd"
+
+	"github.com/cactus/go-statsd-client/statsd"
 )
 
 // To view statsd emitted metrics locally you can use
@@ -43,8 +43,11 @@ func main() {
 	opts := statsdreporter.Options{}
 	r := statsdreporter.NewReporter(statter, opts)
 
-	scope, closer := tally.NewRootScope("my-service", map[string]string{},
-		r, 1*time.Second, tally.DefaultSeparator)
+	scope, closer := tally.NewRootScope(tally.ScopeOptions{
+		Prefix:   "my-service",
+		Tags:     map[string]string{},
+		Reporter: r,
+	}, 1*time.Second)
 	defer closer.Close()
 
 	counter := scope.Counter("test-counter")
@@ -52,6 +55,8 @@ func main() {
 	gauge := scope.Gauge("test-gauge")
 
 	timer := scope.Timer("test-timer")
+
+	histogram := scope.Histogram("test-histogram", tally.DefaultBuckets)
 
 	go func() {
 		for {
@@ -69,9 +74,11 @@ func main() {
 
 	go func() {
 		for {
-			sw := timer.Start()
+			tsw := timer.Start()
+			hsw := histogram.Start()
 			time.Sleep(time.Duration(rand.Float64() * float64(time.Second)))
-			sw.Stop()
+			tsw.Stop()
+			hsw.Stop()
 		}
 	}()
 

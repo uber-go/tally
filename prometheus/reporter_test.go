@@ -27,10 +27,15 @@ import (
 
 	prom "github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/uber-go/tally"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// NB(r): If a test is failing, you can debug what is being
+// gathered from Prometheus by printing the following:
+// proto.MarshalTextString(gather(t, registry)[0])
 
 func TestCounter(t *testing.T) {
 	registry := prom.NewRegistry()
@@ -244,6 +249,87 @@ func TestTimerSummary(t *testing.T) {
 						{quantile: 0.95, value: 3.232},
 						{quantile: 0.99, value: 3.232},
 						{quantile: 0.999, value: 3.232},
+					},
+				}),
+			},
+		},
+	})
+}
+
+func TestHistogramBucketValues(t *testing.T) {
+	registry := prom.NewRegistry()
+	r := NewReporter(Options{
+		Registerer: registry,
+	})
+
+	buckets := tally.DurationBuckets{
+		0 * time.Millisecond,
+		50 * time.Millisecond,
+		250 * time.Millisecond,
+		1000 * time.Millisecond,
+		2500 * time.Millisecond,
+		10000 * time.Millisecond,
+	}
+
+	name := "test_histogram"
+	tags := map[string]string{
+		"foo":  "bar",
+		"test": "everything",
+	}
+	tags2 := map[string]string{
+		"foo":  "baz",
+		"test": "something",
+	}
+	vals := []time.Duration{
+		23 * time.Millisecond,
+		223 * time.Millisecond,
+		320 * time.Millisecond,
+	}
+	vals2 := []time.Duration{
+		1742 * time.Millisecond,
+		3232 * time.Millisecond,
+	}
+
+	histogram := r.AllocateHistogram(name, tags, buckets)
+	histogram.DurationBucket(0, 50*time.Millisecond).ReportSamples(1)
+	histogram.DurationBucket(0, 250*time.Millisecond).ReportSamples(1)
+	histogram.DurationBucket(0, 1000*time.Millisecond).ReportSamples(1)
+
+	histogram = r.AllocateHistogram(name, tags2, buckets)
+	histogram.DurationBucket(0, 2500*time.Millisecond).ReportSamples(1)
+	histogram.DurationBucket(0, 10000*time.Millisecond).ReportSamples(1)
+
+	assertMetric(t, gather(t, registry), metric{
+		name:  name,
+		mtype: dto.MetricType_HISTOGRAM,
+		instances: []instance{
+			{
+				labels: tags,
+				histogram: histogramValue(histogramVal{
+					sampleCount: uint64(len(vals)),
+					sampleSum:   1.3,
+					buckets: []histogramValBucket{
+						{upperBound: 0.00, count: 0},
+						{upperBound: 0.05, count: 1},
+						{upperBound: 0.25, count: 2},
+						{upperBound: 1.00, count: 3},
+						{upperBound: 2.50, count: 3},
+						{upperBound: 10.00, count: 3},
+					},
+				}),
+			},
+			{
+				labels: tags2,
+				histogram: histogramValue(histogramVal{
+					sampleCount: uint64(len(vals2)),
+					sampleSum:   12.5,
+					buckets: []histogramValBucket{
+						{upperBound: 0.00, count: 0},
+						{upperBound: 0.05, count: 0},
+						{upperBound: 0.25, count: 0},
+						{upperBound: 1.00, count: 0},
+						{upperBound: 2.50, count: 1},
+						{upperBound: 10.00, count: 2},
 					},
 				}),
 			},

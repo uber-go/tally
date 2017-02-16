@@ -24,9 +24,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uber-go/tally"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uber-go/tally"
 )
 
 func TestMultiReporter(t *testing.T) {
@@ -42,12 +43,21 @@ func TestMultiReporter(t *testing.T) {
 		{"foo": "bar"},
 		{"foo": "baz"},
 		{"foo": "qux"},
+		{"foo": "bzz"},
+		{"foo": "buz"},
 	}
+
+	valueBuckets := tally.MustMakeLinearValueBuckets(0, 2, 5)
+	durationBuckets := tally.MustMakeLinearDurationBuckets(0, 2*time.Second, 5)
 
 	r.ReportCounter("foo", tags[0], 42)
 	r.ReportCounter("foo", tags[0], 84)
 	r.ReportGauge("baz", tags[1], 42.0)
 	r.ReportTimer("qux", tags[2], 126*time.Millisecond)
+	r.ReportHistogramValueSamples("bzz", tags[3], valueBuckets,
+		2.0, 4.0, 3)
+	r.ReportHistogramDurationSamples("buz", tags[4], durationBuckets,
+		2*time.Second, 4*time.Second, 3)
 	for _, r := range all {
 		require.Equal(t, 2, len(r.counts))
 
@@ -66,6 +76,18 @@ func TestMultiReporter(t *testing.T) {
 		assert.Equal(t, "qux", r.timers[0].name)
 		assert.Equal(t, tags[2], r.timers[0].tags)
 		assert.Equal(t, 126*time.Millisecond, r.timers[0].value)
+
+		assert.Equal(t, "bzz", r.histogramValueSamples[0].name)
+		assert.Equal(t, tags[3], r.histogramValueSamples[0].tags)
+		assert.Equal(t, 2.0, r.histogramValueSamples[0].bucketLowerBound)
+		assert.Equal(t, 4.0, r.histogramValueSamples[0].bucketUpperBound)
+		assert.Equal(t, int64(3), r.histogramValueSamples[0].samples)
+
+		assert.Equal(t, "buz", r.histogramDurationSamples[0].name)
+		assert.Equal(t, tags[4], r.histogramDurationSamples[0].tags)
+		assert.Equal(t, 2*time.Second, r.histogramDurationSamples[0].bucketLowerBound)
+		assert.Equal(t, 4*time.Second, r.histogramDurationSamples[0].bucketUpperBound)
+		assert.Equal(t, int64(3), r.histogramDurationSamples[0].samples)
 	}
 
 	assert.NotNil(t, r.Capabilities())
@@ -89,7 +111,12 @@ func TestMultiCachedReporter(t *testing.T) {
 		{"foo": "bar"},
 		{"foo": "baz"},
 		{"foo": "qux"},
+		{"foo": "bzz"},
+		{"foo": "buz"},
 	}
+
+	valueBuckets := tally.MustMakeLinearValueBuckets(0, 2, 5)
+	durationBuckets := tally.MustMakeLinearDurationBuckets(0, 2*time.Second, 5)
 
 	ctr := r.AllocateCounter("foo", tags[0])
 	ctr.ReportCount(42)
@@ -100,6 +127,12 @@ func TestMultiCachedReporter(t *testing.T) {
 
 	tmr := r.AllocateTimer("qux", tags[2])
 	tmr.ReportTimer(126 * time.Millisecond)
+
+	vhist := r.AllocateHistogram("bzz", tags[3], valueBuckets)
+	vhist.ValueBucket(2.0, 4.0).ReportSamples(3)
+
+	dhist := r.AllocateHistogram("buz", tags[4], durationBuckets)
+	dhist.DurationBucket(2*time.Second, 4*time.Second).ReportSamples(3)
 
 	for _, r := range all {
 		require.Equal(t, 2, len(r.counts))
@@ -119,6 +152,18 @@ func TestMultiCachedReporter(t *testing.T) {
 		assert.Equal(t, "qux", r.timers[0].name)
 		assert.Equal(t, tags[2], r.timers[0].tags)
 		assert.Equal(t, 126*time.Millisecond, r.timers[0].value)
+
+		assert.Equal(t, "bzz", r.histogramValueSamples[0].name)
+		assert.Equal(t, tags[3], r.histogramValueSamples[0].tags)
+		assert.Equal(t, 2.0, r.histogramValueSamples[0].bucketLowerBound)
+		assert.Equal(t, 4.0, r.histogramValueSamples[0].bucketUpperBound)
+		assert.Equal(t, int64(3), r.histogramValueSamples[0].samples)
+
+		assert.Equal(t, "buz", r.histogramDurationSamples[0].name)
+		assert.Equal(t, tags[4], r.histogramDurationSamples[0].tags)
+		assert.Equal(t, 2*time.Second, r.histogramDurationSamples[0].bucketLowerBound)
+		assert.Equal(t, 4*time.Second, r.histogramDurationSamples[0].bucketUpperBound)
+		assert.Equal(t, int64(3), r.histogramDurationSamples[0].samples)
 	}
 
 	assert.NotNil(t, r.Capabilities())
@@ -130,11 +175,13 @@ func TestMultiCachedReporter(t *testing.T) {
 }
 
 type capturingStatsReporter struct {
-	counts       []capturedCount
-	gauges       []capturedGauge
-	timers       []capturedTimer
-	capabilities int
-	flush        int
+	counts                   []capturedCount
+	gauges                   []capturedGauge
+	timers                   []capturedTimer
+	histogramValueSamples    []capturedHistogramValueSamples
+	histogramDurationSamples []capturedHistogramDurationSamples
+	capabilities             int
+	flush                    int
 }
 
 type capturedCount struct {
@@ -153,6 +200,22 @@ type capturedTimer struct {
 	name  string
 	tags  map[string]string
 	value time.Duration
+}
+
+type capturedHistogramValueSamples struct {
+	name             string
+	tags             map[string]string
+	bucketLowerBound float64
+	bucketUpperBound float64
+	samples          int64
+}
+
+type capturedHistogramDurationSamples struct {
+	name             string
+	tags             map[string]string
+	bucketLowerBound time.Duration
+	bucketUpperBound time.Duration
+	samples          int64
 }
 
 func newCapturingStatsReporter() *capturingStatsReporter {
@@ -183,6 +246,32 @@ func (r *capturingStatsReporter) ReportTimer(
 	r.timers = append(r.timers, capturedTimer{name, tags, value})
 }
 
+func (r *capturingStatsReporter) ReportHistogramValueSamples(
+	name string,
+	tags map[string]string,
+	buckets tally.Buckets,
+	bucketLowerBound,
+	bucketUpperBound float64,
+	samples int64,
+) {
+	elem := capturedHistogramValueSamples{name, tags,
+		bucketLowerBound, bucketUpperBound, samples}
+	r.histogramValueSamples = append(r.histogramValueSamples, elem)
+}
+
+func (r *capturingStatsReporter) ReportHistogramDurationSamples(
+	name string,
+	tags map[string]string,
+	buckets tally.Buckets,
+	bucketLowerBound,
+	bucketUpperBound time.Duration,
+	samples int64,
+) {
+	elem := capturedHistogramDurationSamples{name, tags,
+		bucketLowerBound, bucketUpperBound, samples}
+	r.histogramDurationSamples = append(r.histogramDurationSamples, elem)
+}
+
 func (r *capturingStatsReporter) AllocateCounter(
 	name string,
 	tags map[string]string,
@@ -210,6 +299,27 @@ func (r *capturingStatsReporter) AllocateTimer(
 	}}
 }
 
+func (r *capturingStatsReporter) AllocateHistogram(
+	name string,
+	tags map[string]string,
+	buckets tally.Buckets,
+) tally.CachedHistogram {
+	return cachedHistogram{
+		valueFn: func(bucketLowerBound, bucketUpperBound float64, samples int64) {
+			elem := capturedHistogramValueSamples{
+				name, tags, bucketLowerBound, bucketUpperBound, samples,
+			}
+			r.histogramValueSamples = append(r.histogramValueSamples, elem)
+		},
+		durationFn: func(bucketLowerBound, bucketUpperBound time.Duration, samples int64) {
+			elem := capturedHistogramDurationSamples{
+				name, tags, bucketLowerBound, bucketUpperBound, samples,
+			}
+			r.histogramDurationSamples = append(r.histogramDurationSamples, elem)
+		},
+	}
+}
+
 func (r *capturingStatsReporter) Capabilities() tally.Capabilities {
 	r.capabilities++
 	return r
@@ -220,6 +330,10 @@ func (r *capturingStatsReporter) Reporting() bool {
 }
 
 func (r *capturingStatsReporter) Tagging() bool {
+	return true
+}
+
+func (r *capturingStatsReporter) Histograms() bool {
 	return true
 }
 
@@ -249,4 +363,41 @@ type cachedTimer struct {
 
 func (c cachedTimer) ReportTimer(value time.Duration) {
 	c.fn(value)
+}
+
+type cachedHistogram struct {
+	valueFn    func(bucketLowerBound, bucketUpperBound float64, samples int64)
+	durationFn func(bucketLowerBound, bucketUpperBound time.Duration, samples int64)
+}
+
+func (h cachedHistogram) ValueBucket(
+	bucketLowerBound, bucketUpperBound float64,
+) tally.CachedHistogramBucket {
+	return cachedHistogramValueBucket{&h, bucketLowerBound, bucketUpperBound}
+}
+
+func (h cachedHistogram) DurationBucket(
+	bucketLowerBound, bucketUpperBound time.Duration,
+) tally.CachedHistogramBucket {
+	return cachedHistogramDurationBucket{&h, bucketLowerBound, bucketUpperBound}
+}
+
+type cachedHistogramValueBucket struct {
+	histogram        *cachedHistogram
+	bucketLowerBound float64
+	bucketUpperBound float64
+}
+
+func (b cachedHistogramValueBucket) ReportSamples(v int64) {
+	b.histogram.valueFn(b.bucketLowerBound, b.bucketUpperBound, v)
+}
+
+type cachedHistogramDurationBucket struct {
+	histogram        *cachedHistogram
+	bucketLowerBound time.Duration
+	bucketUpperBound time.Duration
+}
+
+func (b cachedHistogramDurationBucket) ReportSamples(v int64) {
+	b.histogram.durationFn(b.bucketLowerBound, b.bucketUpperBound, v)
 }

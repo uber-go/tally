@@ -26,10 +26,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/uber-go/tally"
+
 	prom "github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
-	"github.com/uber-go/tally"
 )
 
 const (
@@ -150,6 +150,7 @@ type reporter struct {
 	counters        map[metricID]*prom.CounterVec
 	gauges          map[metricID]*prom.GaugeVec
 	timers          map[metricID]*promTimerVec
+	histograms      map[metricID]*prom.HistogramVec
 }
 
 type promTimerVec struct {
@@ -185,11 +186,42 @@ func (m *cachedMetric) reportTimerSummary(interval time.Duration) {
 	m.summary.Observe(float64(interval) / float64(time.Second))
 }
 
+func (m *cachedMetric) ValueBucket(
+	bucketLowerBound, bucketUpperBound float64,
+) tally.CachedHistogramBucket {
+	return cachedHistogramBucket{m, bucketUpperBound}
+}
+
+func (m *cachedMetric) DurationBucket(
+	bucketLowerBound, bucketUpperBound time.Duration,
+) tally.CachedHistogramBucket {
+	upperBound := float64(bucketUpperBound) / float64(time.Second)
+	return cachedHistogramBucket{m, upperBound}
+}
+
+type cachedHistogramBucket struct {
+	metric     *cachedMetric
+	upperBound float64
+}
+
+func (b cachedHistogramBucket) ReportSamples(value int64) {
+	for i := int64(0); i < value; i++ {
+		b.metric.histogram.Observe(b.upperBound)
+	}
+}
+
 type noopMetric struct{}
 
 func (m noopMetric) ReportCount(value int64)            {}
 func (m noopMetric) ReportGauge(value float64)          {}
 func (m noopMetric) ReportTimer(interval time.Duration) {}
+func (m noopMetric) ReportSamples(value int64)          {}
+func (m noopMetric) ValueBucket(lower, upper float64) tally.CachedHistogramBucket {
+	return m
+}
+func (m noopMetric) DurationBucket(lower, upper time.Duration) tally.CachedHistogramBucket {
+	return m
+}
 
 func (r *reporter) HTTPHandler() http.Handler {
 	return promhttp.Handler()
@@ -199,10 +231,11 @@ func (r *reporter) HTTPHandler() http.Handler {
 type TimerType int
 
 const (
-	// HistogramTimerType is a timer type that reports into a histogram
-	HistogramTimerType TimerType = iota
 	// SummaryTimerType is a timer type that reports into a summary
-	SummaryTimerType
+	SummaryTimerType TimerType = iota
+
+	// HistogramTimerType is a timer type that reports into a histogram
+	HistogramTimerType
 )
 
 // Options is a set of options for the tally reporter.
@@ -212,7 +245,7 @@ type Options struct {
 	Registerer prom.Registerer
 
 	// DefaultTimerType is the default type timer type to create
-	// when using timers. It's default value is a histogram timer type.
+	// when using timers. It's default value is a summary timer type.
 	DefaultTimerType TimerType
 
 	// DefaultHistogramBuckets is the default histogram buckets
@@ -472,7 +505,7 @@ func (r *reporter) AllocateTimer(name string, tags map[string]string) tally.Cach
 	switch timerType {
 	case HistogramTimerType:
 		var histogramVec *prom.HistogramVec
-		histogramVec, err = r.histogramVec(name, tagKeys, name+" timer histogram", buckets)
+		histogramVec, err = r.histogramVec(name, tagKeys, name+" histogram", buckets)
 		if err == nil {
 			t := &cachedMetric{histogram: histogramVec.With(tags)}
 			t.reportTimer = t.reportTimerHistogram
@@ -480,7 +513,7 @@ func (r *reporter) AllocateTimer(name string, tags map[string]string) tally.Cach
 		}
 	case SummaryTimerType:
 		var summaryVec *prom.SummaryVec
-		summaryVec, err = r.summaryVec(name, tagKeys, name+" timer summary", objectives)
+		summaryVec, err = r.summaryVec(name, tagKeys, name+" summary", objectives)
 		if err == nil {
 			t := &cachedMetric{summary: summaryVec.With(tags)}
 			t.reportTimer = t.reportTimerSummary
@@ -496,6 +529,20 @@ func (r *reporter) AllocateTimer(name string, tags map[string]string) tally.Cach
 	return timer
 }
 
+func (r *reporter) AllocateHistogram(
+	name string,
+	tags map[string]string,
+	buckets tally.Buckets,
+) tally.CachedHistogram {
+	tagKeys := keysFromMap(tags)
+	histogramVec, err := r.histogramVec(name, tagKeys, name+" histogram", buckets.AsValues())
+	if err != nil {
+		r.onRegisterError(err)
+		return noopMetric{}
+	}
+	return &cachedMetric{histogram: histogramVec.With(tags)}
+}
+
 func (r *reporter) Capabilities() tally.Capabilities {
 	return r
 }
@@ -505,6 +552,10 @@ func (r *reporter) Reporting() bool {
 }
 
 func (r *reporter) Tagging() bool {
+	return true
+}
+
+func (r *reporter) Histograms() bool {
 	return true
 }
 

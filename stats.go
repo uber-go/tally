@@ -22,6 +22,7 @@ package tally
 
 import (
 	"math"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,22 +30,31 @@ import (
 
 var (
 	capabilitiesNone = &capabilities{
-		reporting: false,
-		tagging:   false,
+		reporting:  false,
+		tagging:    false,
+		histograms: false,
 	}
-	capabilitiesReportingNoTagging = &capabilities{
-		reporting: true,
-		tagging:   false,
+	capabilitiesReportingNoTaggingNoHistograms = &capabilities{
+		reporting:  true,
+		tagging:    false,
+		histograms: false,
 	}
-	capabilitiesReportingTagging = &capabilities{
-		reporting: true,
-		tagging:   true,
+	capabilitiesReportingTaggingNoHistograms = &capabilities{
+		reporting:  true,
+		tagging:    true,
+		histograms: false,
+	}
+	capabilitiesReportingTaggingHistograms = &capabilities{
+		reporting:  true,
+		tagging:    true,
+		histograms: true,
 	}
 )
 
 type capabilities struct {
-	reporting bool
-	tagging   bool
+	reporting  bool
+	tagging    bool
+	histograms bool
 }
 
 func (c *capabilities) Reporting() bool {
@@ -53,6 +63,10 @@ func (c *capabilities) Reporting() bool {
 
 func (c *capabilities) Tagging() bool {
 	return c.tagging
+}
+
+func (c *capabilities) Histograms() bool {
+	return c.histograms
 }
 
 type counter struct {
@@ -162,8 +176,8 @@ func newTimer(
 	t := &timer{
 		name:        name,
 		tags:        tags,
-		cachedTimer: cachedTimer,
 		reporter:    r,
+		cachedTimer: cachedTimer,
 	}
 	if r == nil {
 		t.reporter = &timerNoReporterSink{timer: t}
@@ -172,7 +186,7 @@ func newTimer(
 }
 
 func (t *timer) Start() Stopwatch {
-	return Stopwatch{start: globalClock.Now(), timer: t}
+	return timerStopwatch{start: globalClock.Now(), timer: t}
 }
 
 func (t *timer) Record(interval time.Duration) {
@@ -193,27 +207,241 @@ func (t *timer) snapshot() []time.Duration {
 	return snap
 }
 
+type timerStopwatch struct {
+	start   time.Time
+	timer   *timer
+	stopped int32
+}
+
+func (s timerStopwatch) Stop() {
+	if atomic.CompareAndSwapInt32(&s.stopped, 0, 1) {
+		d := globalClock.Now().Sub(s.start)
+		s.timer.Record(d)
+	}
+}
+
 type timerNoReporterSink struct {
 	sync.RWMutex
 	timer *timer
 }
 
-func (r *timerNoReporterSink) ReportCounter(name string, tags map[string]string, value int64) {
+func (r *timerNoReporterSink) ReportCounter(
+	name string,
+	tags map[string]string,
+	value int64,
+) {
 }
-func (r *timerNoReporterSink) ReportGauge(name string, tags map[string]string, value float64) {
+
+func (r *timerNoReporterSink) ReportGauge(
+	name string,
+	tags map[string]string,
+	value float64,
+) {
 }
-func (r *timerNoReporterSink) ReportTimer(name string, tags map[string]string, interval time.Duration) {
+
+func (r *timerNoReporterSink) ReportTimer(
+	name string,
+	tags map[string]string,
+	interval time.Duration,
+) {
 	r.timer.unreported.Lock()
 	r.timer.unreported.values = append(r.timer.unreported.values, interval)
 	r.timer.unreported.Unlock()
 }
-func (r *timerNoReporterSink) Capabilities() Capabilities {
-	return capabilitiesReportingTagging
+
+func (r *timerNoReporterSink) ReportHistogramValueSamples(
+	name string,
+	tags map[string]string,
+	buckets Buckets,
+	bucketLowerBound,
+	bucketUpperBound float64,
+	samples int64,
+) {
 }
+
+func (r *timerNoReporterSink) ReportHistogramDurationSamples(
+	name string,
+	tags map[string]string,
+	buckets Buckets,
+	bucketLowerBound,
+	bucketUpperBound time.Duration,
+	samples int64,
+) {
+}
+
+func (r *timerNoReporterSink) Capabilities() Capabilities {
+	return capabilitiesReportingTaggingNoHistograms
+}
+
 func (r *timerNoReporterSink) Flush() {
 }
 
-// NullStatsReporter is an implementatin of StatsReporter than simply does nothing.
+type histogram struct {
+	htype            histogramType
+	name             string
+	tags             map[string]string
+	reporter         StatsReporter
+	specification    Buckets
+	buckets          []histogramBucket
+	lookupByValue    []float64
+	lookupByDuration []int
+}
+
+type histogramType int
+
+const (
+	valueHistogramType histogramType = iota
+	durationHistogramType
+)
+
+func newHistogram(
+	name string,
+	tags map[string]string,
+	reporter StatsReporter,
+	buckets Buckets,
+	cachedHistogram CachedHistogram,
+) *histogram {
+	htype := valueHistogramType
+	if _, ok := buckets.(DurationBuckets); ok {
+		htype = durationHistogramType
+	}
+
+	pairs := BucketPairs(buckets)
+
+	h := &histogram{
+		htype:            htype,
+		name:             name,
+		tags:             tags,
+		reporter:         reporter,
+		specification:    buckets,
+		buckets:          make([]histogramBucket, 0, len(pairs)),
+		lookupByValue:    make([]float64, 0, len(pairs)),
+		lookupByDuration: make([]int, 0, len(pairs)),
+	}
+
+	for _, pair := range pairs {
+		h.addBucket(newHistogramBucket(h,
+			pair.LowerBoundValue(), pair.UpperBoundValue(),
+			pair.LowerBoundDuration(), pair.UpperBoundDuration(),
+			cachedHistogram))
+	}
+
+	return h
+}
+
+func (h *histogram) addBucket(b histogramBucket) {
+	h.buckets = append(h.buckets, b)
+	h.lookupByValue = append(h.lookupByValue, b.valueUpperBound)
+	h.lookupByDuration = append(h.lookupByDuration, int(b.durationUpperBound))
+}
+
+func (h *histogram) report(name string, tags map[string]string, r StatsReporter) {
+	for i := range h.buckets {
+		samples := h.buckets[i].samples.value()
+		if samples == 0 {
+			continue
+		}
+		switch h.htype {
+		case valueHistogramType:
+			r.ReportHistogramValueSamples(name, tags, h.specification,
+				h.buckets[i].valueLowerBound, h.buckets[i].valueUpperBound,
+				samples)
+		case durationHistogramType:
+			r.ReportHistogramDurationSamples(name, tags, h.specification,
+				h.buckets[i].durationLowerBound, h.buckets[i].durationUpperBound,
+				samples)
+		}
+	}
+}
+
+func (h *histogram) cachedReport() {
+	for i := range h.buckets {
+		samples := h.buckets[i].samples.value()
+		if samples == 0 {
+			continue
+		}
+		switch h.htype {
+		case valueHistogramType:
+			h.buckets[i].cachedValueBucket.ReportSamples(samples)
+		case durationHistogramType:
+			h.buckets[i].cachedDurationBucket.ReportSamples(samples)
+		}
+	}
+}
+
+func (h *histogram) RecordValue(value float64) {
+	// Find the highest inclusive of the bucket upper bound
+	// and emit directly to it. Since we use BucketPairs to derive
+	// buckets there will always be an inclusive bucket as
+	// we always have a math.MaxFloat64 bucket.
+	idx := sort.SearchFloat64s(h.lookupByValue, value)
+	h.buckets[idx].samples.Inc(1)
+}
+
+func (h *histogram) RecordDuration(value time.Duration) {
+	// Find the highest inclusive of the bucket upper bound
+	// and emit directly to it. Since we use BucketPairs to derive
+	// buckets there will always be an inclusive bucket as
+	// we always have a math.MaxInt64 bucket.
+	idx := sort.SearchInts(h.lookupByDuration, int(value))
+	h.buckets[idx].samples.Inc(1)
+}
+
+func (h *histogram) Start() Stopwatch {
+	return histogramStopwatch{start: globalClock.Now(), histogram: h}
+}
+
+type histogramBucket struct {
+	h                    *histogram
+	samples              *counter
+	valueLowerBound      float64
+	valueUpperBound      float64
+	durationLowerBound   time.Duration
+	durationUpperBound   time.Duration
+	cachedValueBucket    CachedHistogramBucket
+	cachedDurationBucket CachedHistogramBucket
+}
+
+func newHistogramBucket(
+	h *histogram,
+	valueLowerBound,
+	valueUpperBound float64,
+	durationLowerBound,
+	durationUpperBound time.Duration,
+	cachedHistogram CachedHistogram,
+) histogramBucket {
+	bucket := histogramBucket{
+		samples:            newCounter(nil),
+		valueLowerBound:    valueLowerBound,
+		valueUpperBound:    valueUpperBound,
+		durationLowerBound: durationLowerBound,
+		durationUpperBound: durationUpperBound,
+	}
+	if cachedHistogram != nil {
+		bucket.cachedValueBucket = cachedHistogram.ValueBucket(
+			bucket.valueLowerBound, bucket.valueUpperBound,
+		)
+		bucket.cachedDurationBucket = cachedHistogram.DurationBucket(
+			bucket.durationLowerBound, bucket.durationUpperBound,
+		)
+	}
+	return bucket
+}
+
+type histogramStopwatch struct {
+	start     time.Time
+	histogram *histogram
+	stopped   int32
+}
+
+func (s histogramStopwatch) Stop() {
+	if atomic.CompareAndSwapInt32(&s.stopped, 0, 1) {
+		d := globalClock.Now().Sub(s.start)
+		s.histogram.RecordDuration(d)
+	}
+}
+
+// NullStatsReporter is an implementation of StatsReporter than simply does nothing.
 var NullStatsReporter StatsReporter = nullStatsReporter{}
 
 func (r nullStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
@@ -222,8 +450,27 @@ func (r nullStatsReporter) ReportGauge(name string, tags map[string]string, valu
 }
 func (r nullStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
 }
+func (r nullStatsReporter) ReportHistogramValueSamples(
+	name string,
+	tags map[string]string,
+	buckets Buckets,
+	bucketLowerBound,
+	bucketUpperBound float64,
+	samples int64,
+) {
+}
+
+func (r nullStatsReporter) ReportHistogramDurationSamples(
+	name string,
+	tags map[string]string,
+	buckets Buckets,
+	bucketLowerBound,
+	bucketUpperBound time.Duration,
+	samples int64,
+) {
+}
 func (r nullStatsReporter) Capabilities() Capabilities {
-	return capabilitiesReportingNoTagging
+	return capabilitiesNone
 }
 func (r nullStatsReporter) Flush() {
 }

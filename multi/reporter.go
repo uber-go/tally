@@ -75,6 +75,34 @@ func (r *multi) ReportTimer(
 	}
 }
 
+func (r *multi) ReportHistogramValueSamples(
+	name string,
+	tags map[string]string,
+	buckets tally.Buckets,
+	bucketLowerBound,
+	bucketUpperBound float64,
+	samples int64,
+) {
+	for _, r := range r.reporters {
+		r.ReportHistogramValueSamples(name, tags, buckets,
+			bucketLowerBound, bucketUpperBound, samples)
+	}
+}
+
+func (r *multi) ReportHistogramDurationSamples(
+	name string,
+	tags map[string]string,
+	buckets tally.Buckets,
+	bucketLowerBound,
+	bucketUpperBound time.Duration,
+	samples int64,
+) {
+	for _, r := range r.reporters {
+		r.ReportHistogramDurationSamples(name, tags, buckets,
+			bucketLowerBound, bucketUpperBound, samples)
+	}
+}
+
 func (r *multi) Capabilities() tally.Capabilities {
 	return r.multiBaseReporters.Capabilities()
 }
@@ -135,6 +163,18 @@ func (r *multiCached) AllocateTimer(
 	return multiMetric{timers: metrics}
 }
 
+func (r *multiCached) AllocateHistogram(
+	name string,
+	tags map[string]string,
+	buckets tally.Buckets,
+) tally.CachedHistogram {
+	metrics := make([]tally.CachedHistogram, 0, len(r.reporters))
+	for _, r := range r.reporters {
+		metrics = append(metrics, r.AllocateHistogram(name, tags, buckets))
+	}
+	return multiMetric{histograms: metrics}
+}
+
 func (r *multiCached) Capabilities() tally.Capabilities {
 	return r.multiBaseReporters.Capabilities()
 }
@@ -144,9 +184,10 @@ func (r *multiCached) Flush() {
 }
 
 type multiMetric struct {
-	counters []tally.CachedCount
-	gauges   []tally.CachedGauge
-	timers   []tally.CachedTimer
+	counters   []tally.CachedCount
+	gauges     []tally.CachedGauge
+	timers     []tally.CachedTimer
+	histograms []tally.CachedHistogram
 }
 
 func (m multiMetric) ReportCount(value int64) {
@@ -167,6 +208,38 @@ func (m multiMetric) ReportTimer(interval time.Duration) {
 	}
 }
 
+func (m multiMetric) ValueBucket(
+	bucketLowerBound, bucketUpperBound float64,
+) tally.CachedHistogramBucket {
+	var multi []tally.CachedHistogramBucket
+	for _, m := range m.histograms {
+		multi = append(multi,
+			m.ValueBucket(bucketLowerBound, bucketUpperBound))
+	}
+	return multiHistogramBucket{multi}
+}
+
+func (m multiMetric) DurationBucket(
+	bucketLowerBound, bucketUpperBound time.Duration,
+) tally.CachedHistogramBucket {
+	var multi []tally.CachedHistogramBucket
+	for _, m := range m.histograms {
+		multi = append(multi,
+			m.DurationBucket(bucketLowerBound, bucketUpperBound))
+	}
+	return multiHistogramBucket{multi}
+}
+
+type multiHistogramBucket struct {
+	multi []tally.CachedHistogramBucket
+}
+
+func (m multiHistogramBucket) ReportSamples(value int64) {
+	for _, m := range m.multi {
+		m.ReportSamples(value)
+	}
+}
+
 type multiBaseReporters []tally.BaseStatsReporter
 
 func (r multiBaseReporters) Capabilities() tally.Capabilities {
@@ -174,6 +247,7 @@ func (r multiBaseReporters) Capabilities() tally.Capabilities {
 	for _, r := range r {
 		c.reporting = c.reporting && r.Capabilities().Reporting()
 		c.tagging = c.tagging && r.Capabilities().Tagging()
+		c.histograms = c.histograms && r.Capabilities().Histograms()
 	}
 	return c
 }
@@ -185,8 +259,9 @@ func (r multiBaseReporters) Flush() {
 }
 
 type capabilities struct {
-	reporting bool
-	tagging   bool
+	reporting  bool
+	tagging    bool
+	histograms bool
 }
 
 func (c *capabilities) Reporting() bool {
@@ -195,4 +270,8 @@ func (c *capabilities) Reporting() bool {
 
 func (c *capabilities) Tagging() bool {
 	return c.tagging
+}
+
+func (c *capabilities) Histograms() bool {
+	return c.histograms
 }

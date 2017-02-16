@@ -35,8 +35,12 @@ func main() {
 
 	// Note: `promreporter.DefaultSeparator` is "_".
 	// Prometheus doesnt like metrics with "." or "-" in them.
-	scope, closer := tally.NewCachedRootScope("my_service", map[string]string{},
-		r, 1*time.Second, promreporter.DefaultSeparator)
+	scope, closer := tally.NewRootScope(tally.ScopeOptions{
+		Prefix:         "my_service",
+		Tags:           map[string]string{},
+		CachedReporter: r,
+		Separator:      promreporter.DefaultSeparator,
+	}, 1*time.Second)
 	defer closer.Close()
 
 	counter := scope.Tagged(map[string]string{
@@ -49,7 +53,11 @@ func main() {
 
 	timer := scope.Tagged(map[string]string{
 		"foo": "qux",
-	}).Timer("test_timer_histogram")
+	}).Timer("test_timer_summary")
+
+	histogram := scope.Tagged(map[string]string{
+		"foo": "quk",
+	}).Histogram("test_histogram", tally.DefaultBuckets)
 
 	go func() {
 		for {
@@ -67,9 +75,11 @@ func main() {
 
 	go func() {
 		for {
-			sw := timer.Start()
+			tsw := timer.Start()
+			hsw := histogram.Start()
 			time.Sleep(time.Duration(rand.Float64() * float64(time.Second)))
-			sw.Stop()
+			tsw.Stop()
+			hsw.Stop()
 		}
 	}()
 

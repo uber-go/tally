@@ -26,6 +26,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -58,8 +59,17 @@ const (
 	DefaultMaxQueueSize = 4096
 	// DefaultMaxPacketSize is the default M3 reporter max packet size.
 	DefaultMaxPacketSize = int32(1440)
+	// DefaultHistogramBucketIDName is the default histogram bucket ID tag name
+	DefaultHistogramBucketIDName = "bucketid"
+	// DefaultHistogramBucketName is the default histogram bucket name tag name
+	DefaultHistogramBucketName = "bucket"
+	// DefaultHistogramBucketTagPrecision is the default
+	// precision to use when formatting the metric tag
+	// with the histogram bucket bound values.
+	DefaultHistogramBucketTagPrecision = uint(6)
 
-	emitMetricBatchOverhead = 19
+	emitMetricBatchOverhead    = 19
+	minMetricBucketIDTagLength = 4
 )
 
 // Initialize max vars in init function to avoid lint error.
@@ -96,32 +106,37 @@ type Reporter interface {
 // remote M3 collector, metrics are batched together and emitted
 // via either thrift compact or binary protocol in batch UDP packets.
 type reporter struct {
-	client       *m3thrift.M3Client
-	curBatch     *m3thrift.MetricBatch
-	curBatchLock sync.Mutex
-	calc         *customtransport.TCalcTransport
-	calcProto    thrift.TProtocol
-	calcLock     sync.Mutex
-	commonTags   map[*m3thrift.MetricTag]bool
-	freeBytes    int32
-	processors   sync.WaitGroup
-	resourcePool *resourcePool
-	closeChan    chan struct{}
+	client          *m3thrift.M3Client
+	curBatch        *m3thrift.MetricBatch
+	curBatchLock    sync.Mutex
+	calc            *customtransport.TCalcTransport
+	calcProto       thrift.TProtocol
+	calcLock        sync.Mutex
+	commonTags      map[*m3thrift.MetricTag]bool
+	freeBytes       int32
+	processors      sync.WaitGroup
+	resourcePool    *resourcePool
+	bucketIDTagName string
+	bucketTagName   string
+	bucketValFmt    string
+	closeChan       chan struct{}
 
 	metCh chan sizedMetric
 }
 
 // Options is a set of options for the M3 reporter.
 type Options struct {
-	HostPorts          []string
-	Service            string
-	Env                string
-	CommonTags         map[string]string
-	IncludeHost        bool
-	Protocol           Protocol
-	MaxQueueSize       int
-	MaxPacketSizeBytes int32
-	Interval           time.Duration
+	HostPorts                   []string
+	Service                     string
+	Env                         string
+	CommonTags                  map[string]string
+	IncludeHost                 bool
+	Protocol                    Protocol
+	MaxQueueSize                int
+	MaxPacketSizeBytes          int32
+	HistogramBucketIDName       string
+	HistogramBucketName         string
+	HistogramBucketTagPrecision uint
 }
 
 // NewReporter creates a new M3 reporter.
@@ -131,6 +146,15 @@ func NewReporter(opts Options) (Reporter, error) {
 	}
 	if opts.MaxPacketSizeBytes <= 0 {
 		opts.MaxPacketSizeBytes = DefaultMaxPacketSize
+	}
+	if opts.HistogramBucketIDName == "" {
+		opts.HistogramBucketIDName = DefaultHistogramBucketIDName
+	}
+	if opts.HistogramBucketName == "" {
+		opts.HistogramBucketName = DefaultHistogramBucketName
+	}
+	if opts.HistogramBucketTagPrecision == 0 {
+		opts.HistogramBucketTagPrecision = DefaultHistogramBucketTagPrecision
 	}
 
 	// Create M3 thrift client
@@ -200,14 +224,17 @@ func NewReporter(opts Options) (Reporter, error) {
 	}
 
 	r := &reporter{
-		client:       client,
-		curBatch:     batch,
-		calc:         calc,
-		calcProto:    proto,
-		commonTags:   tags,
-		freeBytes:    freeBytes,
-		resourcePool: resourcePool,
-		metCh:        make(chan sizedMetric, opts.MaxQueueSize),
+		client:          client,
+		curBatch:        batch,
+		calc:            calc,
+		calcProto:       proto,
+		commonTags:      tags,
+		freeBytes:       freeBytes,
+		resourcePool:    resourcePool,
+		bucketIDTagName: opts.HistogramBucketIDName,
+		bucketTagName:   opts.HistogramBucketName,
+		bucketValFmt:    "%." + strconv.Itoa(int(opts.HistogramBucketTagPrecision)) + "f",
+		metCh:           make(chan sizedMetric, opts.MaxQueueSize),
 	}
 
 	r.processors.Add(1)
@@ -220,6 +247,12 @@ func NewReporter(opts Options) (Reporter, error) {
 func (r *reporter) AllocateCounter(
 	name string, tags map[string]string,
 ) tally.CachedCount {
+	return r.allocateCounter(name, tags)
+}
+
+func (r *reporter) allocateCounter(
+	name string, tags map[string]string,
+) cachedMetric {
 	counter := r.newMetric(name, tags, counterType)
 	size := r.calculateSize(counter)
 	return cachedMetric{counter, r, size}
@@ -241,6 +274,77 @@ func (r *reporter) AllocateTimer(
 	timer := r.newMetric(name, tags, timerType)
 	size := r.calculateSize(timer)
 	return cachedMetric{timer, r, size}
+}
+
+// AllocateHistogram implements tally.CachedStatsReporter.
+func (r *reporter) AllocateHistogram(
+	name string,
+	tags map[string]string,
+	buckets tally.Buckets,
+) tally.CachedHistogram {
+	var (
+		cachedValueBuckets    []cachedHistogramBucket
+		cachedDurationBuckets []cachedHistogramBucket
+	)
+	bucketIDLen := len(strconv.Itoa(buckets.Len()))
+	bucketIDLen = int(math.Max(float64(bucketIDLen),
+		float64(minMetricBucketIDTagLength)))
+	bucketIDLenStr := strconv.Itoa(bucketIDLen)
+	bucketIDFmt := "%0" + bucketIDLenStr + "d"
+	for i, pair := range tally.BucketPairs(buckets) {
+		valueTags, durationTags :=
+			make(map[string]string), make(map[string]string)
+		for k, v := range tags {
+			valueTags[k], durationTags[k] = v, v
+		}
+
+		idTagValue := fmt.Sprintf(bucketIDFmt, i)
+
+		valueTags[r.bucketIDTagName] = idTagValue
+		valueTags[r.bucketTagName] = fmt.Sprintf("%s-%s",
+			r.valueBucketString(pair.LowerBoundValue()),
+			r.valueBucketString(pair.UpperBoundValue()))
+
+		cachedValueBuckets = append(cachedValueBuckets,
+			cachedHistogramBucket{pair.UpperBoundValue(),
+				pair.UpperBoundDuration(),
+				r.allocateCounter(name, valueTags)})
+
+		durationTags[r.bucketIDTagName] = idTagValue
+		durationTags[r.bucketTagName] = fmt.Sprintf("%s-%s",
+			r.durationBucketString(pair.LowerBoundDuration()),
+			r.durationBucketString(pair.UpperBoundDuration()))
+
+		cachedDurationBuckets = append(cachedDurationBuckets,
+			cachedHistogramBucket{pair.UpperBoundValue(),
+				pair.UpperBoundDuration(),
+				r.allocateCounter(name, durationTags)})
+	}
+	return cachedHistogram{r, name, tags, buckets,
+		cachedValueBuckets, cachedDurationBuckets}
+}
+
+func (r *reporter) valueBucketString(v float64) string {
+	if v == math.MaxFloat64 {
+		return "infinity"
+	}
+	if v == -math.MaxFloat64 {
+		return "-infinity"
+	}
+	return fmt.Sprintf(r.bucketValFmt, v)
+}
+
+func (r *reporter) durationBucketString(d time.Duration) string {
+	if d == 0 {
+		return "0"
+	}
+	if d == time.Duration(math.MaxInt64) {
+		return "infinity"
+	}
+	if d == time.Duration(math.MinInt64) {
+		return "-infinity"
+	}
+	return d.String()
 }
 
 func (r *reporter) newMetric(
@@ -359,6 +463,10 @@ func (r *reporter) Tagging() bool {
 	return true
 }
 
+func (r *reporter) Histograms() bool {
+	return true
+}
+
 func (r *reporter) process() {
 	mets := make([]*m3thrift.Metric, 0, (r.freeBytes / 10))
 	bytes := int32(0)
@@ -437,6 +545,62 @@ func (c cachedMetric) ReportGauge(value float64) {
 func (c cachedMetric) ReportTimer(interval time.Duration) {
 	val := int64(interval)
 	c.reporter.reportCopyMetric(c.metric, c.size, timerType, val, 0)
+}
+
+func (c cachedMetric) ReportSamples(value int64) {
+	c.reporter.reportCopyMetric(c.metric, c.size, counterType, value, 0)
+}
+
+type noopMetric struct {
+}
+
+func (c noopMetric) ReportCount(value int64) {
+}
+
+func (c noopMetric) ReportGauge(value float64) {
+}
+
+func (c noopMetric) ReportTimer(interval time.Duration) {
+}
+
+func (c noopMetric) ReportSamples(value int64) {
+}
+
+type cachedHistogram struct {
+	r                     *reporter
+	name                  string
+	tags                  map[string]string
+	buckets               tally.Buckets
+	cachedValueBuckets    []cachedHistogramBucket
+	cachedDurationBuckets []cachedHistogramBucket
+}
+
+type cachedHistogramBucket struct {
+	valueUpperBound    float64
+	durationUpperBound time.Duration
+	metric             cachedMetric
+}
+
+func (h cachedHistogram) ValueBucket(
+	bucketLowerBound, bucketUpperBound float64,
+) tally.CachedHistogramBucket {
+	for _, b := range h.cachedValueBuckets {
+		if b.valueUpperBound >= bucketUpperBound {
+			return b.metric
+		}
+	}
+	return noopMetric{}
+}
+
+func (h cachedHistogram) DurationBucket(
+	bucketLowerBound, bucketUpperBound time.Duration,
+) tally.CachedHistogramBucket {
+	for _, b := range h.cachedDurationBuckets {
+		if b.durationUpperBound >= bucketUpperBound {
+			return b.metric
+		}
+	}
+	return noopMetric{}
 }
 
 type sizedMetric struct {
