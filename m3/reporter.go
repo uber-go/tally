@@ -463,10 +463,6 @@ func (r *reporter) Tagging() bool {
 	return true
 }
 
-func (r *reporter) Histograms() bool {
-	return true
-}
-
 func (r *reporter) process() {
 	mets := make([]*m3thrift.Metric, 0, (r.freeBytes / 10))
 	bytes := int32(0)

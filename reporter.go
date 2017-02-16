@@ -24,7 +24,10 @@ import "time"
 
 // BaseStatsReporter implements the shared reporter methods.
 type BaseStatsReporter interface {
+	// Capabilities returns the capabilities description of the reporter.
 	Capabilities() Capabilities
+
+	// Flush asks the reporter to flush all reported values.
 	Flush()
 }
 

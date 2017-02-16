@@ -245,7 +245,7 @@ func (r *testStatsReporter) ReportHistogramDurationSamples(
 }
 
 func (r *testStatsReporter) Capabilities() Capabilities {
-	return capabilitiesReportingNoTaggingNoHistograms // TODO: add support for test stats reporter for histograms
+	return capabilitiesReportingNoTagging
 }
 
 func (r *testStatsReporter) Flush() {}

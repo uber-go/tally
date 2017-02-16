@@ -7,15 +7,20 @@ Fast, buffered, hierarchical stats collection in Go.
 
 ## Abstract
 
-Tally provides a common interface for emitting metrics, while letting you not worry about the velocity of metrics emission.  
+Tally provides a common interface for emitting metrics, while letting you not worry about the velocity of metrics emission.
 
-By default it buffers counters and gauges at a specified interval but does not buffer timer values.  This is primarily so timer values can have all their values sampled if desired and if not they can be sampled as histograms.
+By default it buffers counters, gauges and histograms at a specified interval but does not buffer timer values.  This is primarily so timer values can have all their values sampled if desired and if not they can be sampled as summaries or histograms independently by a reporter.
 
 ## Structure
 
 - Scope: Keeps track of metrics, and their common metadata.
-- Metrics: Counters, Gauges, Timers.
+- Metrics: Counters, Gauges, Timers and Histograms.
 - Reporter: Implemented by you. Accepts aggregated values from the scope. Forwards the aggregated values to your metrics ingestion pipeline.
+  - The reporters already available listed alphabetically are:
+	 - `github.com/uber-go/tally/m3`: Report m3 metrics, timers are not sampled and forwarded directly.
+	 - `github.com/uber-go/tally/multi`: Report to multiple reporters, you can multi-write metrics to other reporters simply.
+	 - `github.com/uber-go/tally/prometheus`: Report prometheus metrics, timers by default are made summaries with an option to make them histograms instead.
+	 - `github.com/uber-go/tally/statsd`: Report statsd metrics, no support for tags.
 
 ### Acquire a Scope ###
 ```go
@@ -24,8 +29,12 @@ tags := map[string]string{
 	"dc": "east-1",
 	"type": "master",
 }
-reportEvery := 1 * time.Second
-scope := tally.NewRootScope("some_prefix", tags, reporter, reportEvery, tally.DefaultSeparator)
+reportEvery := time.Second
+
+scope := tally.NewRootScope(tally.ScopeOptions{
+	Tags: tags,
+	Reporter: reporter,
+}, reportEvery)
 ```
 
 ### Get/Create a metric, use it ###
@@ -43,43 +52,85 @@ Use the inbuilt statsd reporter:
 
 ```go
 import (
+	"io"
 	"github.com/cactus/go-statsd-client/statsd"
 	"github.com/uber-go/tally"
 	tallystatsd "github.com/uber-go/tally/statsd"
 	// ...
 )
 
-client, err := statsd.NewClient("statsd.aggregator.local:1234", "")
-// ...
+func newScope() (tally.Scope, io.Closer) {
+	statter, _ := statsd.NewBufferedClient("127.0.0.1:8125",
+		"stats", 100*time.Millisecond, 1440)
+	
+	reporter := tallystatsd.NewReporter(statter, tallystatsd.Options{
+		SampleRate: 1.0,
+	})
+	
+	scope, closer := tally.NewRootScope(tally.ScopeOptions{
+		Prefix:   "my-service",
+		Tags:     map[string]string{},
+		Reporter: r,
+	}, time.Second)
 
-opts := tallystatsd.NewOptions().SetSampleRate(1.0)
-reporter = tallystatsd.NewStatsdReporter(client, opts)
-tags := map[string]string{
-	"dc": "east-1",
-	"type": "master",
+	return scope, closer
 }
-reportEvery := 1 * time.Second
-scope := tally.NewRootScope("some_prefix", tags, reporter, reportEvery, tally.DefaultSeparator)
 ```
 
 Implement your own reporter using the `StatsReporter` interface:
 
 ```go
+
+// BaseStatsReporter implements the shared reporter methods.
+type BaseStatsReporter interface {
+	Capabilities() Capabilities
+	Flush()
+}
+
+// StatsReporter is a backend for Scopes to report metrics to.
 type StatsReporter interface {
+	BaseStatsReporter
+
 	// ReportCounter reports a counter value
-	ReportCounter(name string, tags map[string]string, value int64)
+	ReportCounter(
+		name string,
+		tags map[string]string,
+		value int64,
+	)
 
 	// ReportGauge reports a gauge value
-	ReportGauge(name string, tags map[string]string, value float64)
+	ReportGauge(
+		name string,
+		tags map[string]string,
+		value float64,
+	)
 
 	// ReportTimer reports a timer value
-	ReportTimer(name string, tags map[string]string, interval time.Duration)
+	ReportTimer(
+		name string,
+		tags map[string]string,
+		interval time.Duration,
+	)
 
-	// Capabilities returns a description of metrics reporting capabilities
-	Capabilities() Capabilities
+	// ReportHistogramValueSamples reports histogram samples for a bucket
+	ReportHistogramValueSamples(
+		name string,
+		tags map[string]string,
+		buckets Buckets,
+		bucketLowerBound,
+		bucketUpperBound float64,
+		samples int64,
+	)
 
-	// Flush is expected to be called by a Scope when it completes a round or reporting
-	Flush()
+	// ReportHistogramDurationSamples reports histogram samples for a bucket
+	ReportHistogramDurationSamples(
+		name string,
+		tags map[string]string,
+		buckets Buckets,
+		bucketLowerBound,
+		bucketUpperBound time.Duration,
+		samples int64,
+	)
 }
 ```
 
@@ -87,23 +138,43 @@ Or implement your own metrics implementation that matches the tally `Scope` inte
 
 ```go
 type Scope interface {
-	// Counter returns the Counter object corresponding to the name
+	// Counter returns the Counter object corresponding to the name.
 	Counter(name string) Counter
 
-	// Gauge returns the Gauge object corresponding to the name
+	// Gauge returns the Gauge object corresponding to the name.
 	Gauge(name string) Gauge
 
-	// Timer returns the Timer object corresponding to the name
+	// Timer returns the Timer object corresponding to the name.
 	Timer(name string) Timer
 
-	// Tagged returns a new child scope with the given tags and current tags
+	// Histogram returns the Histogram object corresponding to the name.
+	// To use default value and duration buckets configured for the scope
+	// simply pass tally.DefaultBuckets or nil.
+	// You can use tally.ValueBuckets{x, y, ...} for value buckets.
+	// You can use tally.DurationBuckets{x, y, ...} for duration buckets.
+	// You can use tally.MustMakeLinearValueBuckets(start, width, count) for linear values.
+	// You can use tally.MustMakeLinearDurationBuckets(start, width, count) for linear durations.
+	// You can use tally.MustMakeExponentialValueBuckets(start, factor, count) for exponential values.
+	// You can use tally.MustMakeExponentialDurationBuckets(start, factor, count) for exponential durations.
+	Histogram(name string, buckets Buckets) Histogram
+
+	// Tagged returns a new child scope with the given tags and current tags.
 	Tagged(tags map[string]string) Scope
 
-	// SubScope returns a new child scope appending a further name prefix
+	// SubScope returns a new child scope appending a further name prefix.
 	SubScope(name string) Scope
 
-	// Capabilities returns a description of metrics reporting capabilities
+	// Capabilities returns a description of metrics reporting capabilities.
 	Capabilities() Capabilities
+}
+
+// Capabilities is a description of metrics reporting capabilities.
+type Capabilities interface {
+	// Reporting returns whether the reporter has the ability to actively report.
+	Reporting() bool
+
+	// Tagging returns whether the reporter has the capability for tagged metrics.
+	Tagging() bool
 }
 ```
 
