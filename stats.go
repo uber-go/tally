@@ -30,31 +30,22 @@ import (
 
 var (
 	capabilitiesNone = &capabilities{
-		reporting:  false,
-		tagging:    false,
-		histograms: false,
+		reporting: false,
+		tagging:   false,
 	}
-	capabilitiesReportingNoTaggingNoHistograms = &capabilities{
-		reporting:  true,
-		tagging:    false,
-		histograms: false,
+	capabilitiesReportingNoTagging = &capabilities{
+		reporting: true,
+		tagging:   false,
 	}
-	capabilitiesReportingTaggingNoHistograms = &capabilities{
-		reporting:  true,
-		tagging:    true,
-		histograms: false,
-	}
-	capabilitiesReportingTaggingHistograms = &capabilities{
-		reporting:  true,
-		tagging:    true,
-		histograms: true,
+	capabilitiesReportingTagging = &capabilities{
+		reporting: true,
+		tagging:   true,
 	}
 )
 
 type capabilities struct {
-	reporting  bool
-	tagging    bool
-	histograms bool
+	reporting bool
+	tagging   bool
 }
 
 func (c *capabilities) Reporting() bool {
@@ -63,10 +54,6 @@ func (c *capabilities) Reporting() bool {
 
 func (c *capabilities) Tagging() bool {
 	return c.tagging
-}
-
-func (c *capabilities) Histograms() bool {
-	return c.histograms
 }
 
 type counter struct {
@@ -270,7 +257,7 @@ func (r *timerNoReporterSink) ReportHistogramDurationSamples(
 }
 
 func (r *timerNoReporterSink) Capabilities() Capabilities {
-	return capabilitiesReportingTaggingNoHistograms
+	return capabilitiesReportingTagging
 }
 
 func (r *timerNoReporterSink) Flush() {

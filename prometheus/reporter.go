@@ -555,10 +555,6 @@ func (r *reporter) Tagging() bool {
 	return true
 }
 
-func (r *reporter) Histograms() bool {
-	return true
-}
-
 // Flush does nothing for prometheus
 func (r *reporter) Flush() {}
 

@@ -151,10 +151,6 @@ func (r *cactusStatsReporter) Tagging() bool {
 	return false
 }
 
-func (r *cactusStatsReporter) Histograms() bool {
-	return true
-}
-
 func (r *cactusStatsReporter) Flush() {
 	// no-op
 }

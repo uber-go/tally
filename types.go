@@ -130,7 +130,4 @@ type Capabilities interface {
 
 	// Tagging returns whether the reporter has the capability for tagged metrics.
 	Tagging() bool
-
-	// Histograms returns whether the reporter has the capability for histogram metrics.
-	Histograms() bool
 }

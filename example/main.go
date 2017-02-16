@@ -81,10 +81,6 @@ func (r *printStatsReporter) Tagging() bool {
 	return false
 }
 
-func (r *printStatsReporter) Histograms() bool {
-	return true
-}
-
 func (r *printStatsReporter) Flush() {
 	fmt.Printf("flush\n")
 }

@@ -78,7 +78,7 @@ func (r *statsTestReporter) ReportHistogramDurationSamples(
 }
 
 func (r *statsTestReporter) Capabilities() Capabilities {
-	return capabilitiesReportingNoTaggingNoHistograms
+	return capabilitiesReportingNoTagging
 }
 
 func (r *statsTestReporter) Flush() {}

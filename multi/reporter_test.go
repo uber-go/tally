@@ -333,10 +333,6 @@ func (r *capturingStatsReporter) Tagging() bool {
 	return true
 }
 
-func (r *capturingStatsReporter) Histograms() bool {
-	return true
-}
-
 func (r *capturingStatsReporter) Flush() {
 	r.flush++
 }
