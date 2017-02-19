@@ -99,19 +99,25 @@ type Histogram interface {
 // Stop() method to report time elapsed since its created back to the
 // timer or histogram.
 type Stopwatch struct {
-	Start    time.Time
-	Recorder StopwatchRecorder
+	start    time.Time
+	recorder StopwatchRecorder
+}
+
+// NewStopwatch creates a new immutable stopwatch for recording the start
+// time to a stopwatch reporter.
+func NewStopwatch(start time.Time, r StopwatchRecorder) Stopwatch {
+	return Stopwatch{start: start, recorder: r}
 }
 
 // Stop reports time elapsed since the stopwatch start to the recorder.
 func (sw Stopwatch) Stop() {
-	sw.Recorder.RecordStopwatch(sw)
+	sw.recorder.RecordStopwatch(sw.start)
 }
 
 // StopwatchRecorder is a recorder that is called when a stopwatch is
 // stopped with Stop().
 type StopwatchRecorder interface {
-	RecordStopwatch(sw Stopwatch)
+	RecordStopwatch(stopwatchStart time.Time)
 }
 
 // Buckets is an interface that can represent a set of buckets
