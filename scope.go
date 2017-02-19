@@ -66,7 +66,7 @@ type scope struct {
 	defaultBuckets Buckets
 
 	registry *scopeRegistry
-	status   *scopeStatus
+	status   scopeStatus
 
 	cm sync.RWMutex
 	gm sync.RWMutex
@@ -153,7 +153,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		registry: &scopeRegistry{
 			subscopes: make(map[string]*scope),
 		},
-		status: &scopeStatus{
+		status: scopeStatus{
 			closed: false,
 			quit:   make(chan struct{}, 1),
 		},
