@@ -95,10 +95,29 @@ type Histogram interface {
 	Start() Stopwatch
 }
 
-// Stopwatch is a helper for simpler tracking of elapsed time.
-type Stopwatch interface {
-	// Stop records the difference between the current clock and start time.
-	Stop()
+// Stopwatch is a helper for simpler tracking of elapsed time, use the
+// Stop() method to report time elapsed since its created back to the
+// timer or histogram.
+type Stopwatch struct {
+	start    time.Time
+	recorder StopwatchRecorder
+}
+
+// NewStopwatch creates a new immutable stopwatch for recording the start
+// time to a stopwatch reporter.
+func NewStopwatch(start time.Time, r StopwatchRecorder) Stopwatch {
+	return Stopwatch{start: start, recorder: r}
+}
+
+// Stop reports time elapsed since the stopwatch start to the recorder.
+func (sw Stopwatch) Stop() {
+	sw.recorder.RecordStopwatch(sw.start)
+}
+
+// StopwatchRecorder is a recorder that is called when a stopwatch is
+// stopped with Stop().
+type StopwatchRecorder interface {
+	RecordStopwatch(stopwatchStart time.Time)
 }
 
 // Buckets is an interface that can represent a set of buckets
