@@ -20,7 +20,10 @@
 
 package tally
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func BenchmarkCounterInc(b *testing.B) {
 	c := &counter{}
@@ -66,7 +69,7 @@ func BenchmarkReportGaugeWithData(b *testing.B) {
 	}
 }
 
-func BenchmarkTimerInterval(b *testing.B) {
+func BenchmarkTimerStopwatch(b *testing.B) {
 	t := &timer{
 		name:     "bencher",
 		tags:     nil,
@@ -84,6 +87,7 @@ func BenchmarkTimerReport(b *testing.B) {
 		reporter: NullStatsReporter,
 	}
 	for n := 0; n < b.N; n++ {
-		t.Record(1234)
+		start := time.Now()
+		t.Record(time.Since(start))
 	}
 }

@@ -172,16 +172,21 @@ func newTimer(
 	return t
 }
 
-func (t *timer) Start() Stopwatch {
-	return timerStopwatch{start: globalClock.Now(), timer: t}
-}
-
 func (t *timer) Record(interval time.Duration) {
 	if t.cachedTimer != nil {
 		t.cachedTimer.ReportTimer(interval)
 	} else {
 		t.reporter.ReportTimer(t.name, t.tags, interval)
 	}
+}
+
+func (t *timer) Start() Stopwatch {
+	return Stopwatch{Start: globalClock.Now(), Recorder: t}
+}
+
+func (t *timer) RecordStopwatch(sw Stopwatch) {
+	d := globalClock.Now().Sub(sw.Start)
+	t.Record(d)
 }
 
 func (t *timer) snapshot() []time.Duration {
@@ -192,19 +197,6 @@ func (t *timer) snapshot() []time.Duration {
 	}
 	t.unreported.RUnlock()
 	return snap
-}
-
-type timerStopwatch struct {
-	start   time.Time
-	timer   *timer
-	stopped int32
-}
-
-func (s timerStopwatch) Stop() {
-	if atomic.CompareAndSwapInt32(&s.stopped, 0, 1) {
-		d := globalClock.Now().Sub(s.start)
-		s.timer.Record(d)
-	}
 }
 
 type timerNoReporterSink struct {
@@ -375,7 +367,12 @@ func (h *histogram) RecordDuration(value time.Duration) {
 }
 
 func (h *histogram) Start() Stopwatch {
-	return histogramStopwatch{start: globalClock.Now(), histogram: h}
+	return Stopwatch{Start: globalClock.Now(), Recorder: h}
+}
+
+func (h *histogram) RecordStopwatch(sw Stopwatch) {
+	d := globalClock.Now().Sub(sw.Start)
+	h.RecordDuration(d)
 }
 
 type histogramBucket struct {
@@ -413,19 +410,6 @@ func newHistogramBucket(
 		)
 	}
 	return bucket
-}
-
-type histogramStopwatch struct {
-	start     time.Time
-	histogram *histogram
-	stopped   int32
-}
-
-func (s histogramStopwatch) Stop() {
-	if atomic.CompareAndSwapInt32(&s.stopped, 0, 1) {
-		d := globalClock.Now().Sub(s.start)
-		s.histogram.RecordDuration(d)
-	}
 }
 
 // NullStatsReporter is an implementation of StatsReporter than simply does nothing.
