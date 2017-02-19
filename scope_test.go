@@ -22,6 +22,7 @@ package tally
 
 import (
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -80,6 +81,8 @@ type testStatsReporter struct {
 	gauges     map[string]*testFloatValue
 	timers     map[string]*testIntValue
 	histograms map[string]*testHistogramValue
+
+	flushes int32
 }
 
 // newTestStatsReporter returns a new TestStatsReporter
@@ -248,11 +251,14 @@ func (r *testStatsReporter) Capabilities() Capabilities {
 	return capabilitiesReportingNoTagging
 }
 
-func (r *testStatsReporter) Flush() {}
+func (r *testStatsReporter) Flush() {
+	atomic.AddInt32(&r.flushes, 1)
+}
 
 func TestWriteTimerImmediately(t *testing.T) {
 	r := newTestStatsReporter()
-	s, _ := NewRootScope(ScopeOptions{Reporter: r}, 0)
+	s, closer := NewRootScope(ScopeOptions{Reporter: r}, 0)
+	defer closer.Close()
 	r.tg.Add(1)
 	s.Timer("ticky").Record(time.Millisecond * 175)
 	r.tg.Wait()
@@ -260,7 +266,8 @@ func TestWriteTimerImmediately(t *testing.T) {
 
 func TestWriteTimerClosureImmediately(t *testing.T) {
 	r := newTestStatsReporter()
-	s, _ := NewRootScope(ScopeOptions{Reporter: r}, 0)
+	s, closer := NewRootScope(ScopeOptions{Reporter: r}, 0)
+	defer closer.Close()
 	r.tg.Add(1)
 	tm := s.Timer("ticky")
 	tm.Start().Stop()
@@ -269,8 +276,8 @@ func TestWriteTimerClosureImmediately(t *testing.T) {
 
 func TestWriteReportLoop(t *testing.T) {
 	r := newTestStatsReporter()
-	s, close := NewRootScope(ScopeOptions{Reporter: r}, 10)
-	defer close.Close()
+	s, closer := NewRootScope(ScopeOptions{Reporter: r}, 10)
+	defer closer.Close()
 
 	r.cg.Add(1)
 	s.Counter("bar").Inc(1)
@@ -287,8 +294,8 @@ func TestWriteReportLoop(t *testing.T) {
 
 func TestCachedReportLoop(t *testing.T) {
 	r := newTestStatsReporter()
-	s, close := NewRootScope(ScopeOptions{CachedReporter: r}, 10)
-	defer close.Close()
+	s, closer := NewRootScope(ScopeOptions{CachedReporter: r}, 10)
+	defer closer.Close()
 
 	r.cg.Add(1)
 	s.Counter("bar").Inc(1)
@@ -306,7 +313,9 @@ func TestCachedReportLoop(t *testing.T) {
 func TestWriteOnce(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, _ := NewRootScope(ScopeOptions{Reporter: r}, 0)
+	root, closer := NewRootScope(ScopeOptions{Reporter: r}, 0)
+	defer closer.Close()
+
 	s := root.(*scope)
 
 	r.cg.Add(1)
@@ -338,7 +347,9 @@ func TestWriteOnce(t *testing.T) {
 func TestCachedReporter(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, _ := NewRootScope(ScopeOptions{CachedReporter: r}, 0)
+	root, closer := NewRootScope(ScopeOptions{CachedReporter: r}, 0)
+	defer closer.Close()
+
 	s := root.(*scope)
 
 	r.cg.Add(1)
@@ -366,7 +377,9 @@ func TestCachedReporter(t *testing.T) {
 func TestRootScopeWithoutPrefix(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, _ := NewRootScope(ScopeOptions{Reporter: r}, 0)
+	root, closer := NewRootScope(ScopeOptions{Reporter: r}, 0)
+	defer closer.Close()
+
 	s := root.(*scope)
 	r.cg.Add(1)
 	s.Counter("bar").Inc(1)
@@ -391,7 +404,9 @@ func TestRootScopeWithoutPrefix(t *testing.T) {
 func TestRootScopeWithPrefix(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, _ := NewRootScope(ScopeOptions{Prefix: "foo", Reporter: r}, 0)
+	root, closer := NewRootScope(ScopeOptions{Prefix: "foo", Reporter: r}, 0)
+	defer closer.Close()
+
 	s := root.(*scope)
 	r.cg.Add(1)
 	s.Counter("bar").Inc(1)
@@ -416,7 +431,9 @@ func TestRootScopeWithPrefix(t *testing.T) {
 func TestRootScopeWithDifferentSeparator(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, _ := NewRootScope(ScopeOptions{Prefix: "foo", Separator: "_", Reporter: r}, 0)
+	root, closer := NewRootScope(ScopeOptions{Prefix: "foo", Separator: "_", Reporter: r}, 0)
+	defer closer.Close()
+
 	s := root.(*scope)
 	r.cg.Add(1)
 	s.Counter("bar").Inc(1)
@@ -441,7 +458,9 @@ func TestRootScopeWithDifferentSeparator(t *testing.T) {
 func TestSubScope(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, _ := NewRootScope(ScopeOptions{Prefix: "foo", Reporter: r}, 0)
+	root, closer := NewRootScope(ScopeOptions{Prefix: "foo", Reporter: r}, 0)
+	defer closer.Close()
+
 	s := root.SubScope("mork").(*scope)
 	r.cg.Add(1)
 	s.Counter("bar").Inc(1)
@@ -467,7 +486,9 @@ func TestTaggedSubScope(t *testing.T) {
 	r := newTestStatsReporter()
 
 	ts := map[string]string{"env": "test"}
-	root, _ := NewRootScope(ScopeOptions{Prefix: "foo", Tags: ts, Reporter: r}, 0)
+	root, closer := NewRootScope(ScopeOptions{Prefix: "foo", Tags: ts, Reporter: r}, 0)
+	defer closer.Close()
+
 	s := root.(*scope)
 
 	tscope := root.Tagged(map[string]string{"service": "test"}).(*scope)
@@ -514,7 +535,8 @@ func TestTaggedExistingReturnsSameScope(t *testing.T) {
 		nil,
 		{"env": "test"},
 	} {
-		root, _ := NewRootScope(ScopeOptions{Prefix: "foo", Tags: initialTags, Reporter: r}, 0)
+		root, closer := NewRootScope(ScopeOptions{Prefix: "foo", Tags: initialTags, Reporter: r}, 0)
+		defer closer.Close()
 
 		rootScope := root.(*scope)
 		fooScope := root.Tagged(map[string]string{"foo": "bar"}).(*scope)
@@ -565,13 +587,15 @@ func TestSnapshot(t *testing.T) {
 
 func TestCapabilities(t *testing.T) {
 	r := newTestStatsReporter()
-	s, _ := NewRootScope(ScopeOptions{Reporter: r}, 0)
+	s, closer := NewRootScope(ScopeOptions{Reporter: r}, 0)
+	defer closer.Close()
 	assert.True(t, s.Capabilities().Reporting())
 	assert.False(t, s.Capabilities().Tagging())
 }
 
 func TestCapabilitiesNoReporter(t *testing.T) {
-	s, _ := NewRootScope(ScopeOptions{}, 0)
+	s, closer := NewRootScope(ScopeOptions{}, 0)
+	defer closer.Close()
 	assert.False(t, s.Capabilities().Reporting())
 	assert.False(t, s.Capabilities().Tagging())
 }
@@ -583,7 +607,7 @@ func TestNilTagMerge(t *testing.T) {
 func TestScopeDefaultBuckets(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, _ := NewRootScope(ScopeOptions{
+	root, closer := NewRootScope(ScopeOptions{
 		DefaultBuckets: DurationBuckets{
 			0 * time.Millisecond,
 			30 * time.Millisecond,
@@ -593,6 +617,8 @@ func TestScopeDefaultBuckets(t *testing.T) {
 		},
 		Reporter: r,
 	}, 0)
+	defer closer.Close()
+
 	s := root.(*scope)
 	r.hg.Add(2)
 	s.Histogram("baz", DefaultBuckets).RecordDuration(42 * time.Millisecond)
@@ -619,7 +645,9 @@ func newTestMets(scope Scope) testMets {
 func TestReturnByValue(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, _ := NewRootScope(ScopeOptions{Reporter: r}, 0)
+	root, closer := NewRootScope(ScopeOptions{Reporter: r}, 0)
+	defer closer.Close()
+
 	s := root.(*scope)
 	mets := newTestMets(s)
 
@@ -629,4 +657,19 @@ func TestReturnByValue(t *testing.T) {
 	r.cg.Wait()
 
 	assert.EqualValues(t, 3, r.counters["honk"].val)
+}
+
+func TestScopeAvoidReportLoopRunOnClose(t *testing.T) {
+	r := newTestStatsReporter()
+	root, closer := NewRootScope(ScopeOptions{Reporter: r}, 0)
+
+	s := root.(*scope)
+	s.reportLoopRun()
+
+	assert.Equal(t, int32(1), atomic.LoadInt32(&r.flushes))
+
+	assert.NoError(t, closer.Close())
+
+	s.reportLoopRun()
+	assert.Equal(t, int32(1), atomic.LoadInt32(&r.flushes))
 }

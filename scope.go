@@ -66,7 +66,7 @@ type scope struct {
 	defaultBuckets Buckets
 
 	registry *scopeRegistry
-	quit     chan struct{}
+	status   *scopeStatus
 
 	cm sync.RWMutex
 	gm sync.RWMutex
@@ -77,6 +77,12 @@ type scope struct {
 	gauges     map[string]*gauge
 	timers     map[string]*timer
 	histograms map[string]*histogram
+}
+
+type scopeStatus struct {
+	sync.RWMutex
+	closed bool
+	quit   chan struct{}
 }
 
 type scopeRegistry struct {
@@ -147,7 +153,10 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		registry: &scopeRegistry{
 			subscopes: make(map[string]*scope),
 		},
-		quit: make(chan struct{}, 1),
+		status: &scopeStatus{
+			closed: false,
+			quit:   make(chan struct{}, 1),
+		},
 
 		counters:   make(map[string]*counter),
 		gauges:     make(map[string]*gauge),
@@ -217,25 +226,40 @@ func (s *scope) cachedReport(c CachedStatsReporter) {
 // reportLoop is used by the root scope for periodic reporting
 func (s *scope) reportLoop(interval time.Duration) {
 	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ticker.C:
-			s.registry.RLock()
-			if s.reporter != nil {
-				for _, ss := range s.registry.subscopes {
-					ss.report(s.reporter)
-				}
-			} else if s.cachedReporter != nil {
-				for _, ss := range s.registry.subscopes {
-					ss.cachedReport(s.cachedReporter)
-				}
-			}
-
-			s.registry.RUnlock()
-		case <-s.quit:
+			s.reportLoopRun()
+		case <-s.status.quit:
 			return
 		}
 	}
+}
+
+func (s *scope) reportLoopRun() {
+	// Need to hold a status lock to ensure not to report
+	// and flush after a close
+	s.status.RLock()
+	if s.status.closed {
+		s.status.RUnlock()
+		return
+	}
+
+	s.registry.RLock()
+	if s.reporter != nil {
+		for _, ss := range s.registry.subscopes {
+			ss.report(s.reporter)
+		}
+	} else if s.cachedReporter != nil {
+		for _, ss := range s.registry.subscopes {
+			ss.cachedReport(s.cachedReporter)
+		}
+	}
+	s.registry.RUnlock()
+
+	s.status.RUnlock()
 }
 
 func (s *scope) Counter(name string) Counter {
@@ -440,7 +464,11 @@ func (s *scope) Snapshot() Snapshot {
 }
 
 func (s *scope) Close() error {
-	close(s.quit)
+	s.status.Lock()
+	s.status.closed = true
+	close(s.status.quit)
+	s.status.Unlock()
+
 	if closer, ok := s.baseReporter.(io.Closer); ok {
 		return closer.Close()
 	}
