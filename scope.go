@@ -36,12 +36,12 @@ var (
 	NoopScope, _ = NewRootScope(ScopeOptions{Reporter: NullStatsReporter}, 0)
 	// DefaultSeparator is the default separator used to join nested scopes
 	DefaultSeparator = "."
-	// ComponentSeparator is the separator used to separate a metric's name and it's tags in its ID
-	ComponentSeparator = "+"
-	// TagPairSeparator is the separator used to separate pairs of tags in metric's ID
-	TagPairSeparator = ","
-	// TagValueSeparator is the separator used to separate a tag's key and value in a metric's ID
-	TagValueSeparator = "="
+	// componentSeparator is the separator used to separate a metric's name and it's tags in its ID
+	componentSeparator = "+"
+	// tagPairSeparator is the separator used to separate pairs of tags in metric's ID
+	tagPairSeparator = ","
+	// tagValueSeparator is the separator used to separate a tag's key and value in a metric's ID
+	tagValueSeparator = "="
 
 	globalClock = clock.New()
 
@@ -437,7 +437,7 @@ func (s *scope) Snapshot() Snapshot {
 		ss.cm.RLock()
 		for key, c := range ss.counters {
 			name := ss.fullyQualifiedName(key)
-			id := ss.uniqueID(key, tags)
+			id := ss.uniqueID(name, tags)
 			snap.counters[id] = &counterSnapshot{
 				name:  name,
 				tags:  tags,
@@ -448,7 +448,7 @@ func (s *scope) Snapshot() Snapshot {
 		ss.gm.RLock()
 		for key, g := range ss.gauges {
 			name := ss.fullyQualifiedName(key)
-			id := ss.uniqueID(key, tags)
+			id := ss.uniqueID(name, tags)
 			snap.gauges[id] = &gaugeSnapshot{
 				name:  name,
 				tags:  tags,
@@ -459,7 +459,7 @@ func (s *scope) Snapshot() Snapshot {
 		ss.tm.RLock()
 		for key, t := range ss.timers {
 			name := ss.fullyQualifiedName(key)
-			id := ss.uniqueID(key, tags)
+			id := ss.uniqueID(name, tags)
 			snap.timers[id] = &timerSnapshot{
 				name:   name,
 				tags:   tags,
@@ -494,23 +494,21 @@ func (s *scope) fullyQualifiedName(name string) string {
 }
 
 func (s *scope) uniqueID(name string, tags map[string]string) string {
-	name = s.fullyQualifiedName(name)
+	if len(tags) == 0 {
+		return name
+	}
+
 	l := len(name)
 	for k, v := range tags {
 		l += len(k) + len(v)
 	}
 
-	// size the buffer to include separator bytes
+	// Size of the buffer include separator bytes
 	buf := bytes.NewBuffer(make([]byte, 0, l+2*len(tags)+1))
 	buf.WriteString(name)
+	buf.WriteString(componentSeparator)
 
-	if len(tags) == 0 {
-		return buf.String()
-	}
-
-	buf.WriteString(ComponentSeparator)
-
-	// sort tags in alphabetical order so the ID is consistent
+	// Sort tags in alphabetical order so the ID is consistent
 	keys := make([]string, 0, len(tags))
 	for key := range tags {
 		keys = append(keys, key)
@@ -519,11 +517,11 @@ func (s *scope) uniqueID(name string, tags map[string]string) string {
 
 	for i, key := range keys {
 		buf.WriteString(key)
-		buf.WriteString(TagValueSeparator)
+		buf.WriteString(tagValueSeparator)
 		buf.WriteString(tags[key])
 
 		if i != len(keys)-1 {
-			buf.WriteString(TagPairSeparator)
+			buf.WriteString(tagPairSeparator)
 		}
 	}
 
