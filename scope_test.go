@@ -566,23 +566,23 @@ func TestSnapshot(t *testing.T) {
 	counters, gauges, timers :=
 		snap.Counters(), snap.Gauges(), snap.Timers()
 
-	assert.EqualValues(t, 1, counters["foo.beep"].Value())
-	assert.EqualValues(t, commonTags, counters["foo.beep"].Tags())
+	assert.EqualValues(t, 1, counters["foo.beep+env=test"].Value())
+	assert.EqualValues(t, commonTags, counters["foo.beep+env=test"].Tags())
 
-	assert.EqualValues(t, 2, gauges["foo.bzzt"].Value())
-	assert.EqualValues(t, commonTags, gauges["foo.bzzt"].Tags())
+	assert.EqualValues(t, 2, gauges["foo.bzzt+env=test"].Value())
+	assert.EqualValues(t, commonTags, gauges["foo.bzzt+env=test"].Tags())
 
 	assert.EqualValues(t, []time.Duration{
 		1 * time.Second,
 		2 * time.Second,
-	}, timers["foo.brrr"].Values())
-	assert.EqualValues(t, commonTags, timers["foo.brrr"].Tags())
+	}, timers["foo.brrr+env=test"].Values())
+	assert.EqualValues(t, commonTags, timers["foo.brrr+env=test"].Tags())
 
-	assert.EqualValues(t, 1, counters["foo.boop"].Value())
+	assert.EqualValues(t, 1, counters["foo.boop+env=test,service=test"].Value())
 	assert.EqualValues(t, map[string]string{
 		"env":     "test",
 		"service": "test",
-	}, counters["foo.boop"].Tags())
+	}, counters["foo.boop+env=test,service=test"].Tags())
 }
 
 func TestCapabilities(t *testing.T) {

@@ -21,8 +21,10 @@
 package tally
 
 import (
+	"bytes"
 	"fmt"
 	"io"
+	"sort"
 	"sync"
 	"time"
 
@@ -34,6 +36,12 @@ var (
 	NoopScope, _ = NewRootScope(ScopeOptions{Reporter: NullStatsReporter}, 0)
 	// DefaultSeparator is the default separator used to join nested scopes
 	DefaultSeparator = "."
+	// ComponentSeparator is the separator used to separate a metric's name and it's tags in its ID
+	ComponentSeparator = "+"
+	// TagPairSeparator is the separator used to separate pairs of tags
+	TagPairSeparator = ","
+	// TagValueSeparator is the separator used to separate a tags key and value
+	TagValueSeparator = "="
 
 	globalClock = clock.New()
 
@@ -429,7 +437,8 @@ func (s *scope) Snapshot() Snapshot {
 		ss.cm.RLock()
 		for key, c := range ss.counters {
 			name := ss.fullyQualifiedName(key)
-			snap.counters[name] = &counterSnapshot{
+			id := ss.uniqueID(key, tags)
+			snap.counters[id] = &counterSnapshot{
 				name:  name,
 				tags:  tags,
 				value: c.snapshot(),
@@ -439,7 +448,8 @@ func (s *scope) Snapshot() Snapshot {
 		ss.gm.RLock()
 		for key, g := range ss.gauges {
 			name := ss.fullyQualifiedName(key)
-			snap.gauges[name] = &gaugeSnapshot{
+			id := ss.uniqueID(key, tags)
+			snap.gauges[id] = &gaugeSnapshot{
 				name:  name,
 				tags:  tags,
 				value: g.snapshot(),
@@ -449,7 +459,8 @@ func (s *scope) Snapshot() Snapshot {
 		ss.tm.RLock()
 		for key, t := range ss.timers {
 			name := ss.fullyQualifiedName(key)
-			snap.timers[name] = &timerSnapshot{
+			id := ss.uniqueID(key, tags)
+			snap.timers[id] = &timerSnapshot{
 				name:   name,
 				tags:   tags,
 				values: t.snapshot(),
@@ -480,6 +491,43 @@ func (s *scope) fullyQualifiedName(name string) string {
 		return name
 	}
 	return fmt.Sprintf("%s%s%s", s.prefix, s.separator, name)
+}
+
+func (s *scope) uniqueID(name string, tags map[string]string) string {
+	name = s.fullyQualifiedName(name)
+	l := len(name)
+	for k, v := range tags {
+		l += len(k) + len(v)
+	}
+
+	// size the buffer to include separator bytes
+	buf := bytes.NewBuffer(make([]byte, 0, l+2*len(tags)+1))
+	buf.WriteString(name)
+
+	if len(tags) == 0 {
+		return buf.String()
+	}
+
+	buf.WriteString(ComponentSeparator)
+
+	// sort tags in alphabetical order so the ID is consistent
+	keys := make([]string, 0, len(tags))
+	for key := range tags {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for i, key := range keys {
+		buf.WriteString(key)
+		buf.WriteString(TagValueSeparator)
+		buf.WriteString(tags[key])
+
+		if i != len(keys)-1 {
+			buf.WriteString(TagPairSeparator)
+		}
+	}
+
+	return buf.String()
 }
 
 // TestScope is a metrics collector that has no reporting, ensuring that
