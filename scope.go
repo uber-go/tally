@@ -38,9 +38,9 @@ var (
 	DefaultSeparator = "."
 	// ComponentSeparator is the separator used to separate a metric's name and it's tags in its ID
 	ComponentSeparator = "+"
-	// TagPairSeparator is the separator used to separate pairs of tags
+	// TagPairSeparator is the separator used to separate pairs of tags in metric's ID
 	TagPairSeparator = ","
-	// TagValueSeparator is the separator used to separate a tags key and value
+	// TagValueSeparator is the separator used to separate a tag's key and value in a metric's ID
 	TagValueSeparator = "="
 
 	globalClock = clock.New()
