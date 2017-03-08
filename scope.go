@@ -424,6 +424,7 @@ func (s *scope) Capabilities() Capabilities {
 }
 
 func (s *scope) Snapshot() Snapshot {
+	var buf bytes.Buffer
 	snap := newSnapshot()
 
 	s.registry.RLock()
@@ -437,7 +438,7 @@ func (s *scope) Snapshot() Snapshot {
 		ss.cm.RLock()
 		for key, c := range ss.counters {
 			name := ss.fullyQualifiedName(key)
-			id := ss.uniqueID(name, tags)
+			id := ss.uniqueID(name, tags, buf)
 			snap.counters[id] = &counterSnapshot{
 				name:  name,
 				tags:  tags,
@@ -448,7 +449,7 @@ func (s *scope) Snapshot() Snapshot {
 		ss.gm.RLock()
 		for key, g := range ss.gauges {
 			name := ss.fullyQualifiedName(key)
-			id := ss.uniqueID(name, tags)
+			id := ss.uniqueID(name, tags, buf)
 			snap.gauges[id] = &gaugeSnapshot{
 				name:  name,
 				tags:  tags,
@@ -459,7 +460,7 @@ func (s *scope) Snapshot() Snapshot {
 		ss.tm.RLock()
 		for key, t := range ss.timers {
 			name := ss.fullyQualifiedName(key)
-			id := ss.uniqueID(name, tags)
+			id := ss.uniqueID(name, tags, buf)
 			snap.timers[id] = &timerSnapshot{
 				name:   name,
 				tags:   tags,
@@ -493,18 +494,12 @@ func (s *scope) fullyQualifiedName(name string) string {
 	return fmt.Sprintf("%s%s%s", s.prefix, s.separator, name)
 }
 
-func (s *scope) uniqueID(name string, tags map[string]string) string {
+func (s *scope) uniqueID(name string, tags map[string]string, buf bytes.Buffer) string {
 	if len(tags) == 0 {
 		return name
 	}
 
-	l := len(name)
-	for k, v := range tags {
-		l += len(k) + len(v)
-	}
-
-	// Size of the buffer includes separator bytes
-	buf := bytes.NewBuffer(make([]byte, 0, l+2*len(tags)))
+	buf.Reset()
 	buf.WriteString(name)
 	buf.WriteString(componentSeparator)
 
