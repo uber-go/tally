@@ -504,7 +504,7 @@ func (s *scope) uniqueID(name string, tags map[string]string) string {
 	}
 
 	// Size of the buffer includes separator bytes
-	buf := bytes.NewBuffer(make([]byte, 0, l+2*len(tags)+1))
+	buf := bytes.NewBuffer(make([]byte, 0, l+2*len(tags)))
 	buf.WriteString(name)
 	buf.WriteString(componentSeparator)
 
