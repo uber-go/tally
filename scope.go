@@ -21,10 +21,8 @@
 package tally
 
 import (
-	"bytes"
 	"fmt"
 	"io"
-	"sort"
 	"sync"
 	"time"
 
@@ -36,12 +34,6 @@ var (
 	NoopScope, _ = NewRootScope(ScopeOptions{Reporter: NullStatsReporter}, 0)
 	// DefaultSeparator is the default separator used to join nested scopes
 	DefaultSeparator = "."
-	// componentSeparator is the separator used to separate a metric's name and it's tags in its ID
-	componentSeparator = "+"
-	// tagPairSeparator is the separator used to separate pairs of tags in metric's ID
-	tagPairSeparator = ","
-	// tagValueSeparator is the separator used to separate a tag's key and value in a metric's ID
-	tagValueSeparator = "="
 
 	globalClock = clock.New()
 
@@ -424,7 +416,6 @@ func (s *scope) Capabilities() Capabilities {
 }
 
 func (s *scope) Snapshot() Snapshot {
-	var buf bytes.Buffer
 	snap := newSnapshot()
 
 	s.registry.RLock()
@@ -438,7 +429,7 @@ func (s *scope) Snapshot() Snapshot {
 		ss.cm.RLock()
 		for key, c := range ss.counters {
 			name := ss.fullyQualifiedName(key)
-			id := ss.uniqueID(name, tags, buf)
+			id := KeyForPrefixedStringMap(name, tags)
 			snap.counters[id] = &counterSnapshot{
 				name:  name,
 				tags:  tags,
@@ -449,7 +440,7 @@ func (s *scope) Snapshot() Snapshot {
 		ss.gm.RLock()
 		for key, g := range ss.gauges {
 			name := ss.fullyQualifiedName(key)
-			id := ss.uniqueID(name, tags, buf)
+			id := KeyForPrefixedStringMap(name, tags)
 			snap.gauges[id] = &gaugeSnapshot{
 				name:  name,
 				tags:  tags,
@@ -460,7 +451,7 @@ func (s *scope) Snapshot() Snapshot {
 		ss.tm.RLock()
 		for key, t := range ss.timers {
 			name := ss.fullyQualifiedName(key)
-			id := ss.uniqueID(name, tags, buf)
+			id := KeyForPrefixedStringMap(name, tags)
 			snap.timers[id] = &timerSnapshot{
 				name:   name,
 				tags:   tags,
@@ -492,35 +483,6 @@ func (s *scope) fullyQualifiedName(name string) string {
 		return name
 	}
 	return fmt.Sprintf("%s%s%s", s.prefix, s.separator, name)
-}
-
-func (s *scope) uniqueID(name string, tags map[string]string, buf bytes.Buffer) string {
-	if len(tags) == 0 {
-		return name
-	}
-
-	buf.Reset()
-	buf.WriteString(name)
-	buf.WriteString(componentSeparator)
-
-	// Sort tags in alphabetical order so the ID is consistent
-	keys := make([]string, 0, len(tags))
-	for key := range tags {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	for i, key := range keys {
-		buf.WriteString(key)
-		buf.WriteString(tagValueSeparator)
-		buf.WriteString(tags[key])
-
-		if i != len(keys)-1 {
-			buf.WriteString(tagPairSeparator)
-		}
-	}
-
-	return buf.String()
 }
 
 // TestScope is a metrics collector that has no reporting, ensuring that
