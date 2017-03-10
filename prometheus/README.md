@@ -5,7 +5,7 @@ See `examples/prometheus_main.go` for an end to end example.
 ## Options
 
 You can use a specific Prometheus registry, and you can use
-either histograms or summaries for timers.
+either summaries or histograms for timers.
 
 The reporter options are:
 
@@ -42,10 +42,11 @@ The timer types are:
 type TimerType int
 
 const (
-	// HistogramTimerType is a timer type that reports into a histogram
-	HistogramTimerType TimerType = iota
 	// SummaryTimerType is a timer type that reports into a summary
-	SummaryTimerType
+	SummaryTimerType TimerType = iota
+
+	// HistogramTimerType is a timer type that reports into a histogram
+	HistogramTimerType
 )
 ```
 
