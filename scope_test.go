@@ -21,6 +21,7 @@
 package tally
 
 import (
+	"math"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -560,11 +561,14 @@ func TestSnapshot(t *testing.T) {
 	s.Gauge("bzzt").Update(2)
 	s.Timer("brrr").Record(1 * time.Second)
 	s.Timer("brrr").Record(2 * time.Second)
+	s.Histogram("fizz", ValueBuckets{0, 2, 4}).RecordValue(1)
+	s.Histogram("fizz", ValueBuckets{0, 2, 4}).RecordValue(5)
+	s.Histogram("buzz", DurationBuckets{time.Second * 2, time.Second * 4}).RecordDuration(time.Second)
 	child.Counter("boop").Inc(1)
 
 	snap := s.Snapshot()
-	counters, gauges, timers :=
-		snap.Counters(), snap.Gauges(), snap.Timers()
+	counters, gauges, timers, histograms :=
+		snap.Counters(), snap.Gauges(), snap.Timers(), snap.Histograms()
 
 	assert.EqualValues(t, 1, counters["foo.beep+env=test"].Value())
 	assert.EqualValues(t, commonTags, counters["foo.beep+env=test"].Tags())
@@ -578,7 +582,25 @@ func TestSnapshot(t *testing.T) {
 	}, timers["foo.brrr+env=test"].Values())
 	assert.EqualValues(t, commonTags, timers["foo.brrr+env=test"].Tags())
 
-	assert.EqualValues(t, 1, counters["foo.boop+env=test,service=test"].Value())
+	assert.EqualValues(t, map[float64]int64{
+		0:               0,
+		2:               1,
+		4:               0,
+		math.MaxFloat64: 1,
+	}, histograms["foo.fizz"].Values())
+	assert.EqualValues(t, map[time.Duration]int64(nil), histograms["foo.fizz"].Durations())
+	assert.EqualValues(t, commonTags, histograms["foo.fizz"].Tags())
+
+	assert.EqualValues(t, map[float64]int64(nil), histograms["foo.buzz"].Values())
+	assert.EqualValues(t, map[time.Duration]int64{
+		0:               0,
+		time.Second * 2: 1,
+		time.Second * 4: 0,
+		math.MaxInt64:   0,
+	}, histograms["foo.buzz"].Durations())
+	assert.EqualValues(t, commonTags, histograms["foo.buzz"].Tags())
+
+	assert.EqualValues(t, 1, counters["foo.boop"].Value())
 	assert.EqualValues(t, map[string]string{
 		"env":     "test",
 		"service": "test",

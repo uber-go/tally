@@ -375,6 +375,32 @@ func (h *histogram) RecordStopwatch(stopwatchStart time.Time) {
 	h.RecordDuration(d)
 }
 
+func (h *histogram) snapshotValues() map[float64]int64 {
+	if h.htype == durationHistogramType {
+		return nil
+	}
+
+	vals := make(map[float64]int64, len(h.buckets))
+	for i := range h.buckets {
+		vals[h.buckets[i].valueUpperBound] = h.buckets[i].samples.value()
+	}
+
+	return vals
+}
+
+func (h *histogram) snapshotDurations() map[time.Duration]int64 {
+	if h.htype == valueHistogramType {
+		return nil
+	}
+
+	durations := make(map[time.Duration]int64, len(h.buckets))
+	for i := range h.buckets {
+		durations[h.buckets[i].durationUpperBound] = h.buckets[i].samples.value()
+	}
+
+	return durations
+}
+
 type histogramBucket struct {
 	h                    *histogram
 	samples              *counter
