@@ -516,7 +516,7 @@ type Snapshot interface {
 	// Timers returns a snapshot of timer values since last report execution
 	Timers() map[string]TimerSnapshot
 
-	// Histograms returns a snapshot of histogram buckets since last report execution
+	// Histograms returns a snapshot of histogram samples since last report execution
 	Histograms() map[string]HistogramSnapshot
 }
 
@@ -564,10 +564,10 @@ type HistogramSnapshot interface {
 	// Tags returns the tags
 	Tags() map[string]string
 
-	// Values returns the counts for a valueHistogram
+	// Values returns the sample values for a valueHistogram
 	Values() map[float64]int64
 
-	// Durations returns the counts for a durationHistogram
+	// Durations returns the sample values for a durationHistogram
 	Durations() map[time.Duration]int64
 }
 
