@@ -429,7 +429,8 @@ func (s *scope) Snapshot() Snapshot {
 		ss.cm.RLock()
 		for key, c := range ss.counters {
 			name := ss.fullyQualifiedName(key)
-			snap.counters[name] = &counterSnapshot{
+			id := KeyForPrefixedStringMap(name, tags)
+			snap.counters[id] = &counterSnapshot{
 				name:  name,
 				tags:  tags,
 				value: c.snapshot(),
@@ -439,7 +440,8 @@ func (s *scope) Snapshot() Snapshot {
 		ss.gm.RLock()
 		for key, g := range ss.gauges {
 			name := ss.fullyQualifiedName(key)
-			snap.gauges[name] = &gaugeSnapshot{
+			id := KeyForPrefixedStringMap(name, tags)
+			snap.gauges[id] = &gaugeSnapshot{
 				name:  name,
 				tags:  tags,
 				value: g.snapshot(),
@@ -449,7 +451,8 @@ func (s *scope) Snapshot() Snapshot {
 		ss.tm.RLock()
 		for key, t := range ss.timers {
 			name := ss.fullyQualifiedName(key)
-			snap.timers[name] = &timerSnapshot{
+			id := KeyForPrefixedStringMap(name, tags)
+			snap.timers[id] = &timerSnapshot{
 				name:   name,
 				tags:   tags,
 				values: t.snapshot(),
