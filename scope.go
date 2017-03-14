@@ -565,10 +565,10 @@ type HistogramSnapshot interface {
 	// Tags returns the tags
 	Tags() map[string]string
 
-	// Values returns the sample values for a valueHistogram
+	// Values returns the sample values by upper bound for a valueHistogram
 	Values() map[float64]int64
 
-	// Durations returns the sample values for a durationHistogram
+	// Durations returns the sample values by upper bound for a durationHistogram
 	Durations() map[time.Duration]int64
 }
 
