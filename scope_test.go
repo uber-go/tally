@@ -587,20 +587,20 @@ func TestSnapshot(t *testing.T) {
 		2:               1,
 		4:               0,
 		math.MaxFloat64: 1,
-	}, histograms["foo.fizz"].Values())
-	assert.EqualValues(t, map[time.Duration]int64(nil), histograms["foo.fizz"].Durations())
-	assert.EqualValues(t, commonTags, histograms["foo.fizz"].Tags())
+	}, histograms["foo.fizz+env=test"].Values())
+	assert.EqualValues(t, map[time.Duration]int64(nil), histograms["foo.fizz+env=test"].Durations())
+	assert.EqualValues(t, commonTags, histograms["foo.fizz+env=test"].Tags())
 
-	assert.EqualValues(t, map[float64]int64(nil), histograms["foo.buzz"].Values())
+	assert.EqualValues(t, map[float64]int64(nil), histograms["foo.buzz+env=test"].Values())
 	assert.EqualValues(t, map[time.Duration]int64{
 		0:               0,
 		time.Second * 2: 1,
 		time.Second * 4: 0,
 		math.MaxInt64:   0,
-	}, histograms["foo.buzz"].Durations())
-	assert.EqualValues(t, commonTags, histograms["foo.buzz"].Tags())
+	}, histograms["foo.buzz+env=test"].Durations())
+	assert.EqualValues(t, commonTags, histograms["foo.buzz+env=test"].Tags())
 
-	assert.EqualValues(t, 1, counters["foo.boop"].Value())
+	assert.EqualValues(t, 1, counters["foo.boop+env=test,service=test"].Value())
 	assert.EqualValues(t, map[string]string{
 		"env":     "test",
 		"service": "test",

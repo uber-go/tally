@@ -462,7 +462,8 @@ func (s *scope) Snapshot() Snapshot {
 		ss.hm.RLock()
 		for key, h := range ss.histograms {
 			name := ss.fullyQualifiedName(key)
-			snap.histograms[name] = &histogramSnapshot{
+			id := KeyForPrefixedStringMap(name, tags)
+			snap.histograms[id] = &histogramSnapshot{
 				name:      name,
 				tags:      tags,
 				values:    h.snapshotValues(),
