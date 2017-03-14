@@ -459,7 +459,18 @@ func (s *scope) Snapshot() Snapshot {
 			}
 		}
 		ss.tm.RUnlock()
-		// TODO: histograms in snapshot
+		ss.hm.RLock()
+		for key, h := range ss.histograms {
+			name := ss.fullyQualifiedName(key)
+			id := KeyForPrefixedStringMap(name, tags)
+			snap.histograms[id] = &histogramSnapshot{
+				name:      name,
+				tags:      tags,
+				values:    h.snapshotValues(),
+				durations: h.snapshotDurations(),
+			}
+		}
+		ss.hm.RUnlock()
 	}
 	s.registry.RUnlock()
 
@@ -505,6 +516,9 @@ type Snapshot interface {
 
 	// Timers returns a snapshot of timer values since last report execution
 	Timers() map[string]TimerSnapshot
+
+	// Histograms returns a snapshot of histogram samples since last report execution
+	Histograms() map[string]HistogramSnapshot
 }
 
 // CounterSnapshot is a snapshot of a counter
@@ -543,6 +557,21 @@ type TimerSnapshot interface {
 	Values() []time.Duration
 }
 
+// HistogramSnapshot is a snapshot of a histogram
+type HistogramSnapshot interface {
+	// Name returns the name
+	Name() string
+
+	// Tags returns the tags
+	Tags() map[string]string
+
+	// Values returns the sample values by upper bound for a valueHistogram
+	Values() map[float64]int64
+
+	// Durations returns the sample values by upper bound for a durationHistogram
+	Durations() map[time.Duration]int64
+}
+
 // mergeRightTags merges 2 sets of tags with the tags from tagsRight overriding values from tagsLeft
 func mergeRightTags(tagsLeft, tagsRight map[string]string) map[string]string {
 	if tagsLeft == nil && tagsRight == nil {
@@ -574,16 +603,18 @@ func copyStringMap(stringMap map[string]string) map[string]string {
 }
 
 type snapshot struct {
-	counters map[string]CounterSnapshot
-	gauges   map[string]GaugeSnapshot
-	timers   map[string]TimerSnapshot
+	counters   map[string]CounterSnapshot
+	gauges     map[string]GaugeSnapshot
+	timers     map[string]TimerSnapshot
+	histograms map[string]HistogramSnapshot
 }
 
 func newSnapshot() *snapshot {
 	return &snapshot{
-		counters: make(map[string]CounterSnapshot),
-		gauges:   make(map[string]GaugeSnapshot),
-		timers:   make(map[string]TimerSnapshot),
+		counters:   make(map[string]CounterSnapshot),
+		gauges:     make(map[string]GaugeSnapshot),
+		timers:     make(map[string]TimerSnapshot),
+		histograms: make(map[string]HistogramSnapshot),
 	}
 }
 
@@ -597,6 +628,10 @@ func (s *snapshot) Gauges() map[string]GaugeSnapshot {
 
 func (s *snapshot) Timers() map[string]TimerSnapshot {
 	return s.timers
+}
+
+func (s *snapshot) Histograms() map[string]HistogramSnapshot {
+	return s.histograms
 }
 
 type counterSnapshot struct {
@@ -651,4 +686,27 @@ func (s *timerSnapshot) Tags() map[string]string {
 
 func (s *timerSnapshot) Values() []time.Duration {
 	return s.values
+}
+
+type histogramSnapshot struct {
+	name      string
+	tags      map[string]string
+	values    map[float64]int64
+	durations map[time.Duration]int64
+}
+
+func (s *histogramSnapshot) Name() string {
+	return s.name
+}
+
+func (s *histogramSnapshot) Tags() map[string]string {
+	return s.tags
+}
+
+func (s *histogramSnapshot) Values() map[float64]int64 {
+	return s.values
+}
+
+func (s *histogramSnapshot) Durations() map[time.Duration]int64 {
+	return s.durations
 }
