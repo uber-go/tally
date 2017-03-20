@@ -57,6 +57,11 @@ type Scope interface {
 
 	// Capabilities returns a description of metrics reporting capabilities.
 	Capabilities() Capabilities
+
+	// Snapshot returns a copy of all values since the last report execution,
+	// this is an expensive operation and should only be used for testing or
+	// debugging purposes
+	Snapshot() Snapshot
 }
 
 // Counter is the interface for emitting counter type metrics.
@@ -149,4 +154,63 @@ type Capabilities interface {
 
 	// Tagging returns whether the reporter has the capability for tagged metrics.
 	Tagging() bool
+}
+
+// Snapshot is a snapshot of values since last report execution
+type Snapshot interface {
+	// Counters returns a snapshot of all counter summations since last report execution
+	Counters() map[string]CounterSnapshot
+
+	// Gauges returns a snapshot of gauge last values since last report execution
+	Gauges() map[string]GaugeSnapshot
+
+	// Timers returns a snapshot of timer values since last report execution
+	Timers() map[string]TimerSnapshot
+
+	// Histograms returns a snapshot of histogram samples since last report execution
+	Histograms() map[string]HistogramSnapshot
+}
+
+// Metadata returns the metadata for a metric
+type Metadata interface {
+	// Name returns the name of a metric
+	Name() string
+
+	// Tags returns the tags for a metric
+	Tags() map[string]string
+}
+
+// CounterSnapshot is a snapshot of a counter
+type CounterSnapshot interface {
+	Metadata
+
+	// Value returns the value
+	Value() int64
+}
+
+// GaugeSnapshot is a snapshot of a gauge
+type GaugeSnapshot interface {
+	Metadata
+
+	// Value returns the value
+	Value() float64
+}
+
+// TimerSnapshot is a snapshot of a timer
+type TimerSnapshot interface {
+	Metadata
+
+	// Values returns the values
+	Values() []time.Duration
+}
+
+// HistogramSnapshot is a snapshot of a histogram
+type HistogramSnapshot interface {
+	Metadata
+
+	// Values returns the sample values by upper bound for a valueHistogram
+	Values() map[float64]int64
+
+	// Durations returns the sample values by upper bound for a durationHistogram
+	Durations() map[time.Duration]int64
 }
