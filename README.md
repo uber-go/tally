@@ -194,6 +194,7 @@ BenchmarkTimerReport-8              	300000000	         5.69 ns/op
 ```
 
 <hr>
+
 Released under the [MIT License](LICENSE).
 
 [doc-img]: https://godoc.org/github.com/uber-go/tally?status.svg
