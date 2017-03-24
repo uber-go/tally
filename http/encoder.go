@@ -36,6 +36,8 @@ const (
 	gaugeType     = "gauge"
 	timerType     = "timer"
 	histogramType = "histogram"
+
+	maxUpperBoundStr = "+Inf"
 )
 
 var (
@@ -244,7 +246,6 @@ func (e *encoder) encodeTimer(timer tally.TimerSnapshot) (int, error) {
 
 func (e *encoder) encodeHistogram(histogram tally.HistogramSnapshot) (int, error) {
 	var written int
-	maxUpperBoundStr := "+Inf"
 
 	n, err := e.encodeComments(histogram, histogramType)
 	written += n
@@ -303,7 +304,7 @@ func (e *encoder) encodeHistogram(histogram tally.HistogramSnapshot) (int, error
 			if upperBound == math.MaxInt64 {
 				upperBoundStr = maxUpperBoundStr
 			} else {
-				upperBoundStr = fmt.Sprint(time.Duration(upperBound))
+				upperBoundStr = durationString(time.Duration(upperBound))
 			}
 
 			n, err = e.encodeNameAndTags(histogram, "le", upperBoundStr)
@@ -328,6 +329,17 @@ func (e *encoder) encodeHistogram(histogram tally.HistogramSnapshot) (int, error
 var (
 	escaper = strings.NewReplacer("\\", `\\`, "\n", `\n`, "\"", `\"`)
 )
+
+// durationString returns the string representation of a time.Duration. We need a special function
+// here because in Go 1.7 the representation of 0 was changed from "0" to "0s". Consequently,
+// to ensure consistent output on versions of Go older than 1.7 we need to return "0s" explicitly.
+func durationString(d time.Duration) string {
+	if d == 0 {
+		return "0s"
+	}
+
+	return fmt.Sprint(d)
+}
 
 // escapeString replaces a backslash with '\\', a new line with '\n', and a double quote with '\"'.
 func escapeString(s string) string {

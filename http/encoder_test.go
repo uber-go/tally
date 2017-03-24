@@ -229,7 +229,7 @@ var durationsHistogramSnapshot = &mockHistogramSnapshot{
 	mockMetadata: metadata,
 	mockDurations: func() map[time.Duration]int64 {
 		return map[time.Duration]int64{
-			0:               0,
+			time.Second * 0: 0,
 			time.Second * 2: 1,
 			time.Second * 4: 0,
 			math.MaxInt64:   1,
