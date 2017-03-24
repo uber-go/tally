@@ -20,4 +20,58 @@
 
 package http
 
-// TODO(jeromefroe): Finish writing tests for http package.
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/uber-go/tally"
+)
+
+func TestHTTPHandler(t *testing.T) {
+	opts := tally.ScopeOptions{
+		Tags: map[string]string{"env": "test", "service": "fizz"},
+	}
+	s, closer := tally.NewRootScope(opts, 0)
+	defer closer.Close()
+
+	s.Counter("doe").Inc(1)
+	s.Gauge("ray").Update(2)
+	s.Timer("me").Record(1 * time.Second)
+
+	vh := s.Histogram("fa", tally.ValueBuckets{0, 2, 4})
+	vh.RecordValue(1)
+	vh.RecordValue(5)
+	dh := s.Histogram("sew", tally.DurationBuckets{time.Second * 2, time.Second * 4})
+	dh.RecordDuration(time.Second)
+
+	handler := ScopeHandler(s)
+
+	writer := httptest.NewRecorder()
+	request, _ := http.NewRequest("GET", "/", nil)
+	request.Header.Add("Accept", "test/plain")
+
+	handler.ServeHTTP(writer, request)
+	assert.Equal(t, http.StatusOK, writer.Code)
+
+	expectedResponse := `# TYPE doe counter
+doe{env="test",service="fizz"} 1
+# TYPE ray gauge
+ray{env="test",service="fizz"} 2
+# TYPE me timer
+me{env="test",service="fizz"} [1s]
+# TYPE fa histogram
+fa{env="test",service="fizz",le="0"} 0
+fa{env="test",service="fizz",le="2"} 1
+fa{env="test",service="fizz",le="4"} 0
+fa{env="test",service="fizz",le="+Inf"} 1
+# TYPE sew histogram
+sew{env="test",service="fizz",le="0s"} 0
+sew{env="test",service="fizz",le="2s"} 1
+sew{env="test",service="fizz",le="4s"} 0
+sew{env="test",service="fizz",le="+Inf"} 0
+`
+	assert.Equal(t, expectedResponse, writer.Body.String())
+}

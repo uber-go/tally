@@ -64,8 +64,8 @@ func release(b *bytes.Buffer) {
 	bufferPool.Put(b)
 }
 
-// Handler returns an http.Handler for the provided Scope.
-func Handler(s tally.Scope) http.Handler {
+// ScopeHandler returns an http.Handler for the provided Scope.
+func ScopeHandler(s tally.Scope) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		snapshot := s.Snapshot()
 

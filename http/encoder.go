@@ -73,7 +73,18 @@ func (e *encoder) Encode(s tally.Snapshot) error {
 func (e *encoder) encode(s tally.Snapshot) (int, error) {
 	var written int
 
-	for _, counter := range s.Counters() {
+	// We sort the id's so we can ensure consistent order across calls.
+	keys := encPool.stringsPool.Get().([]string)
+	defer encPool.releaseStrings(keys)
+
+	counters := s.Counters()
+	for k := range counters {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		counter := counters[key]
 		n, err := e.encodeCounter(counter)
 		written += n
 		if err != nil {
@@ -81,7 +92,15 @@ func (e *encoder) encode(s tally.Snapshot) (int, error) {
 		}
 	}
 
-	for _, gauge := range s.Gauges() {
+	keys = keys[:0]
+	gauges := s.Gauges()
+	for k := range gauges {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		gauge := gauges[key]
 		n, err := e.encodeGauge(gauge)
 		written += n
 		if err != nil {
@@ -89,7 +108,15 @@ func (e *encoder) encode(s tally.Snapshot) (int, error) {
 		}
 	}
 
-	for _, timer := range s.Timers() {
+	keys = keys[:0]
+	timers := s.Timers()
+	for k := range timers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		timer := timers[key]
 		n, err := e.encodeTimer(timer)
 		written += n
 		if err != nil {
@@ -97,13 +124,22 @@ func (e *encoder) encode(s tally.Snapshot) (int, error) {
 		}
 	}
 
-	for _, histogram := range s.Histograms() {
+	keys = keys[:0]
+	histograms := s.Histograms()
+	for k := range histograms {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		histogram := histograms[key]
 		n, err := e.encodeHistogram(histogram)
 		written += n
 		if err != nil {
 			return written, err
 		}
 	}
+
 	return written, nil
 }
 
@@ -388,4 +424,19 @@ func (p *encoderPool) releaseInts(ints []int) {
 		ints[i] = 0
 	}
 	p.intsPool.Put(ints[:0])
+}
+
+func maxLength(lengths ...int) int {
+	if len(lengths) == 0 {
+		return -1
+	}
+
+	max := lengths[0]
+	for i := 1; 1 < len(lengths); i++ {
+		if lengths[i] > max {
+			max = lengths[i]
+		}
+	}
+
+	return max
 }
