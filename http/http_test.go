@@ -47,7 +47,7 @@ func TestHTTPHandler(t *testing.T) {
 	dh := s.Histogram("sew", tally.DurationBuckets{time.Second * 2, time.Second * 4})
 	dh.RecordDuration(time.Second)
 
-	handler := ScopeHandler(s)
+	handler := Handler(s)
 
 	writer := httptest.NewRecorder()
 	request, _ := http.NewRequest("GET", "/", nil)

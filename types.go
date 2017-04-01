@@ -57,11 +57,6 @@ type Scope interface {
 
 	// Capabilities returns a description of metrics reporting capabilities.
 	Capabilities() Capabilities
-
-	// Snapshot returns a copy of all values since the last report execution,
-	// this is an expensive operation and should only be used for testing or
-	// debugging purposes
-	Snapshot() Snapshot
 }
 
 // Counter is the interface for emitting counter type metrics.
@@ -169,6 +164,16 @@ type Snapshot interface {
 
 	// Histograms returns a snapshot of histogram samples since last report execution
 	Histograms() map[string]HistogramSnapshot
+}
+
+// SnapshotScope is a Scope which can return a snapshot of currently queued metric
+type SnapshotScope interface {
+	Scope
+
+	// Snapshot returns a copy of all values since the last report execution,
+	// this is an expensive operation and should only be used for testing or
+	// debugging purposes
+	Snapshot() Snapshot
 }
 
 // Metadata returns the metadata for a metric
