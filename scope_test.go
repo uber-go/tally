@@ -607,6 +607,22 @@ func TestSnapshot(t *testing.T) {
 	}, counters["foo.boop+env=test,service=test"].Tags())
 }
 
+func TestSnapshot_NoTags(t *testing.T) {
+	s := NewTestScope("foo", nil)
+	s.Counter("bar").Inc(1)
+
+	snap := s.Snapshot()
+	assert.EqualValues(t, 1, snap.Counters()["foo.bar"].Value())
+
+	s.Tagged(map[string]string{"env": "test"}).Counter("fizz").Inc(1)
+	snap = s.Snapshot()
+	assert.EqualValues(t, 1, snap.Counters()["foo.fizz+env=test"].Value())
+
+	s.SubScope("baz").Counter("buzz").Inc(1)
+	snap = s.Snapshot()
+	assert.EqualValues(t, 1, snap.Counters()["foo.baz.buzz"].Value())
+}
+
 func TestCapabilities(t *testing.T) {
 	r := newTestStatsReporter()
 	s, closer := NewRootScope(ScopeOptions{Reporter: r}, 0)
