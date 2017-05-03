@@ -116,7 +116,7 @@ func TestGauge(t *testing.T) {
 
 func TestTimer(t *testing.T) {
 	r := newStatsTestReporter()
-	timer := newTimer("t1", nil, r, nil)
+	timer := newTimer("t1", nil, r, nil, timerOptions{})
 
 	timer.Record(42 * time.Millisecond)
 	assert.Equal(t, 42*time.Millisecond, r.last)

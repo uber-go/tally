@@ -112,7 +112,10 @@ type ScopeOptions struct {
 // NewRootScope creates a new root Scope with a set of options and
 // a reporting interval.
 // Must provide either a StatsReporter or a CachedStatsReporter.
-func NewRootScope(opts ScopeOptions, interval time.Duration) (Scope, io.Closer) {
+func NewRootScope(
+	opts ScopeOptions,
+	interval time.Duration,
+) (Scope, io.Closer) {
 	s := newRootScope(opts, interval)
 	return s, s
 }
@@ -122,7 +125,7 @@ func NewRootScope(opts ScopeOptions, interval time.Duration) (Scope, io.Closer) 
 func NewTestScope(
 	prefix string,
 	tags map[string]string,
-) Scope {
+) TestScope {
 	return newRootScope(ScopeOptions{Prefix: prefix, Tags: tags}, 0)
 }
 
