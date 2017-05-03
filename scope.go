@@ -32,8 +32,13 @@ import (
 var (
 	// NoopScope is a scope that does nothing
 	NoopScope, _ = NewRootScope(ScopeOptions{Reporter: NullStatsReporter}, 0)
+
 	// DefaultSeparator is the default separator used to join nested scopes
 	DefaultSeparator = "."
+
+	// DefaultTimersBufferMax is the default timers max buffer when not
+	// reporting directly to a reporter and relying on snapshots
+	DefaultTimersBufferMax = 1024
 
 	globalClock = clock.New()
 
@@ -57,13 +62,14 @@ var (
 )
 
 type scope struct {
-	separator      string
-	prefix         string
-	tags           map[string]string
-	reporter       StatsReporter
-	cachedReporter CachedStatsReporter
-	baseReporter   BaseStatsReporter
-	defaultBuckets Buckets
+	separator       string
+	prefix          string
+	tags            map[string]string
+	reporter        StatsReporter
+	cachedReporter  CachedStatsReporter
+	baseReporter    BaseStatsReporter
+	defaultBuckets  Buckets
+	timersBufferMax int
 
 	registry *scopeRegistry
 	status   scopeStatus
@@ -94,18 +100,19 @@ var scopeRegistryKey = KeyForPrefixedStringMap
 
 // ScopeOptions is a set of options to construct a scope.
 type ScopeOptions struct {
-	Tags           map[string]string
-	Prefix         string
-	Reporter       StatsReporter
-	CachedReporter CachedStatsReporter
-	Separator      string
-	DefaultBuckets Buckets
+	Tags            map[string]string
+	Prefix          string
+	Reporter        StatsReporter
+	CachedReporter  CachedStatsReporter
+	Separator       string
+	DefaultBuckets  Buckets
+	TimersBufferMax int
 }
 
 // NewRootScope creates a new root Scope with a set of options and
 // a reporting interval.
 // Must provide either a StatsReporter or a CachedStatsReporter.
-func NewRootScope(opts ScopeOptions, interval time.Duration) (SnapshotScope, io.Closer) {
+func NewRootScope(opts ScopeOptions, interval time.Duration) (Scope, io.Closer) {
 	s := newRootScope(opts, interval)
 	return s, s
 }
@@ -115,7 +122,7 @@ func NewRootScope(opts ScopeOptions, interval time.Duration) (SnapshotScope, io.
 func NewTestScope(
 	prefix string,
 	tags map[string]string,
-) SnapshotScope {
+) Scope {
 	return newRootScope(ScopeOptions{Prefix: prefix, Tags: tags}, 0)
 }
 
@@ -138,16 +145,21 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		opts.DefaultBuckets = defaultScopeBuckets
 	}
 
+	if opts.TimersBufferMax <= 0 {
+		opts.TimersBufferMax = DefaultTimersBufferMax
+	}
+
 	s := &scope{
 		separator: opts.Separator,
 		prefix:    opts.Prefix,
 		// NB(r): Take a copy of the tags on creation
 		// so that it cannot be modified after set.
-		tags:           copyStringMap(opts.Tags),
-		reporter:       opts.Reporter,
-		cachedReporter: opts.CachedReporter,
-		baseReporter:   baseReporter,
-		defaultBuckets: opts.DefaultBuckets,
+		tags:            copyStringMap(opts.Tags),
+		reporter:        opts.Reporter,
+		cachedReporter:  opts.CachedReporter,
+		baseReporter:    baseReporter,
+		defaultBuckets:  opts.DefaultBuckets,
+		timersBufferMax: opts.TimersBufferMax,
 
 		registry: &scopeRegistry{
 			subscopes: make(map[string]*scope),
@@ -319,8 +331,9 @@ func (s *scope) Timer(name string) Timer {
 					s.fullyQualifiedName(name), s.tags,
 				)
 			}
+			opts := timerOptions{bufferMax: s.timersBufferMax}
 			val = newTimer(
-				s.fullyQualifiedName(name), s.tags, s.reporter, cachedTimer,
+				s.fullyQualifiedName(name), s.tags, s.reporter, cachedTimer, opts,
 			)
 			s.timers[name] = val
 		}
@@ -390,12 +403,14 @@ func (s *scope) subscope(prefix string, tags map[string]string) Scope {
 		prefix:    prefix,
 		// NB(r): Take a copy of the tags on creation
 		// so that it cannot be modified after set.
-		tags:           copyStringMap(tags),
-		reporter:       s.reporter,
-		cachedReporter: s.cachedReporter,
-		baseReporter:   s.baseReporter,
-		defaultBuckets: s.defaultBuckets,
-		registry:       s.registry,
+		tags:            copyStringMap(tags),
+		reporter:        s.reporter,
+		cachedReporter:  s.cachedReporter,
+		baseReporter:    s.baseReporter,
+		defaultBuckets:  s.defaultBuckets,
+		timersBufferMax: s.timersBufferMax,
+
+		registry: s.registry,
 
 		counters:   make(map[string]*counter),
 		gauges:     make(map[string]*gauge),
@@ -415,6 +430,14 @@ func (s *scope) Capabilities() Capabilities {
 }
 
 func (s *scope) Snapshot() Snapshot {
+	return s.snapshot(ResetOptions{})
+}
+
+func (s *scope) SnapshotReset(opts ResetOptions) Snapshot {
+	return s.snapshot(opts)
+}
+
+func (s *scope) snapshot(opts ResetOptions) Snapshot {
 	snap := newSnapshot()
 
 	s.registry.RLock()
@@ -429,10 +452,17 @@ func (s *scope) Snapshot() Snapshot {
 		for key, c := range ss.counters {
 			name := ss.fullyQualifiedName(key)
 			id := KeyForPrefixedStringMap(name, tags)
+
+			var value int64
+			if opts.ResetCounters {
+				value = c.snapshotReset()
+			} else {
+				value = c.snapshot()
+			}
 			snap.counters[id] = &counterSnapshot{
 				name:  name,
 				tags:  tags,
-				value: c.snapshot(),
+				value: value,
 			}
 		}
 		ss.cm.RUnlock()
@@ -451,10 +481,17 @@ func (s *scope) Snapshot() Snapshot {
 		for key, t := range ss.timers {
 			name := ss.fullyQualifiedName(key)
 			id := KeyForPrefixedStringMap(name, tags)
+
+			var values []time.Duration
+			if opts.ResetTimers {
+				values = t.snapshotReset()
+			} else {
+				values = t.snapshot()
+			}
 			snap.timers[id] = &timerSnapshot{
 				name:   name,
 				tags:   tags,
-				values: t.snapshot(),
+				values: values,
 			}
 		}
 		ss.tm.RUnlock()
@@ -462,11 +499,21 @@ func (s *scope) Snapshot() Snapshot {
 		for key, h := range ss.histograms {
 			name := ss.fullyQualifiedName(key)
 			id := KeyForPrefixedStringMap(name, tags)
+
+			var values map[float64]int64
+			var durations map[time.Duration]int64
+			if opts.ResetHistograms {
+				values = h.snapshotResetValues()
+				durations = h.snapshotResetDurations()
+			} else {
+				values = h.snapshotValues()
+				durations = h.snapshotDurations()
+			}
 			snap.histograms[id] = &histogramSnapshot{
 				name:      name,
 				tags:      tags,
-				values:    h.snapshotValues(),
-				durations: h.snapshotDurations(),
+				values:    values,
+				durations: durations,
 			}
 		}
 		ss.hm.RUnlock()

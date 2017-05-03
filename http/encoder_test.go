@@ -79,7 +79,7 @@ func TestEncodeNameAndTags(t *testing.T) {
 	var buf bytes.Buffer
 	e := &encoder{w: &buf}
 
-	n, err := e.encodeNameAndTags(metadata, "", "")
+	n, err := e.encodeNameAndTags(metadata, "", "", "", "")
 	actual := buf.String()
 	expected := `requests{request_type="GET",status_code="200"}`
 	assert.Nil(t, err)
@@ -88,7 +88,7 @@ func TestEncodeNameAndTags(t *testing.T) {
 
 	buf.Reset()
 
-	n, err = e.encodeNameAndTags(metadata, "quantile", "75")
+	n, err = e.encodeNameAndTags(metadata, "quantile", "75", "", "")
 	actual = buf.String()
 	expected = `requests{request_type="GET",status_code="200",quantile="75"}`
 	assert.Nil(t, err)
@@ -246,8 +246,8 @@ func TestEncodeHistogram(t *testing.T) {
 	expected := "# TYPE requests histogram\n" +
 		`requests{request_type="GET",status_code="200",le="0"} 0` + "\n" +
 		`requests{request_type="GET",status_code="200",le="2"} 1` + "\n" +
-		`requests{request_type="GET",status_code="200",le="4"} 0` + "\n" +
-		`requests{request_type="GET",status_code="200",le="+Inf"} 1` + "\n"
+		`requests{request_type="GET",status_code="200",le="4"} 1` + "\n" +
+		`requests{request_type="GET",status_code="200",le="+Inf"} 2` + "\n"
 	assert.Nil(t, err)
 	assert.Equal(t, n, len(expected))
 	assert.Equal(t, expected, actual)
@@ -259,8 +259,8 @@ func TestEncodeHistogram(t *testing.T) {
 	expected = "# TYPE requests histogram\n" +
 		`requests{request_type="GET",status_code="200",le="0s"} 0` + "\n" +
 		`requests{request_type="GET",status_code="200",le="2s"} 1` + "\n" +
-		`requests{request_type="GET",status_code="200",le="4s"} 0` + "\n" +
-		`requests{request_type="GET",status_code="200",le="+Inf"} 1` + "\n"
+		`requests{request_type="GET",status_code="200",le="4s"} 1` + "\n" +
+		`requests{request_type="GET",status_code="200",le="+Inf"} 2` + "\n"
 	assert.Nil(t, err)
 	assert.Equal(t, n, len(expected))
 	assert.Equal(t, expected, actual)
@@ -338,8 +338,8 @@ func TestEncode(t *testing.T) {
 		"# TYPE requests histogram\n" +
 		`requests{request_type="GET",status_code="200",le="0"} 0` + "\n" +
 		`requests{request_type="GET",status_code="200",le="2"} 1` + "\n" +
-		`requests{request_type="GET",status_code="200",le="4"} 0` + "\n" +
-		`requests{request_type="GET",status_code="200",le="+Inf"} 1` + "\n"
+		`requests{request_type="GET",status_code="200",le="4"} 1` + "\n" +
+		`requests{request_type="GET",status_code="200",le="+Inf"} 2` + "\n"
 	assert.Nil(t, err)
 	assert.Equal(t, n, len(expected))
 	assert.Equal(t, expected, actual)

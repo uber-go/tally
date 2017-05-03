@@ -67,6 +67,9 @@ const (
 	// precision to use when formatting the metric tag
 	// with the histogram bucket bound values.
 	DefaultHistogramBucketTagPrecision = uint(6)
+	// DefaultHistogramValueBucketFmt is the default histogram
+	// value bucket format for use when calling HistogramValueBucketString.
+	DefaultHistogramValueBucketFmt = "%.6f"
 
 	emitMetricBatchOverhead    = 19
 	minMetricBucketIDTagLength = 4
@@ -286,65 +289,43 @@ func (r *reporter) AllocateHistogram(
 		cachedValueBuckets    []cachedHistogramBucket
 		cachedDurationBuckets []cachedHistogramBucket
 	)
-	bucketIDLen := len(strconv.Itoa(buckets.Len()))
-	bucketIDLen = int(math.Max(float64(bucketIDLen),
-		float64(minMetricBucketIDTagLength)))
-	bucketIDLenStr := strconv.Itoa(bucketIDLen)
-	bucketIDFmt := "%0" + bucketIDLenStr + "d"
-	for i, pair := range tally.BucketPairs(buckets) {
-		valueTags, durationTags :=
-			make(map[string]string), make(map[string]string)
+
+	opts := HistogramBucketsForEachOptions{
+		BucketIDTagName:   r.bucketIDTagName,
+		BucketTagName:     r.bucketTagName,
+		BucketValueFormat: r.bucketValFmt,
+	}
+
+	valueBuckets := tally.ValueBuckets(buckets.AsValues())
+	HistogramValueBucketsForEach(valueBuckets, opts, func(
+		pair tally.BucketPair,
+		bucketTags map[string]string,
+	) {
 		for k, v := range tags {
-			valueTags[k], durationTags[k] = v, v
+			bucketTags[k] = v
 		}
-
-		idTagValue := fmt.Sprintf(bucketIDFmt, i)
-
-		valueTags[r.bucketIDTagName] = idTagValue
-		valueTags[r.bucketTagName] = fmt.Sprintf("%s-%s",
-			r.valueBucketString(pair.LowerBoundValue()),
-			r.valueBucketString(pair.UpperBoundValue()))
-
 		cachedValueBuckets = append(cachedValueBuckets,
 			cachedHistogramBucket{pair.UpperBoundValue(),
 				pair.UpperBoundDuration(),
-				r.allocateCounter(name, valueTags)})
+				r.allocateCounter(name, bucketTags)})
+	})
 
-		durationTags[r.bucketIDTagName] = idTagValue
-		durationTags[r.bucketTagName] = fmt.Sprintf("%s-%s",
-			r.durationBucketString(pair.LowerBoundDuration()),
-			r.durationBucketString(pair.UpperBoundDuration()))
-
+	durationBuckets := tally.DurationBuckets(buckets.AsDurations())
+	HistogramDurationBucketsForEach(durationBuckets, opts, func(
+		pair tally.BucketPair,
+		bucketTags map[string]string,
+	) {
+		for k, v := range tags {
+			bucketTags[k] = v
+		}
 		cachedDurationBuckets = append(cachedDurationBuckets,
 			cachedHistogramBucket{pair.UpperBoundValue(),
 				pair.UpperBoundDuration(),
-				r.allocateCounter(name, durationTags)})
-	}
+				r.allocateCounter(name, bucketTags)})
+	})
+
 	return cachedHistogram{r, name, tags, buckets,
 		cachedValueBuckets, cachedDurationBuckets}
-}
-
-func (r *reporter) valueBucketString(v float64) string {
-	if v == math.MaxFloat64 {
-		return "infinity"
-	}
-	if v == -math.MaxFloat64 {
-		return "-infinity"
-	}
-	return fmt.Sprintf(r.bucketValFmt, v)
-}
-
-func (r *reporter) durationBucketString(d time.Duration) string {
-	if d == 0 {
-		return "0"
-	}
-	if d == time.Duration(math.MaxInt64) {
-		return "infinity"
-	}
-	if d == time.Duration(math.MinInt64) {
-		return "-infinity"
-	}
-	return d.String()
 }
 
 func (r *reporter) newMetric(
@@ -509,6 +490,143 @@ func (r *reporter) flush(
 		mets[i] = nil
 	}
 	return mets[:0]
+}
+
+// HistogramBucketsForEachFn is a callback for users
+// to use name, tags and the bucket pair expected
+// for each M3 bucket pair created.
+type HistogramBucketsForEachFn func(
+	bucketPair tally.BucketPair,
+	tags map[string]string,
+)
+
+// HistogramBucketsForEachOptions is options to use
+// when iterating histogram buckets to determine
+// attributes about the bucket names and tags.
+type HistogramBucketsForEachOptions struct {
+	BucketIDTagName   string
+	BucketTagName     string
+	BucketValueFormat string
+}
+
+// HistogramDurationBucketsForEach can be used to iterate
+// the M3 duration bucket pairs tags
+func HistogramDurationBucketsForEach(
+	buckets tally.DurationBuckets,
+	opts HistogramBucketsForEachOptions,
+	fn HistogramBucketsForEachFn,
+) {
+	if opts.BucketIDTagName == "" {
+		opts.BucketIDTagName = DefaultHistogramBucketIDName
+	}
+	if opts.BucketTagName == "" {
+		opts.BucketTagName = DefaultHistogramBucketName
+	}
+
+	pairs := tally.BucketPairs(buckets)
+	bucketIDFmt := HistogramBucketIDFmt(len(pairs))
+	for i, pair := range pairs {
+		idTagValue := fmt.Sprintf(bucketIDFmt, i)
+
+		tags := map[string]string{
+			opts.BucketIDTagName: idTagValue,
+			opts.BucketTagName: HistogramDurationBucketString(
+				pair.LowerBoundDuration(),
+				pair.UpperBoundDuration()),
+		}
+
+		fn(pair, tags)
+	}
+}
+
+// HistogramValueBucketsForEach can be used to iterate
+// the M3 value bucket pairs tags
+func HistogramValueBucketsForEach(
+	buckets tally.ValueBuckets,
+	opts HistogramBucketsForEachOptions,
+	fn HistogramBucketsForEachFn,
+) {
+	if opts.BucketIDTagName == "" {
+		opts.BucketIDTagName = DefaultHistogramBucketIDName
+	}
+	if opts.BucketTagName == "" {
+		opts.BucketTagName = DefaultHistogramBucketName
+	}
+	if opts.BucketValueFormat == "" {
+		opts.BucketValueFormat = DefaultHistogramValueBucketFmt
+	}
+
+	pairs := tally.BucketPairs(buckets)
+	bucketIDFmt := HistogramBucketIDFmt(len(pairs))
+	for i, pair := range pairs {
+		idTagValue := fmt.Sprintf(bucketIDFmt, i)
+
+		tags := map[string]string{
+			opts.BucketIDTagName: idTagValue,
+			opts.BucketTagName: HistogramValueBucketString(
+				pair.LowerBoundValue(),
+				pair.UpperBoundValue(),
+				opts.BucketValueFormat),
+		}
+
+		fn(pair, tags)
+	}
+}
+
+// HistogramBucketIDFmt returns a bucket ID format string for a given
+// number of buckets.
+func HistogramBucketIDFmt(buckets int) string {
+	bucketIDLen := len(strconv.Itoa(buckets))
+	bucketIDLen = int(math.Max(float64(bucketIDLen),
+		float64(minMetricBucketIDTagLength)))
+	bucketIDLenStr := strconv.Itoa(bucketIDLen)
+	bucketIDFmt := "%0" + bucketIDLenStr + "d"
+	return bucketIDFmt
+}
+
+// HistogramValueBucketString returns a histogram value bucket string.
+func HistogramValueBucketString(
+	lower, upper float64,
+	format string,
+) string {
+	if format == "" {
+		format = DefaultHistogramValueBucketFmt
+	}
+	return fmt.Sprintf("%s-%s",
+		histogramValueString(lower, format),
+		histogramValueString(upper, format))
+}
+
+func histogramValueString(v float64, format string) string {
+	if v == math.MaxFloat64 {
+		return "infinity"
+	}
+	if v == -math.MaxFloat64 {
+		return "-infinity"
+	}
+	return fmt.Sprintf(format, v)
+}
+
+// HistogramDurationBucketString returns a histogram duration bucket string.
+func HistogramDurationBucketString(
+	lower, upper time.Duration,
+) string {
+	return fmt.Sprintf("%s-%s",
+		histogramDurationString(lower),
+		histogramDurationString(upper))
+}
+
+func histogramDurationString(d time.Duration) string {
+	if d == 0 {
+		return "0"
+	}
+	if d == time.Duration(math.MaxInt64) {
+		return "infinity"
+	}
+	if d == time.Duration(math.MinInt64) {
+		return "-infinity"
+	}
+	return d.String()
 }
 
 func createTag(

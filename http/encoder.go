@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/uber-go/tally"
+	"github.com/uber-go/tally/m3"
 )
 
 const (
@@ -50,19 +51,83 @@ type encoderPool struct {
 	intsPool    *tally.ObjectPool
 }
 
-// Encoder encodes a tally Snapshot and writes it to an underlying io.Writer
+// Encoder encodes a tally Snapshot and writes it to an underlying io.Writer.
 type Encoder interface {
 	Encode(s tally.Snapshot) error
 }
 
 type encoder struct {
-	w io.Writer
+	w    io.Writer
+	opts Options
 }
 
-// NewEncoder returns a new Encoder which encodes a metrics snapshot to an io.Writer in a text
-// format similiar to the one used by Prometheus.
-func NewEncoder(w io.Writer) Encoder {
-	return &encoder{w: w}
+// Options is a set of options for HTTP encoding.
+type Options struct {
+	TagsFormat TagsFormat
+}
+
+// TagsFormat describes the formatting of tags for different
+// metric types when presenting the metrics.
+type TagsFormat uint
+
+const (
+	// PrometheusTagsFormat is the format Prometheus
+	// uses, using the "le" tag for histogram buckets, etc.
+	PrometheusTagsFormat TagsFormat = iota
+	// M3TagsFormat is the format M3 uses, using the
+	// "bucketid" and "bucket" tags for histogram buckets, etc.
+	M3TagsFormat
+
+	unknownTagsFormat
+)
+
+// DefaultTagsFormat is the default tags format using
+// Prometheus tags formatting.
+const DefaultTagsFormat = PrometheusTagsFormat
+
+// ValidTagsFormats returns the current valid tag formats
+// as a new array. This avoids consumers mutating a single
+// instance of a valid tags array.
+func ValidTagsFormats() []TagsFormat {
+	return []TagsFormat{
+		PrometheusTagsFormat,
+		M3TagsFormat,
+	}
+}
+
+func (f TagsFormat) String() string {
+	switch f {
+	case PrometheusTagsFormat:
+		return "prometheus"
+	case M3TagsFormat:
+		return "m3"
+	}
+	return "unknown"
+}
+
+// internal known non-mutated valid tags
+var validTagsFormats = ValidTagsFormats()
+
+// ParseTagsFormat parses a string representation of the
+// tags format and returns the concrete enum value.
+func ParseTagsFormat(str string) (TagsFormat, error) {
+	for _, f := range validTagsFormats {
+		if str == f.String() {
+			return f, nil
+		}
+	}
+	valids := make([]string, len(validTagsFormats))
+	for i, f := range validTagsFormats {
+		valids[i] = f.String()
+	}
+	return unknownTagsFormat, fmt.Errorf(
+		"unknown tags format %s, valid formats: %v", str, valids)
+}
+
+// NewEncoder returns a new Encoder which encodes a metrics snapshot
+// to an io.Writer in a text format similiar to the one used by Prometheus.
+func NewEncoder(w io.Writer, opts Options) Encoder {
+	return &encoder{w: w, opts: opts}
 }
 
 func (e *encoder) Encode(s tally.Snapshot) error {
@@ -158,7 +223,11 @@ func (e *encoder) encodeComments(meta tally.Metadata, metricType string) (int, e
 	return written, nil
 }
 
-func (e *encoder) encodeNameAndTags(meta tally.Metadata, lastTagName, lastTagValue string) (int, error) {
+func (e *encoder) encodeNameAndTags(
+	meta tally.Metadata,
+	secondLastTagName, secondLastTagValue string,
+	lastTagName, lastTagValue string,
+) (int, error) {
 	var written int
 
 	n, err := fmt.Fprint(e.w, meta.Name())
@@ -191,6 +260,14 @@ func (e *encoder) encodeNameAndTags(meta tally.Metadata, lastTagName, lastTagVal
 		separator = ','
 	}
 
+	if secondLastTagName != "" {
+		n, err := fmt.Fprintf(e.w, tagFormat, separator, secondLastTagName, escapeString(secondLastTagValue))
+		written += n
+		if err != nil {
+			return written, err
+		}
+	}
+
 	if lastTagName != "" {
 		n, err := fmt.Fprintf(e.w, tagFormat, separator, lastTagName, escapeString(lastTagValue))
 		written += n
@@ -217,7 +294,7 @@ func (e *encoder) encodeCounter(counter tally.CounterSnapshot) (int, error) {
 		return written, err
 	}
 
-	n, err = e.encodeNameAndTags(counter, "", "")
+	n, err = e.encodeNameAndTags(counter, "", "", "", "")
 	written += n
 	if err != nil {
 		return written, err
@@ -241,7 +318,7 @@ func (e *encoder) encodeGauge(gauge tally.GaugeSnapshot) (int, error) {
 		return written, err
 	}
 
-	n, err = e.encodeNameAndTags(gauge, "", "")
+	n, err = e.encodeNameAndTags(gauge, "", "", "", "")
 	written += n
 	if err != nil {
 		return written, err
@@ -265,7 +342,7 @@ func (e *encoder) encodeTimer(timer tally.TimerSnapshot) (int, error) {
 		return written, err
 	}
 
-	n, err = e.encodeNameAndTags(timer, "", "")
+	n, err = e.encodeNameAndTags(timer, "", "", "", "")
 	written += n
 	if err != nil {
 		return written, err
@@ -300,26 +377,69 @@ func (e *encoder) encodeHistogram(histogram tally.HistogramSnapshot) (int, error
 		}
 		sort.Float64s(valueUpperBounds)
 
-		for _, upperBound := range valueUpperBounds {
-			var upperBoundStr string
-			if upperBound == math.MaxFloat64 {
-				upperBoundStr = maxUpperBoundStr
-			} else {
-				upperBoundStr = fmt.Sprint(upperBound)
-			}
+		switch e.opts.TagsFormat {
+		case PrometheusTagsFormat:
+			var count int64
+			for _, upperBound := range valueUpperBounds {
+				var upperBoundStr string
+				if upperBound == math.MaxFloat64 {
+					upperBoundStr = maxUpperBoundStr
+				} else {
+					upperBoundStr = fmt.Sprint(upperBound)
+				}
 
-			n, err = e.encodeNameAndTags(histogram, "le", upperBoundStr)
+				n, err = e.encodeNameAndTags(histogram, "le", upperBoundStr, "", "")
+				written += n
+				if err != nil {
+					return written, err
+				}
+
+				count += values[upperBound]
+
+				n, err = fmt.Fprintf(e.w, " %v\n", count)
+				written += n
+				if err != nil {
+					return written, err
+				}
+			}
+		case M3TagsFormat:
+			bucketIDFmt := m3.HistogramBucketIDFmt(len(valueUpperBounds) + 2)
+			bucketValFmt := m3.DefaultHistogramValueBucketFmt
+			bucketName := m3.HistogramValueBucketString(
+				-math.MaxFloat64, valueUpperBounds[0], bucketValFmt)
+			n, err := e.encodeNameAndTags(histogram,
+				m3.DefaultHistogramBucketIDName, fmt.Sprintf(bucketIDFmt, 0),
+				m3.DefaultHistogramBucketName, bucketName)
 			written += n
 			if err != nil {
 				return written, err
 			}
 
-			count := values[upperBound]
-
-			n, err = fmt.Fprintf(e.w, " %v\n", count)
+			n, err = fmt.Fprintf(e.w, " %v\n", valueUpperBounds[0])
 			written += n
 			if err != nil {
 				return written, err
+			}
+
+			prevValue := valueUpperBounds[0]
+			for i := 1; i < len(valueUpperBounds); i++ {
+				bucketName = m3.HistogramValueBucketString(
+					prevValue, valueUpperBounds[i], bucketValFmt)
+				n, err = e.encodeNameAndTags(histogram,
+					m3.DefaultHistogramBucketIDName, fmt.Sprintf(bucketIDFmt, i),
+					m3.DefaultHistogramBucketName, bucketName)
+				written += n
+				if err != nil {
+					return written, err
+				}
+
+				n, err = fmt.Fprintf(e.w, " %v\n", values[valueUpperBounds[i]])
+				written += n
+				if err != nil {
+					return written, err
+				}
+
+				prevValue = valueUpperBounds[i]
 			}
 		}
 	}
@@ -335,28 +455,75 @@ func (e *encoder) encodeHistogram(histogram tally.HistogramSnapshot) (int, error
 		}
 		sort.Ints(durationUpperBounds)
 
-		for _, upperBound := range durationUpperBounds {
-			var upperBoundStr string
-			if upperBound == math.MaxInt64 {
-				upperBoundStr = maxUpperBoundStr
-			} else {
-				upperBoundStr = durationString(time.Duration(upperBound))
-			}
+		switch e.opts.TagsFormat {
+		case PrometheusTagsFormat:
+			var count int64
+			for _, upperBound := range durationUpperBounds {
+				var upperBoundStr string
+				if upperBound == math.MaxInt64 {
+					upperBoundStr = maxUpperBoundStr
+				} else {
+					upperBoundStr = durationString(time.Duration(upperBound))
+				}
 
-			n, err = e.encodeNameAndTags(histogram, "le", upperBoundStr)
+				n, err = e.encodeNameAndTags(histogram, "le", upperBoundStr, "", "")
+				written += n
+				if err != nil {
+					return written, err
+				}
+
+				count += durations[time.Duration(upperBound)]
+
+				n, err = fmt.Fprintf(e.w, " %v\n", count)
+				written += n
+				if err != nil {
+					return written, err
+				}
+			}
+		case M3TagsFormat:
+			bucketIDFmt := m3.HistogramBucketIDFmt(len(durationUpperBounds) + 2)
+			bucketName := m3.HistogramDurationBucketString(
+				time.Duration(math.MinInt64), time.Duration(durationUpperBounds[0]))
+			n, err := e.encodeNameAndTags(histogram,
+				m3.DefaultHistogramBucketIDName, fmt.Sprintf(bucketIDFmt, 0),
+				m3.DefaultHistogramBucketName, bucketName)
 			written += n
 			if err != nil {
 				return written, err
 			}
 
-			count := durations[time.Duration(upperBound)]
+			count := durations[time.Duration(durationUpperBounds[0])]
 
 			n, err = fmt.Fprintf(e.w, " %v\n", count)
 			written += n
 			if err != nil {
 				return written, err
 			}
+
+			prevValue := durationUpperBounds[0]
+			for i := 1; i < len(durationUpperBounds); i++ {
+				bucketName = m3.HistogramDurationBucketString(
+					time.Duration(prevValue), time.Duration(durationUpperBounds[i]))
+				n, err = e.encodeNameAndTags(histogram,
+					m3.DefaultHistogramBucketIDName, fmt.Sprintf(bucketIDFmt, i),
+					m3.DefaultHistogramBucketName, bucketName)
+				written += n
+				if err != nil {
+					return written, err
+				}
+
+				count := durations[time.Duration(durationUpperBounds[i])]
+
+				n, err = fmt.Fprintf(e.w, " %v\n", count)
+				written += n
+				if err != nil {
+					return written, err
+				}
+
+				prevValue = durationUpperBounds[i]
+			}
 		}
+
 	}
 
 	return written, nil
@@ -413,30 +580,9 @@ func (p *encoderPool) releaseStrings(strs []string) {
 }
 
 func (p *encoderPool) releaseFloats(floats []float64) {
-	for i := range floats {
-		floats[i] = 0
-	}
 	p.floatsPool.Put(floats[:0])
 }
 
 func (p *encoderPool) releaseInts(ints []int) {
-	for i := range ints {
-		ints[i] = 0
-	}
 	p.intsPool.Put(ints[:0])
-}
-
-func maxLength(lengths ...int) int {
-	if len(lengths) == 0 {
-		return -1
-	}
-
-	max := lengths[0]
-	for i := 1; 1 < len(lengths); i++ {
-		if lengths[i] > max {
-			max = lengths[i]
-		}
-	}
-
-	return max
 }

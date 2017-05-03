@@ -166,14 +166,31 @@ type Snapshot interface {
 	Histograms() map[string]HistogramSnapshot
 }
 
-// SnapshotScope is a Scope which can return a snapshot of currently queued metric
-type SnapshotScope interface {
-	Scope
-
-	// Snapshot returns a copy of all values since the last report execution,
-	// this is an expensive operation and should only be used for testing or
-	// debugging purposes
+// SnapshotProvider is a provider which can return a snapshot of
+// currently buffered metrics
+type SnapshotProvider interface {
+	// Snapshot returns a copy of all current values
 	Snapshot() Snapshot
+}
+
+// SnapshotResetProvider is a provider which can return a snapshot of
+// currently buffered metrics and reset the values
+type SnapshotResetProvider interface {
+	SnapshotReset(opts ResetOptions) Snapshot
+}
+
+// ResetOptions describes options to reset values
+type ResetOptions struct {
+	ResetCounters   bool
+	ResetTimers     bool
+	ResetHistograms bool
+}
+
+// TestScope is a metrics collector that has no reporting, ensuring that
+// all emitted values have a given prefix or set of tags
+type TestScope interface {
+	Scope
+	SnapshotProvider
 }
 
 // Metadata returns the metadata for a metric

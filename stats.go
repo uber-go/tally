@@ -103,6 +103,10 @@ func (c *counter) snapshot() int64 {
 	return atomic.LoadInt64(&c.curr) - atomic.LoadInt64(&c.prev)
 }
 
+func (c *counter) snapshotReset() int64 {
+	return c.value()
+}
+
 type gauge struct {
 	updated     uint64
 	curr        uint64
@@ -142,6 +146,7 @@ func (g *gauge) snapshot() float64 {
 // at the timer level. The reporter buffers may timer entries and periodically
 // flushes.
 type timer struct {
+	opts        timerOptions
 	name        string
 	tags        map[string]string
 	reporter    StatsReporter
@@ -151,7 +156,12 @@ type timer struct {
 
 type timerValues struct {
 	sync.RWMutex
-	values []time.Duration
+	values          []time.Duration
+	nextOverflowIdx int
+}
+
+type timerOptions struct {
+	bufferMax int
 }
 
 func newTimer(
@@ -159,14 +169,17 @@ func newTimer(
 	tags map[string]string,
 	r StatsReporter,
 	cachedTimer CachedTimer,
+	opts timerOptions,
 ) *timer {
 	t := &timer{
+		opts:        opts,
 		name:        name,
 		tags:        tags,
 		reporter:    r,
 		cachedTimer: cachedTimer,
 	}
 	if r == nil {
+		t.unreported.values = make([]time.Duration, 0, opts.bufferMax)
 		t.reporter = &timerNoReporterSink{timer: t}
 	}
 	return t
@@ -199,8 +212,18 @@ func (t *timer) snapshot() []time.Duration {
 	return snap
 }
 
+func (t *timer) snapshotReset() []time.Duration {
+	t.unreported.Lock()
+	snap := t.unreported.values
+	t.unreported.values = make([]time.Duration, 0, t.opts.bufferMax)
+	t.unreported.nextOverflowIdx = 0
+	t.unreported.Unlock()
+	return snap
+}
+
 type timerNoReporterSink struct {
 	sync.RWMutex
+	opts  timerOptions
 	timer *timer
 }
 
@@ -224,7 +247,15 @@ func (r *timerNoReporterSink) ReportTimer(
 	interval time.Duration,
 ) {
 	r.timer.unreported.Lock()
-	r.timer.unreported.values = append(r.timer.unreported.values, interval)
+	if len(r.timer.unreported.values) < r.timer.opts.bufferMax {
+		r.timer.unreported.values = append(r.timer.unreported.values, interval)
+	} else {
+		// Use as circular buffer when exhausted
+		r.timer.unreported.values[r.timer.unreported.nextOverflowIdx] =
+			interval
+		r.timer.unreported.nextOverflowIdx =
+			(r.timer.unreported.nextOverflowIdx + 1) % r.timer.opts.bufferMax
+	}
 	r.timer.unreported.Unlock()
 }
 
@@ -382,7 +413,8 @@ func (h *histogram) snapshotValues() map[float64]int64 {
 
 	vals := make(map[float64]int64, len(h.buckets))
 	for i := range h.buckets {
-		vals[h.buckets[i].valueUpperBound] = h.buckets[i].samples.value()
+		vals[h.buckets[i].valueUpperBound] =
+			h.buckets[i].samples.snapshot()
 	}
 
 	return vals
@@ -395,7 +427,36 @@ func (h *histogram) snapshotDurations() map[time.Duration]int64 {
 
 	durations := make(map[time.Duration]int64, len(h.buckets))
 	for i := range h.buckets {
-		durations[h.buckets[i].durationUpperBound] = h.buckets[i].samples.value()
+		durations[h.buckets[i].durationUpperBound] =
+			h.buckets[i].samples.snapshot()
+	}
+
+	return durations
+}
+
+func (h *histogram) snapshotResetValues() map[float64]int64 {
+	if h.htype == durationHistogramType {
+		return nil
+	}
+
+	vals := make(map[float64]int64, len(h.buckets))
+	for i := range h.buckets {
+		vals[h.buckets[i].valueUpperBound] =
+			h.buckets[i].samples.snapshotReset()
+	}
+
+	return vals
+}
+
+func (h *histogram) snapshotResetDurations() map[time.Duration]int64 {
+	if h.htype == valueHistogramType {
+		return nil
+	}
+
+	durations := make(map[time.Duration]int64, len(h.buckets))
+	for i := range h.buckets {
+		durations[h.buckets[i].durationUpperBound] =
+			h.buckets[i].samples.snapshotReset()
 	}
 
 	return durations

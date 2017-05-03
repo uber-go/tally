@@ -22,6 +22,7 @@ package http
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -42,14 +43,19 @@ const (
 	TextFormat Format = `text/plain; version=` + TextVersion
 )
 
+var (
+	errScopeNotSnapshotResetProvider = errors.New(
+		"scope provided is not a snapshot reset provider")
+)
+
 const (
 	contentTypeHeader   = "Content-Type"
 	contentLengthHeader = "Content-Length"
 )
 
 var (
-	bufferPoolSize = 128
-	bufferPoolLen  = 8192
+	bufferPoolSize = 8
+	bufferPoolLen  = 65536
 	bufferPool     = tally.NewObjectPool(bufferPoolSize)
 )
 
@@ -64,18 +70,81 @@ func release(b *bytes.Buffer) {
 	bufferPool.Put(b)
 }
 
-// Handler returns an http.Handler for the provided SnapshotScope.
-func Handler(s tally.SnapshotScope) http.Handler {
+// TryMakeHandler tries to create a handler from a Scope. If
+// using a Scope constructed from tally then this call will always
+// succeed as it implements SnapshotResetProvider.
+func TryMakeHandler(s tally.Scope) (http.Handler, error) {
+	provider, ok := s.(tally.SnapshotResetProvider)
+	if !ok {
+		return nil, errScopeNotSnapshotResetProvider
+	}
+	return Handler(provider), nil
+}
+
+// MustMakeHandler will create a handler from a Scope or panics. If
+// using a Scope constructed from tally then this call will always
+// succeed as it implements SnapshotResetProvider.
+func MustMakeHandler(s tally.Scope) http.Handler {
+	handler, err := TryMakeHandler(s)
+	if err != nil {
+		panic(err)
+	}
+	return handler
+}
+
+// Handler returns an http.Handler for the provided SnapshotResetProvider.
+func Handler(s tally.SnapshotResetProvider) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		snapshot := s.Snapshot()
+		if err := req.ParseForm(); err != nil {
+			httpError(w, err)
+			return
+		}
+
+		tagsFmt := DefaultTagsFormat
+		if arg := req.Form.Get("tags_format"); arg != "" {
+			value, err := ParseTagsFormat(arg)
+			if err != nil {
+				httpError(w, err)
+				return
+			}
+			tagsFmt = value
+		}
+
+		opts := tally.ResetOptions{
+			ResetCounters:   false,
+			ResetTimers:     true,
+			ResetHistograms: false,
+		}
+
+		for _, param := range []struct {
+			name  string
+			value *bool
+		}{
+			{"reset_counters", &opts.ResetCounters},
+			{"reset_timers", &opts.ResetTimers},
+			{"reset_histograms", &opts.ResetHistograms},
+		} {
+			if arg := req.Form.Get(param.name); arg != "" {
+				value, err := parseBool(param.name, arg)
+				if err != nil {
+					httpError(w, err)
+					return
+				}
+				*param.value = value
+			}
+		}
+
+		snapshot := s.SnapshotReset(opts)
 
 		buf := bufferPool.Get().(*bytes.Buffer)
 		defer release(buf)
 
-		enc := NewEncoder(buf)
+		enc := NewEncoder(buf, Options{
+			TagsFormat: tagsFmt,
+		})
 
 		if err := enc.Encode(snapshot); err != nil {
-			http.Error(w, "An error has occurred during metrics encoding:\n\n"+err.Error(), http.StatusInternalServerError)
+			httpError(w, err)
 			return
 		}
 
@@ -84,4 +153,19 @@ func Handler(s tally.SnapshotScope) http.Handler {
 		header.Set(contentLengthHeader, fmt.Sprint(buf.Len()))
 		w.Write(buf.Bytes())
 	})
+}
+
+func parseBool(param, value string) (bool, error) {
+	switch value {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	}
+	return false, fmt.Errorf("not a bool %s, was %s: must be true or false",
+		param, value)
+}
+
+func httpError(w http.ResponseWriter, err error) {
+	http.Error(w, "error: "+err.Error(), http.StatusInternalServerError)
 }
