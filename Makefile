@@ -58,6 +58,14 @@ endif
 test:
 	go test -race -v $(PKGS)
 
+.PHONY: examples
+examples:
+	mkdir -p ./bin
+	go build -o ./bin/print_example ./example/
+	go build -o ./bin/m3_example ./m3/example/
+	go build -o ./bin/prometheus_example ./prometheus/example/
+	go build -o ./bin/statsd_example ./statsd/example/
+
 .PHONY: cover
 cover:
 	go test -cover -coverprofile cover.out -race -v $(PKGS)

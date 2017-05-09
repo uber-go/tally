@@ -39,3 +39,6 @@ testImport:
   subpackages:
   - assert
   - require
+- package: gopkg.in/validator.v2
+- package: gopkg.in/yaml.v2
+
