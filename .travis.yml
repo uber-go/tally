@@ -4,18 +4,19 @@ go:
   - 1.5
   - 1.6
   - 1.7
-  - 1.8
   - tip
 env:
   global:
     - GO15VENDOREXPERIMENT=1
+cache:
+  directories:
+    - vendor
 install:
   - npm i uber-licence
   - make dependencies
 script:
   - make test
   - make lint
-  - make examples
 after_success:
   - make coveralls
 
