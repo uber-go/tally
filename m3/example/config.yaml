@@ -2,4 +2,7 @@ m3:
     hostPort: 127.0.0.1:6396
     service: m3example
     env: staging
-    tags: { dc: dc1 }
+    tags:
+        cluster: local
+        region: us-east
+

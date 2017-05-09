@@ -1,5 +1,5 @@
-hash: cdbc433d199ac0d184d56f461f87cb93db4f60658218f85a2b39c4614e4c1c68
-updated: 2017-02-05T22:15:53.246370902-05:00
+hash: 307f62540a5487b27efc13eb3e2c4a67bf9b50b91d5857067beca6df0f3cd8cc
+updated: 2017-05-09T18:18:15.264370538-04:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -42,6 +42,10 @@ imports:
   version: fcdb11ccb4389efb1b210b7ffb623ab71c5fdd60
 - name: github.com/uber-go/atomic
   version: e682c1008ac17bf26d2e4b5ad6cdd08520ed0b22
+- name: gopkg.in/validator.v2
+  version: 3e4f037f12a1221a0864cf0dd2e81c452ab22448
+- name: gopkg.in/yaml.v2
+  version: a83829b6f1293c91addabc89d0571c246397bbf4
 testImports:
 - name: github.com/axw/gocov
   version: 54b98cfcac0c63fb3f9bd8e7ad241b724d4e985b
