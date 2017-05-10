@@ -65,10 +65,13 @@ func KeyForPrefixedStringMap(
 
 	if prefix != nilString {
 		buf.WriteString(prefix)
-		buf.WriteByte(prefixSplitter)
 	}
 
 	sortedKeysLen := len(stringMap)
+	// don't write splitter if there are no tags to serialize
+	if sortedKeysLen > 0 {
+		buf.WriteByte(prefixSplitter)
+	}
 	for i := 0; i < sortedKeysLen; i++ {
 		buf.WriteString(keys[i])
 		buf.WriteByte(keyNameSplitter)
