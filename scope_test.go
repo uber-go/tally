@@ -693,5 +693,20 @@ func TestScopeAvoidReportLoopRunOnClose(t *testing.T) {
 	assert.NoError(t, closer.Close())
 
 	s.reportLoopRun()
-	assert.Equal(t, int32(1), atomic.LoadInt32(&r.flushes))
+	assert.Equal(t, int32(2), atomic.LoadInt32(&r.flushes))
+}
+
+func TestScopeFlushOnClose(t *testing.T) {
+	r := newTestStatsReporter()
+	root, closer := NewRootScope(ScopeOptions{Reporter: r}, time.Hour)
+
+	r.cg.Add(1)
+	root.Counter("foo").Inc(1)
+	assert.Nil(t, r.counters["foo"])
+
+	assert.NoError(t, closer.Close())
+
+	assert.EqualValues(t, 1, r.counters["foo"].val)
+
+	assert.NoError(t, closer.Close())
 }

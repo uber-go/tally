@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/facebookgo/clock"
@@ -80,8 +81,9 @@ type scope struct {
 }
 
 type scopeStatus struct {
-	sync.RWMutex
-	closed bool
+	// atomically updated. 0 = not closed, 1 = closing but haven't completed
+	// final flush, 2 = closed and final flush complete
+	closed int32
 	quit   chan struct{}
 }
 
@@ -154,8 +156,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 			subscopes: make(map[string]*scope),
 		},
 		status: scopeStatus{
-			closed: false,
-			quit:   make(chan struct{}, 1),
+			quit: make(chan struct{}, 1),
 		},
 
 		counters:   make(map[string]*counter),
@@ -239,11 +240,8 @@ func (s *scope) reportLoop(interval time.Duration) {
 }
 
 func (s *scope) reportLoopRun() {
-	// Need to hold a status lock to ensure not to report
-	// and flush after a close
-	s.status.RLock()
-	if s.status.closed {
-		s.status.RUnlock()
+	// don't flush after scope fully closed
+	if atomic.LoadInt32(&s.status.closed) == 2 {
 		return
 	}
 
@@ -258,8 +256,6 @@ func (s *scope) reportLoopRun() {
 		}
 	}
 	s.registry.RUnlock()
-
-	s.status.RUnlock()
 }
 
 func (s *scope) Counter(name string) Counter {
@@ -478,10 +474,12 @@ func (s *scope) Snapshot() Snapshot {
 }
 
 func (s *scope) Close() error {
-	s.status.Lock()
-	s.status.closed = true
-	close(s.status.quit)
-	s.status.Unlock()
+	if atomic.CompareAndSwapInt32(&s.status.closed, 0, 1) {
+		// prevent any more report loops via tick before forcing report
+		close(s.status.quit)
+		s.reportLoopRun()
+		atomic.StoreInt32(&s.status.closed, 2)
+	}
 
 	if closer, ok := s.baseReporter.(io.Closer); ok {
 		return closer.Close()
