@@ -247,6 +247,13 @@ func (s *scope) reportLoopRun() {
 		return
 	}
 
+	s.reportRegistryWithLock()
+
+	s.status.RUnlock()
+}
+
+// reports current registry with scope status lock held
+func (s *scope) reportRegistryWithLock() {
 	s.registry.RLock()
 	if s.reporter != nil {
 		for _, ss := range s.registry.subscopes {
@@ -258,8 +265,6 @@ func (s *scope) reportLoopRun() {
 		}
 	}
 	s.registry.RUnlock()
-
-	s.status.RUnlock()
 }
 
 func (s *scope) Counter(name string) Counter {
@@ -479,8 +484,18 @@ func (s *scope) Snapshot() Snapshot {
 
 func (s *scope) Close() error {
 	s.status.Lock()
+
+	// don't wait to close more than once (panic on double close of
+	// s.status.quit)
+	if s.status.closed {
+		s.status.Unlock()
+		return nil
+	}
+
 	s.status.closed = true
 	close(s.status.quit)
+	s.reportRegistryWithLock()
+
 	s.status.Unlock()
 
 	if closer, ok := s.baseReporter.(io.Closer); ok {
