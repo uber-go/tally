@@ -83,8 +83,9 @@ type scope struct {
 type scopeStatus struct {
 	// atomically updated. 0 = not closed, 1 = closing but haven't completed
 	// final flush, 2 = closed and final flush complete
-	closed int32
-	quit   chan struct{}
+	closed  int32
+	flushes sync.WaitGroup // tracks pending reportLoopRun calls
+	quit    chan struct{}
 }
 
 type scopeRegistry struct {
@@ -245,6 +246,8 @@ func (s *scope) reportLoopRun() {
 		return
 	}
 
+	s.status.flushes.Add(1)
+
 	s.registry.RLock()
 	if s.reporter != nil {
 		for _, ss := range s.registry.subscopes {
@@ -256,6 +259,8 @@ func (s *scope) reportLoopRun() {
 		}
 	}
 	s.registry.RUnlock()
+
+	s.status.flushes.Done()
 }
 
 func (s *scope) Counter(name string) Counter {
@@ -474,16 +479,21 @@ func (s *scope) Snapshot() Snapshot {
 }
 
 func (s *scope) Close() error {
-	if atomic.CompareAndSwapInt32(&s.status.closed, 0, 1) {
-		// prevent any more report loops via tick before forcing report
-		close(s.status.quit)
-		s.reportLoopRun()
-		atomic.StoreInt32(&s.status.closed, 2)
+	if !atomic.CompareAndSwapInt32(&s.status.closed, 0, 1) {
+		// only want to perform close operations once
+		return nil
 	}
+
+	// prevent any more report loops via tick before forcing report
+	close(s.status.quit)
+	s.reportLoopRun()
+	atomic.StoreInt32(&s.status.closed, 2)
+	s.status.flushes.Wait()
 
 	if closer, ok := s.baseReporter.(io.Closer); ok {
 		return closer.Close()
 	}
+
 	return nil
 }
 
