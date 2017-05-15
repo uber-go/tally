@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/facebookgo/clock"
@@ -81,11 +80,9 @@ type scope struct {
 }
 
 type scopeStatus struct {
-	// atomically updated. 0 = not closed, 1 = closing but haven't completed
-	// final flush, 2 = closed and final flush complete
-	closed  int32
-	flushes sync.WaitGroup // tracks pending reportLoopRun calls
-	quit    chan struct{}
+	sync.RWMutex
+	closed bool
+	quit   chan struct{}
 }
 
 type scopeRegistry struct {
@@ -157,7 +154,8 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 			subscopes: make(map[string]*scope),
 		},
 		status: scopeStatus{
-			quit: make(chan struct{}, 1),
+			closed: false,
+			quit:   make(chan struct{}, 1),
 		},
 
 		counters:   make(map[string]*counter),
@@ -241,13 +239,21 @@ func (s *scope) reportLoop(interval time.Duration) {
 }
 
 func (s *scope) reportLoopRun() {
-	// don't flush after scope fully closed
-	if atomic.LoadInt32(&s.status.closed) == 2 {
+	// Need to hold a status lock to ensure not to report
+	// and flush after a close
+	s.status.RLock()
+	if s.status.closed {
+		s.status.RUnlock()
 		return
 	}
 
-	s.status.flushes.Add(1)
+	s.reportRegistryWithLock()
 
+	s.status.RUnlock()
+}
+
+// reports current registry with scope status lock held
+func (s *scope) reportRegistryWithLock() {
 	s.registry.RLock()
 	if s.reporter != nil {
 		for _, ss := range s.registry.subscopes {
@@ -259,8 +265,6 @@ func (s *scope) reportLoopRun() {
 		}
 	}
 	s.registry.RUnlock()
-
-	s.status.flushes.Done()
 }
 
 func (s *scope) Counter(name string) Counter {
@@ -479,21 +483,24 @@ func (s *scope) Snapshot() Snapshot {
 }
 
 func (s *scope) Close() error {
-	if !atomic.CompareAndSwapInt32(&s.status.closed, 0, 1) {
-		// only want to perform close operations once
+	s.status.Lock()
+
+	// don't wait to close more than once (panic on double close of
+	// s.status.quit)
+	if s.status.closed {
+		s.status.Unlock()
 		return nil
 	}
 
-	// prevent any more report loops via tick before forcing report
+	s.status.closed = true
 	close(s.status.quit)
-	s.reportLoopRun()
-	atomic.StoreInt32(&s.status.closed, 2)
-	s.status.flushes.Wait()
+	s.reportRegistryWithLock()
+
+	s.status.Unlock()
 
 	if closer, ok := s.baseReporter.(io.Closer); ok {
 		return closer.Close()
 	}
-
 	return nil
 }
 
