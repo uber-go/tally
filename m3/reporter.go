@@ -427,6 +427,14 @@ func (r *reporter) reportCopyMetric(
 		copy.MetricValue.Timer = t
 	}
 
+	// NB(r): This is to avoid sending on a closed channel,
+	// it's faster to actually defer/recover than acquire
+	// a read lock here to ensure we aren't closed: benchmarked
+	// this with BenchmarkTimer in reporter_benchmark_test.go
+	defer func() {
+		recover()
+	}()
+
 	select {
 	case r.metCh <- sizedMetric{copy, size}:
 	default:
@@ -435,6 +443,11 @@ func (r *reporter) reportCopyMetric(
 
 // Flush implements tally.CachedStatsReporter.
 func (r *reporter) Flush() {
+	// Avoid send on a closed channel
+	defer func() {
+		recover()
+	}()
+
 	r.metCh <- sizedMetric{}
 }
 

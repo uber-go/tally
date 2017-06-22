@@ -112,7 +112,7 @@ func TestReporter(t *testing.T) {
 			}
 		}
 
-		//Validate metrics
+		// Validate metrics
 		emittedCounters := batches[0].GetMetrics()
 		require.Equal(t, 1, len(emittedCounters))
 		emittedTimers := batches[1].GetMetrics()
@@ -220,6 +220,52 @@ func TestReporterFinalFlush(t *testing.T) {
 	require.Equal(t, 1, len(server.Service.getBatches()))
 	require.NotNil(t, server.Service.getBatches()[0])
 	require.Equal(t, 1, len(server.Service.getBatches()[0].GetMetrics()))
+}
+
+// TestReporterNoPanicOnTimerAfterClose ensure the reporter avoids panic
+// after close of the reporter when emitting a timer value
+func TestReporterNoPanicOnTimerAfterClose(t *testing.T) {
+	server := newFakeM3Server(t, &sync.WaitGroup{}, true, Compact)
+	go server.Serve()
+	defer server.Close()
+
+	r, err := NewReporter(Options{
+		HostPorts:          []string{server.Addr},
+		Service:            "test-service",
+		CommonTags:         defaultCommonTags,
+		MaxQueueSize:       queueSize,
+		MaxPacketSizeBytes: maxPacketSize,
+	})
+	require.NoError(t, err)
+
+	timer := r.AllocateTimer("my-timer", nil)
+	r.Close()
+
+	assert.NotPanics(t, func() {
+		timer.ReportTimer(time.Millisecond)
+	})
+}
+
+// TestReporterNoPanicOnFlushAfterClose ensure the reporter avoids panic
+// after close of the reporter when calling flush
+func TestReporterNoPanicOnFlushAfterClose(t *testing.T) {
+	server := newFakeM3Server(t, &sync.WaitGroup{}, true, Compact)
+	go server.Serve()
+	defer server.Close()
+
+	r, err := NewReporter(Options{
+		HostPorts:          []string{server.Addr},
+		Service:            "test-service",
+		CommonTags:         defaultCommonTags,
+		MaxQueueSize:       queueSize,
+		MaxPacketSizeBytes: maxPacketSize,
+	})
+	require.NoError(t, err)
+	r.Close()
+
+	assert.NotPanics(t, func() {
+		r.Flush()
+	})
 }
 
 func TestReporterHistogram(t *testing.T) {

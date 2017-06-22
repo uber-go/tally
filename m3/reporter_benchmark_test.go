@@ -22,6 +22,10 @@ package m3
 
 import (
 	"testing"
+	"time"
+
+	customtransport "github.com/uber-go/tally/m3/customtransports"
+	m3thrift "github.com/uber-go/tally/m3/thrift"
 
 	"github.com/apache/thrift/lib/go/thrift"
 )
@@ -41,6 +45,8 @@ func BenchmarkNewMetric(b *testing.B) {
 	resourcePool := newResourcePool(protocolFactory)
 	benchReporter := &reporter{resourcePool: resourcePool}
 
+	b.ResetTimer()
+
 	for n := 0; n < b.N; n++ {
 		benchReporter.newMetric("foo", nil, counterType)
 	}
@@ -55,7 +61,47 @@ func BenchmarkCalulateSize(b *testing.B) {
 	met := benchReporter.newMetric("foo", nil, counterType)
 	met.MetricValue.Count.I64Value = &val
 
+	b.ResetTimer()
+
 	for n := 0; n < b.N; n++ {
 		benchReporter.calculateSize(met)
 	}
+}
+
+func BenchmarkTimer(b *testing.B) {
+	protocolFactory := thrift.NewTCompactProtocolFactory()
+	resourcePool := newResourcePool(protocolFactory)
+	tags := resourcePool.getTagList()
+	batch := resourcePool.getBatch()
+	batch.CommonTags = tags
+	batch.Metrics = []*m3thrift.Metric{}
+	proto := resourcePool.getProto()
+	batch.Write(proto)
+	calc := proto.Transport().(*customtransport.TCalcTransport)
+	calc.ResetCount()
+	benchReporter := &reporter{
+		calc:         calc,
+		calcProto:    proto,
+		resourcePool: resourcePool,
+		metCh:        make(chan sizedMetric, DefaultMaxQueueSize),
+	}
+	// Close the met ch to end consume metrics loop
+	defer close(benchReporter.metCh)
+
+	go func() {
+		// Blindly consume metrics
+		for met := range benchReporter.metCh {
+			resourcePool.releaseShallowMetric(met.m)
+		}
+	}()
+
+	timer := benchReporter.AllocateTimer("foo", nil)
+
+	b.ResetTimer()
+
+	for n := 0; n < b.N; n++ {
+		timer.ReportTimer(time.Duration(n) * time.Millisecond)
+	}
+
+	b.StopTimer()
 }
