@@ -105,18 +105,17 @@ type ScopeOptions struct {
 // NewRootScope creates a new root Scope with a set of options and
 // a reporting interval.
 // Must provide either a StatsReporter or a CachedStatsReporter.
-func NewRootScope(opts ScopeOptions, interval time.Duration) (Scope, io.Closer) {
+func NewRootScope(opts ScopeOptions, interval time.Duration) (SnapshotScope, io.Closer) {
 	s := newRootScope(opts, interval)
 	return s, s
 }
 
 // NewTestScope creates a new Scope without a stats reporter with the
-// given prefix and adds the ability to take snapshots of metrics emitted
-// to it.
+// given prefix.
 func NewTestScope(
 	prefix string,
 	tags map[string]string,
-) TestScope {
+) SnapshotScope {
 	return newRootScope(ScopeOptions{Prefix: prefix, Tags: tags}, 0)
 }
 
@@ -511,82 +510,6 @@ func (s *scope) fullyQualifiedName(name string) string {
 	return fmt.Sprintf("%s%s%s", s.prefix, s.separator, name)
 }
 
-// TestScope is a metrics collector that has no reporting, ensuring that
-// all emitted values have a given prefix or set of tags
-type TestScope interface {
-	Scope
-
-	// Snapshot returns a copy of all values since the last report execution,
-	// this is an expensive operation and should only be use for testing purposes
-	Snapshot() Snapshot
-}
-
-// Snapshot is a snapshot of values since last report execution
-type Snapshot interface {
-	// Counters returns a snapshot of all counter summations since last report execution
-	Counters() map[string]CounterSnapshot
-
-	// Gauges returns a snapshot of gauge last values since last report execution
-	Gauges() map[string]GaugeSnapshot
-
-	// Timers returns a snapshot of timer values since last report execution
-	Timers() map[string]TimerSnapshot
-
-	// Histograms returns a snapshot of histogram samples since last report execution
-	Histograms() map[string]HistogramSnapshot
-}
-
-// CounterSnapshot is a snapshot of a counter
-type CounterSnapshot interface {
-	// Name returns the name
-	Name() string
-
-	// Tags returns the tags
-	Tags() map[string]string
-
-	// Value returns the value
-	Value() int64
-}
-
-// GaugeSnapshot is a snapshot of a gauge
-type GaugeSnapshot interface {
-	// Name returns the name
-	Name() string
-
-	// Tags returns the tags
-	Tags() map[string]string
-
-	// Value returns the value
-	Value() float64
-}
-
-// TimerSnapshot is a snapshot of a timer
-type TimerSnapshot interface {
-	// Name returns the name
-	Name() string
-
-	// Tags returns the tags
-	Tags() map[string]string
-
-	// Values returns the values
-	Values() []time.Duration
-}
-
-// HistogramSnapshot is a snapshot of a histogram
-type HistogramSnapshot interface {
-	// Name returns the name
-	Name() string
-
-	// Tags returns the tags
-	Tags() map[string]string
-
-	// Values returns the sample values by upper bound for a valueHistogram
-	Values() map[float64]int64
-
-	// Durations returns the sample values by upper bound for a durationHistogram
-	Durations() map[time.Duration]int64
-}
-
 // mergeRightTags merges 2 sets of tags with the tags from tagsRight overriding values from tagsLeft
 func mergeRightTags(tagsLeft, tagsRight map[string]string) map[string]string {
 	if tagsLeft == nil && tagsRight == nil {
@@ -615,113 +538,4 @@ func copyStringMap(stringMap map[string]string) map[string]string {
 		result[k] = v
 	}
 	return result
-}
-
-type snapshot struct {
-	counters   map[string]CounterSnapshot
-	gauges     map[string]GaugeSnapshot
-	timers     map[string]TimerSnapshot
-	histograms map[string]HistogramSnapshot
-}
-
-func newSnapshot() *snapshot {
-	return &snapshot{
-		counters:   make(map[string]CounterSnapshot),
-		gauges:     make(map[string]GaugeSnapshot),
-		timers:     make(map[string]TimerSnapshot),
-		histograms: make(map[string]HistogramSnapshot),
-	}
-}
-
-func (s *snapshot) Counters() map[string]CounterSnapshot {
-	return s.counters
-}
-
-func (s *snapshot) Gauges() map[string]GaugeSnapshot {
-	return s.gauges
-}
-
-func (s *snapshot) Timers() map[string]TimerSnapshot {
-	return s.timers
-}
-
-func (s *snapshot) Histograms() map[string]HistogramSnapshot {
-	return s.histograms
-}
-
-type counterSnapshot struct {
-	name  string
-	tags  map[string]string
-	value int64
-}
-
-func (s *counterSnapshot) Name() string {
-	return s.name
-}
-
-func (s *counterSnapshot) Tags() map[string]string {
-	return s.tags
-}
-
-func (s *counterSnapshot) Value() int64 {
-	return s.value
-}
-
-type gaugeSnapshot struct {
-	name  string
-	tags  map[string]string
-	value float64
-}
-
-func (s *gaugeSnapshot) Name() string {
-	return s.name
-}
-
-func (s *gaugeSnapshot) Tags() map[string]string {
-	return s.tags
-}
-
-func (s *gaugeSnapshot) Value() float64 {
-	return s.value
-}
-
-type timerSnapshot struct {
-	name   string
-	tags   map[string]string
-	values []time.Duration
-}
-
-func (s *timerSnapshot) Name() string {
-	return s.name
-}
-
-func (s *timerSnapshot) Tags() map[string]string {
-	return s.tags
-}
-
-func (s *timerSnapshot) Values() []time.Duration {
-	return s.values
-}
-
-type histogramSnapshot struct {
-	name      string
-	tags      map[string]string
-	values    map[float64]int64
-	durations map[time.Duration]int64
-}
-
-func (s *histogramSnapshot) Name() string {
-	return s.name
-}
-
-func (s *histogramSnapshot) Tags() map[string]string {
-	return s.tags
-}
-
-func (s *histogramSnapshot) Values() map[float64]int64 {
-	return s.values
-}
-
-func (s *histogramSnapshot) Durations() map[time.Duration]int64 {
-	return s.durations
 }
