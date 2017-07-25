@@ -108,15 +108,15 @@ func NewSanitiser(opts SanitiseOptions) Sanitiser {
 	}
 }
 
-// NoOpSanitizeFn returns the input un-touched.
-func NoOpSanitizeFn(v string) string { return v }
+// NoOpSanitiseFn returns the input un-touched.
+func NoOpSanitiseFn(v string) string { return v }
 
-// NewNoOpSanitiser returns a sanitizer which returns all inputs un-touched.
+// NewNoOpSanitiser returns a sanitiser which returns all inputs un-touched.
 func NewNoOpSanitiser() Sanitiser {
 	return &santiser{
-		nameFn:  NoOpSanitizeFn,
-		keyFn:   NoOpSanitizeFn,
-		valueFn: NoOpSanitizeFn,
+		nameFn:  NoOpSanitiseFn,
+		keyFn:   NoOpSanitiseFn,
+		valueFn: NoOpSanitiseFn,
 	}
 }
 
