@@ -410,9 +410,9 @@ func (s *scope) subscope(prefix string, tags map[string]string) Scope {
 	subscope := &scope{
 		separator: s.separator,
 		prefix:    prefix,
-		// NB(r): Take a copy of the tags on creation
-		// so that it cannot be modified after set.
-		tags:           copyStringMap(tags),
+		// NB(prateek): don't need to copy the tags here,
+		// we assume the map provided is immutable.
+		tags:           tags,
 		reporter:       s.reporter,
 		cachedReporter: s.cachedReporter,
 		baseReporter:   s.baseReporter,
@@ -631,14 +631,6 @@ func mergeRightTags(tagsLeft, tagsRight map[string]string) map[string]string {
 		result[k] = v
 	}
 	for k, v := range tagsRight {
-		result[k] = v
-	}
-	return result
-}
-
-func copyStringMap(stringMap map[string]string) map[string]string {
-	result := make(map[string]string, len(stringMap))
-	for k, v := range stringMap {
 		result[k] = v
 	}
 	return result
