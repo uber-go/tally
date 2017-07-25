@@ -37,7 +37,7 @@ func BenchmarkNameGeneration(b *testing.B) {
 	}
 }
 
-func BenchmarkCounterGeneration(b *testing.B) {
+func BenchmarkCounterAllocation(b *testing.B) {
 	root, _ := NewRootScope(ScopeOptions{
 		Prefix:   "funkytown",
 		Reporter: NullStatsReporter,
@@ -55,7 +55,7 @@ func BenchmarkCounterGeneration(b *testing.B) {
 	}
 }
 
-func BenchmarkSanitisedCounterGeneration(b *testing.B) {
+func BenchmarkSanitisedCounterAllocation(b *testing.B) {
 	root, _ := NewRootScope(ScopeOptions{
 		Prefix:          "funkytown",
 		Reporter:        NullStatsReporter,
