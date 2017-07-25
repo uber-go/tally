@@ -44,7 +44,7 @@ var (
 	// UnderscoreDashDotCharacters is a slice of underscore,
 	// dash, and dot characters.
 	UnderscoreDashDotCharacters = []rune{
-		',',
+		'.',
 		'-',
 		'_'}
 
