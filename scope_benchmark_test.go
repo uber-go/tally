@@ -36,6 +36,18 @@ func BenchmarkNameGeneration(b *testing.B) {
 	}
 }
 
+func BenchmarkSanitisedNameGeneration(b *testing.B) {
+	root, _ := NewRootScope(ScopeOptions{
+		Prefix:          "funkytown",
+		Reporter:        NullStatsReporter,
+		SanitiseOptions: &AlphanumericSanitiserOpts,
+	}, 0)
+	s := root.(*scope)
+	for n := 0; n < b.N; n++ {
+		s.fullyQualifiedName("take.me.to")
+	}
+}
+
 func BenchmarkNameGenerationTagged(b *testing.B) {
 	root, _ := NewRootScope(ScopeOptions{
 		Prefix: "funkytown",
@@ -52,9 +64,37 @@ func BenchmarkNameGenerationTagged(b *testing.B) {
 	}
 }
 
+func BenchmarkSanitisedNameGenerationTagged(b *testing.B) {
+	root, _ := NewRootScope(ScopeOptions{
+		Prefix: "funkytown",
+		Tags: map[string]string{
+			"style":     "funky",
+			"hair":      "wavy",
+			"jefferson": "starship",
+		},
+		Reporter:        NullStatsReporter,
+		SanitiseOptions: &AlphanumericSanitiserOpts,
+	}, 0)
+	s := root.(*scope)
+	for n := 0; n < b.N; n++ {
+		s.fullyQualifiedName("take.me.to")
+	}
+}
+
 func BenchmarkNameGenerationNoPrefix(b *testing.B) {
 	root, _ := NewRootScope(ScopeOptions{
 		Reporter: NullStatsReporter,
+	}, 0)
+	s := root.(*scope)
+	for n := 0; n < b.N; n++ {
+		s.fullyQualifiedName("im.all.alone")
+	}
+}
+
+func BenchmarkSanitisedNameGenerationNoPrefix(b *testing.B) {
+	root, _ := NewRootScope(ScopeOptions{
+		Reporter:        NullStatsReporter,
+		SanitiseOptions: &AlphanumericSanitiserOpts,
 	}, 0)
 	s := root.(*scope)
 	for n := 0; n < b.N; n++ {
