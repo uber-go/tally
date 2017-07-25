@@ -55,9 +55,9 @@ func TestSanitizeIdentifierInvalid(t *testing.T) {
 	}
 
 	testCases := []testCase{
-		testCase{"a:b", "a_b"},
-		testCase{"a! b", "a__b"},
-		testCase{"?bZ", "_bZ"},
+		{"a:b", "a_b"},
+		{"a! b", "a__b"},
+		{"?bZ", "_bZ"},
 	}
 
 	for _, tc := range testCases {
