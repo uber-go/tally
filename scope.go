@@ -64,6 +64,7 @@ type scope struct {
 	cachedReporter CachedStatsReporter
 	baseReporter   BaseStatsReporter
 	defaultBuckets Buckets
+	sanitiser      Sanitiser
 
 	registry *scopeRegistry
 	status   scopeStatus
@@ -94,12 +95,13 @@ var scopeRegistryKey = KeyForPrefixedStringMap
 
 // ScopeOptions is a set of options to construct a scope.
 type ScopeOptions struct {
-	Tags           map[string]string
-	Prefix         string
-	Reporter       StatsReporter
-	CachedReporter CachedStatsReporter
-	Separator      string
-	DefaultBuckets Buckets
+	Tags            map[string]string
+	Prefix          string
+	Reporter        StatsReporter
+	CachedReporter  CachedStatsReporter
+	Separator       string
+	DefaultBuckets  Buckets
+	SanitiseOptions *SanitiseOptions
 }
 
 // NewRootScope creates a new root Scope with a set of options and
@@ -121,6 +123,11 @@ func NewTestScope(
 }
 
 func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
+	sanitiser := NewNoOpSanitiser()
+	if o := opts.SanitiseOptions; o != nil {
+		sanitiser = NewSanitiser(*o)
+	}
+
 	if opts.Tags == nil {
 		opts.Tags = make(map[string]string)
 	}
@@ -140,15 +147,13 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 	}
 
 	s := &scope{
-		separator: opts.Separator,
-		prefix:    opts.Prefix,
-		// NB(r): Take a copy of the tags on creation
-		// so that it cannot be modified after set.
-		tags:           copyStringMap(opts.Tags),
+		separator:      opts.Separator,
+		prefix:         opts.Prefix,
 		reporter:       opts.Reporter,
 		cachedReporter: opts.CachedReporter,
 		baseReporter:   baseReporter,
 		defaultBuckets: opts.DefaultBuckets,
+		sanitiser:      sanitiser,
 
 		registry: &scopeRegistry{
 			subscopes: make(map[string]*scope),
@@ -163,6 +168,10 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		timers:     make(map[string]*timer),
 		histograms: make(map[string]*histogram),
 	}
+
+	// NB(r): Take a copy of the tags on creation
+	// so that it cannot be modified after set.
+	s.tags = s.copyAndSanitiseMap(opts.Tags)
 
 	// Register the root scope
 	s.registry.subscopes[scopeRegistryKey(s.prefix, s.tags)] = s
@@ -268,6 +277,7 @@ func (s *scope) reportRegistryWithLock() {
 }
 
 func (s *scope) Counter(name string) Counter {
+	name = s.sanitiser.Name(name)
 	s.cm.RLock()
 	val, ok := s.counters[name]
 	s.cm.RUnlock()
@@ -290,6 +300,7 @@ func (s *scope) Counter(name string) Counter {
 }
 
 func (s *scope) Gauge(name string) Gauge {
+	name = s.sanitiser.Name(name)
 	s.gm.RLock()
 	val, ok := s.gauges[name]
 	s.gm.RUnlock()
@@ -312,6 +323,7 @@ func (s *scope) Gauge(name string) Gauge {
 }
 
 func (s *scope) Timer(name string) Timer {
+	name = s.sanitiser.Name(name)
 	s.tm.RLock()
 	val, ok := s.timers[name]
 	s.tm.RUnlock()
@@ -336,6 +348,8 @@ func (s *scope) Timer(name string) Timer {
 }
 
 func (s *scope) Histogram(name string, b Buckets) Histogram {
+	name = s.sanitiser.Name(name)
+
 	if b == nil {
 		b = s.defaultBuckets
 	}
@@ -364,10 +378,12 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 }
 
 func (s *scope) Tagged(tags map[string]string) Scope {
+	tags = s.copyAndSanitiseMap(tags)
 	return s.subscope(s.prefix, tags)
 }
 
 func (s *scope) SubScope(prefix string) Scope {
+	prefix = s.sanitiser.Name(prefix)
 	return s.subscope(s.fullyQualifiedName(prefix), nil)
 }
 
@@ -401,6 +417,7 @@ func (s *scope) subscope(prefix string, tags map[string]string) Scope {
 		cachedReporter: s.cachedReporter,
 		baseReporter:   s.baseReporter,
 		defaultBuckets: s.defaultBuckets,
+		sanitiser:      s.sanitiser,
 		registry:       s.registry,
 
 		counters:   make(map[string]*counter),
@@ -509,6 +526,16 @@ func (s *scope) fullyQualifiedName(name string) string {
 		return name
 	}
 	return fmt.Sprintf("%s%s%s", s.prefix, s.separator, name)
+}
+
+func (s *scope) copyAndSanitiseMap(tags map[string]string) map[string]string {
+	result := make(map[string]string, len(tags))
+	for k, v := range tags {
+		k = s.sanitiser.Key(k)
+		v = s.sanitiser.Value(v)
+		result[k] = v
+	}
+	return result
 }
 
 // TestScope is a metrics collector that has no reporting, ensuring that

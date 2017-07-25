@@ -47,6 +47,24 @@ var (
 		',',
 		'-',
 		'_'}
+
+	// AlphanumericSanitiserOpts is the options to create a sanitiser which uses
+	// the alphanumeric SanitiseFn.
+	AlphanumericSanitiserOpts = SanitiseOptions{
+		NameCharacters: ValidCharacters{
+			Ranges:     AlphanumericRange,
+			Characters: UnderscoreDashCharacters,
+		},
+		KeyCharacters: ValidCharacters{
+			Ranges:     AlphanumericRange,
+			Characters: UnderscoreDashCharacters,
+		},
+		ValueCharacters: ValidCharacters{
+			Ranges:     AlphanumericRange,
+			Characters: UnderscoreDashCharacters,
+		},
+		ReplacementCharacter: DefaultReplacementCharacter,
+	}
 )
 
 // SanitiseFn returns a sanitised version of the input string.
@@ -63,13 +81,13 @@ type ValidCharacters struct {
 
 // SanitiseOptions are the set of configurable options for sanitisation.
 type SanitiseOptions struct {
-	ValidNameCharacters  ValidCharacters
-	ValidKeyCharacters   ValidCharacters
-	ValidValueCharacters ValidCharacters
+	NameCharacters       ValidCharacters
+	KeyCharacters        ValidCharacters
+	ValueCharacters      ValidCharacters
 	ReplacementCharacter rune
 }
 
-// Sanitiser sanitises the provided input based on the function called.
+// Sanitiser sanitises the provided input based on the function executed.
 type Sanitiser interface {
 	// Name sanitises the provided `name` string.
 	Name(n string) string
@@ -81,12 +99,12 @@ type Sanitiser interface {
 	Value(v string) string
 }
 
-// NewSanitiser returns a new sanitiser based on provided options
+// NewSanitiser returns a new sanitiser based on provided options.
 func NewSanitiser(opts SanitiseOptions) Sanitiser {
 	return &santiser{
-		nameFn:  opts.ValidNameCharacters.sanitiseFn(opts.ReplacementCharacter),
-		keyFn:   opts.ValidKeyCharacters.sanitiseFn(opts.ReplacementCharacter),
-		valueFn: opts.ValidValueCharacters.sanitiseFn(opts.ReplacementCharacter),
+		nameFn:  opts.NameCharacters.sanitiseFn(opts.ReplacementCharacter),
+		keyFn:   opts.KeyCharacters.sanitiseFn(opts.ReplacementCharacter),
+		valueFn: opts.ValueCharacters.sanitiseFn(opts.ReplacementCharacter),
 	}
 }
 
