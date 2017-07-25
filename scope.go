@@ -387,9 +387,9 @@ func (s *scope) SubScope(prefix string) Scope {
 	return s.subscope(s.fullyQualifiedName(prefix), nil)
 }
 
-func (s *scope) subscope(prefix string, tags map[string]string) Scope {
-	tags = mergeRightTags(s.tags, tags)
-	key := scopeRegistryKey(prefix, tags)
+func (s *scope) subscope(prefix string, immutableTags map[string]string) Scope {
+	immutableTags = mergeRightTags(s.tags, immutableTags)
+	key := scopeRegistryKey(prefix, immutableTags)
 
 	s.registry.RLock()
 	existing, ok := s.registry.subscopes[key]
@@ -412,7 +412,7 @@ func (s *scope) subscope(prefix string, tags map[string]string) Scope {
 		prefix:    prefix,
 		// NB(prateek): don't need to copy the tags here,
 		// we assume the map provided is immutable.
-		tags:           tags,
+		tags:           immutableTags,
 		reporter:       s.reporter,
 		cachedReporter: s.cachedReporter,
 		baseReporter:   s.baseReporter,
