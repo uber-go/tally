@@ -67,8 +67,6 @@ const (
 	// precision to use when formatting the metric tag
 	// with the histogram bucket bound values.
 	DefaultHistogramBucketTagPrecision = uint(6)
-	// DefaultSanitizeMetrics controls whether we sanitize metric identifiers by default
-	DefaultSanitizeMetrics = false
 
 	emitMetricBatchOverhead    = 19
 	minMetricBucketIDTagLength = 4
@@ -104,8 +102,6 @@ type Reporter interface {
 	io.Closer
 }
 
-type sanitizeFn func(string) string
-
 // reporter is a metrics backend that reports metrics to a local or
 // remote M3 collector, metrics are batched together and emitted
 // via either thrift compact or binary protocol in batch UDP packets.
@@ -120,7 +116,6 @@ type reporter struct {
 	freeBytes       int32
 	processors      sync.WaitGroup
 	resourcePool    *resourcePool
-	sanitizeFn      sanitizeFn
 	bucketIDTagName string
 	bucketTagName   string
 	bucketValFmt    string
@@ -137,7 +132,6 @@ type Options struct {
 	CommonTags                  map[string]string
 	IncludeHost                 bool
 	Protocol                    Protocol
-	SanitizeMetrics             bool
 	MaxQueueSize                int
 	MaxPacketSizeBytes          int32
 	HistogramBucketIDName       string
@@ -229,11 +223,6 @@ func NewReporter(opts Options) (Reporter, error) {
 		return nil, errCommonTagSize
 	}
 
-	sanitizeFn := func(v string) string { return v }
-	if opts.SanitizeMetrics {
-		sanitizeFn = sanitizeMetricIdentifiers
-	}
-
 	r := &reporter{
 		client:          client,
 		curBatch:        batch,
@@ -242,7 +231,6 @@ func NewReporter(opts Options) (Reporter, error) {
 		commonTags:      tags,
 		freeBytes:       freeBytes,
 		resourcePool:    resourcePool,
-		sanitizeFn:      sanitizeFn,
 		bucketIDTagName: opts.HistogramBucketIDName,
 		bucketTagName:   opts.HistogramBucketName,
 		bucketValFmt:    "%." + strconv.Itoa(int(opts.HistogramBucketTagPrecision)) + "f",
@@ -368,14 +356,13 @@ func (r *reporter) newMetric(
 		m      = r.resourcePool.getMetric()
 		metVal = r.resourcePool.getValue()
 	)
-
-	m.Name = r.sanitizeFn(name)
+	m.Name = name
 	if tags != nil {
 		metTags := r.resourcePool.getTagList()
 		for k, v := range tags {
-			val := r.sanitizeFn(v)
+			val := v
 			metTag := r.resourcePool.getTag()
-			metTag.TagName = r.sanitizeFn(k)
+			metTag.TagName = k
 			metTag.TagValue = &val
 			metTags[metTag] = true
 		}

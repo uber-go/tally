@@ -45,9 +45,6 @@ type Configuration struct {
 
 	// IncludeHost is whether or not to include host tag.
 	IncludeHost bool `yaml:"includeHost"`
-
-	// SanitizeMetrics is whether or not metric identifiers (name, tags) are sanitized.
-	SanitizeMetrics bool `yaml:"sanitizeMetrics"`
 }
 
 // NewReporter creates a new M3 reporter from this configuration.
@@ -64,6 +61,5 @@ func (c Configuration) NewReporter() (Reporter, error) {
 		MaxQueueSize:       c.Queue,
 		MaxPacketSizeBytes: c.PacketSize,
 		IncludeHost:        c.IncludeHost,
-		SanitizeMetrics:    c.SanitizeMetrics,
 	})
 }

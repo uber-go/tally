@@ -50,28 +50,11 @@ func BenchmarkNewMetric(b *testing.B) {
 	}
 }
 
-func BenchmarkNewMetricWithSanitization(b *testing.B) {
-	r, _ := NewReporter(Options{
-		HostPorts:       []string{"127.0.0.1:9052"},
-		Service:         "test-service",
-		CommonTags:      defaultCommonTags,
-		SanitizeMetrics: true,
-	})
-	defer r.Close()
-	benchReporter := r.(*reporter)
-	b.ResetTimer()
-
-	for n := 0; n < b.N; n++ {
-		benchReporter.newMetric("foo", nil, counterType)
-	}
-}
-
 func BenchmarkCalulateSize(b *testing.B) {
 	r, _ := NewReporter(Options{
-		HostPorts:       []string{"127.0.0.1:9052"},
-		Service:         "test-service",
-		CommonTags:      defaultCommonTags,
-		SanitizeMetrics: true,
+		HostPorts:  []string{"127.0.0.1:9052"},
+		Service:    "test-service",
+		CommonTags: defaultCommonTags,
 	})
 	defer r.Close()
 	benchReporter := r.(*reporter)
@@ -89,10 +72,9 @@ func BenchmarkCalulateSize(b *testing.B) {
 
 func BenchmarkTimer(b *testing.B) {
 	r, _ := NewReporter(Options{
-		HostPorts:       []string{"127.0.0.1:9052"},
-		Service:         "test-service",
-		CommonTags:      defaultCommonTags,
-		SanitizeMetrics: true,
+		HostPorts:  []string{"127.0.0.1:9052"},
+		Service:    "test-service",
+		CommonTags: defaultCommonTags,
 	})
 	defer r.Close()
 	benchReporter := r.(*reporter)
