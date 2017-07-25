@@ -30,6 +30,26 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+var (
+	// alphanumericSanitiserOpts is the options to create a sanitiser which uses
+	// the alphanumeric SanitiseFn.
+	alphanumericSanitiserOpts = SanitiseOptions{
+		NameCharacters: ValidCharacters{
+			Ranges:     AlphanumericRange,
+			Characters: UnderscoreDashCharacters,
+		},
+		KeyCharacters: ValidCharacters{
+			Ranges:     AlphanumericRange,
+			Characters: UnderscoreDashCharacters,
+		},
+		ValueCharacters: ValidCharacters{
+			Ranges:     AlphanumericRange,
+			Characters: UnderscoreDashCharacters,
+		},
+		ReplacementCharacter: DefaultReplacementCharacter,
+	}
+)
+
 type testIntValue struct {
 	val      int64
 	tags     map[string]string

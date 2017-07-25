@@ -49,26 +49,6 @@ var (
 		'_'}
 )
 
-var (
-	// alphanumericSanitiserOpts is the options to create a sanitiser which uses
-	// the alphanumeric SanitiseFn.
-	alphanumericSanitiserOpts = SanitiseOptions{
-		NameCharacters: ValidCharacters{
-			Ranges:     AlphanumericRange,
-			Characters: UnderscoreDashCharacters,
-		},
-		KeyCharacters: ValidCharacters{
-			Ranges:     AlphanumericRange,
-			Characters: UnderscoreDashCharacters,
-		},
-		ValueCharacters: ValidCharacters{
-			Ranges:     AlphanumericRange,
-			Characters: UnderscoreDashCharacters,
-		},
-		ReplacementCharacter: DefaultReplacementCharacter,
-	}
-)
-
 // SanitiseFn returns a sanitised version of the input string.
 type SanitiseFn func(string) string
 
