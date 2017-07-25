@@ -159,11 +159,10 @@ func (c *ValidCharacters) sanitiseFn(repChar rune) SanitiseFn {
 				}
 			}
 
-			// if it's valid, we can optimise allocations by avoiding
-			// copying unless necessary
+			// if it's valid, we can optimise allocations by avoiding copying
 			if validCurr {
 				if buf == nil {
-					continue // haven't deviated from string
+					continue // haven't deviated from string, still no need to init buffer
 				}
 				buf.WriteRune(ch) // we've deviated from string, write to buffer
 				continue
