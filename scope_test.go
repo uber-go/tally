@@ -350,7 +350,7 @@ func TestCounterSanitised(t *testing.T) {
 
 	root, closer := NewRootScope(ScopeOptions{
 		Reporter:        r,
-		SanitiseOptions: &AlphanumericSanitiserOpts,
+		SanitiseOptions: &alphanumericSanitiserOpts,
 	}, 0)
 	defer closer.Close()
 
@@ -583,7 +583,7 @@ func TestTaggedSanitisedSubScope(t *testing.T) {
 		Prefix:          "foo",
 		Tags:            ts,
 		Reporter:        r,
-		SanitiseOptions: &AlphanumericSanitiserOpts,
+		SanitiseOptions: &alphanumericSanitiserOpts,
 	}, 0)
 	defer closer.Close()
 

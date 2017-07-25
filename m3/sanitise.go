@@ -25,11 +25,11 @@ import (
 )
 
 var (
-	// M3SanitiserOpts are the options for the default M3 Sanitiser
-	M3SanitiserOpts = tally.SanitiseOptions{
+	// DefaultSanitiserOpts are the options for the default M3 Sanitiser
+	DefaultSanitiserOpts = tally.SanitiseOptions{
 		NameCharacters: tally.ValidCharacters{
 			Ranges:     tally.AlphanumericRange,
-			Characters: tally.UnderscoreDashCharacters,
+			Characters: tally.UnderscoreDashDotCharacters,
 		},
 		KeyCharacters: tally.ValidCharacters{
 			Ranges:     tally.AlphanumericRange,

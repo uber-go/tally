@@ -59,7 +59,7 @@ func BenchmarkSanitisedCounterAllocation(b *testing.B) {
 	root, _ := NewRootScope(ScopeOptions{
 		Prefix:          "funkytown",
 		Reporter:        NullStatsReporter,
-		SanitiseOptions: &AlphanumericSanitiserOpts,
+		SanitiseOptions: &alphanumericSanitiserOpts,
 	}, 0)
 	s := root.(*scope)
 

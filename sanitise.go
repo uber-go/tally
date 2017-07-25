@@ -47,10 +47,12 @@ var (
 		'.',
 		'-',
 		'_'}
+)
 
-	// AlphanumericSanitiserOpts is the options to create a sanitiser which uses
+var (
+	// alphanumericSanitiserOpts is the options to create a sanitiser which uses
 	// the alphanumeric SanitiseFn.
-	AlphanumericSanitiserOpts = SanitiseOptions{
+	alphanumericSanitiserOpts = SanitiseOptions{
 		NameCharacters: ValidCharacters{
 			Ranges:     AlphanumericRange,
 			Characters: UnderscoreDashCharacters,
