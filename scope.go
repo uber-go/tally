@@ -147,7 +147,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 	}
 
 	s := &scope{
-		separator:      opts.Separator,
+		separator:      sanitiser.Name(opts.Separator),
 		prefix:         sanitiser.Name(opts.Prefix),
 		reporter:       opts.Reporter,
 		cachedReporter: opts.CachedReporter,
@@ -521,12 +521,19 @@ func (s *scope) Close() error {
 	return nil
 }
 
+// NB(prateek): We assume concatenation of sanitised inputs is
+// sanitised. If that stops being true, then we need to sanitise the
+// output of this function.
 func (s *scope) fullyQualifiedName(name string) string {
 	if len(s.prefix) == 0 {
-		return s.sanitiser.Name(name)
+		return name
 	}
-	return s.sanitiser.Name(
-		fmt.Sprintf("%s%s%s", s.prefix, s.separator, name))
+	// NB: we don't need to sanitise the output of this function as we
+	// sanitise all the the inputs (prefix, separator, name); and the
+	// output we're creating is a concatenation of the sanitised inputs.
+	// If we change the concatenation to involve other inputs or characters,
+	// we'll need to sanitise them too.
+	return fmt.Sprintf("%s%s%s", s.prefix, s.separator, name)
 }
 
 func (s *scope) copyAndSanitiseMap(tags map[string]string) map[string]string {
