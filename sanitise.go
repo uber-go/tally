@@ -127,11 +127,9 @@ func (c *ValidCharacters) sanitiseFn(repChar rune) SanitiseFn {
 			// first check if the provided character is valid
 			validCurr := false
 			for i := 0; !validCurr && i < len(c.Ranges); i++ {
-				for j := c.Ranges[i][0]; ch >= c.Ranges[i][0] && j <= c.Ranges[i][1]; j++ {
-					if rune(j) == ch {
-						validCurr = true
-						break
-					}
+				if ch >= c.Ranges[i][0] && ch <= c.Ranges[i][1] {
+					validCurr = true
+					break
 				}
 			}
 			for i := 0; !validCurr && i < len(c.Characters); i++ {
