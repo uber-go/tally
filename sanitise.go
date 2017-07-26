@@ -83,7 +83,7 @@ type Sanitiser interface {
 
 // NewSanitiser returns a new sanitiser based on provided options.
 func NewSanitiser(opts SanitiseOptions) Sanitiser {
-	return santiser{
+	return sanitiser{
 		nameFn:  opts.NameCharacters.sanitiseFn(opts.ReplacementCharacter),
 		keyFn:   opts.KeyCharacters.sanitiseFn(opts.ReplacementCharacter),
 		valueFn: opts.ValueCharacters.sanitiseFn(opts.ReplacementCharacter),
@@ -95,28 +95,28 @@ func NoOpSanitiseFn(v string) string { return v }
 
 // NewNoOpSanitiser returns a sanitiser which returns all inputs un-touched.
 func NewNoOpSanitiser() Sanitiser {
-	return santiser{
+	return sanitiser{
 		nameFn:  NoOpSanitiseFn,
 		keyFn:   NoOpSanitiseFn,
 		valueFn: NoOpSanitiseFn,
 	}
 }
 
-type santiser struct {
+type sanitiser struct {
 	nameFn  SanitiseFn
 	keyFn   SanitiseFn
 	valueFn SanitiseFn
 }
 
-func (s santiser) Name(n string) string {
+func (s sanitiser) Name(n string) string {
 	return s.nameFn(n)
 }
 
-func (s santiser) Key(k string) string {
+func (s sanitiser) Key(k string) string {
 	return s.keyFn(k)
 }
 
-func (s santiser) Value(v string) string {
+func (s sanitiser) Value(v string) string {
 	return s.valueFn(v)
 }
 
