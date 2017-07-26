@@ -148,7 +148,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 
 	s := &scope{
 		separator:      opts.Separator,
-		prefix:         opts.Prefix,
+		prefix:         sanitiser.Name(opts.Prefix),
 		reporter:       opts.Reporter,
 		cachedReporter: opts.CachedReporter,
 		baseReporter:   baseReporter,
@@ -523,9 +523,10 @@ func (s *scope) Close() error {
 
 func (s *scope) fullyQualifiedName(name string) string {
 	if len(s.prefix) == 0 {
-		return name
+		return s.sanitiser.Name(name)
 	}
-	return fmt.Sprintf("%s%s%s", s.prefix, s.separator, name)
+	return s.sanitiser.Name(
+		fmt.Sprintf("%s%s%s", s.prefix, s.separator, name))
 }
 
 func (s *scope) copyAndSanitiseMap(tags map[string]string) map[string]string {

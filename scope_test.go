@@ -618,11 +618,11 @@ func TestTaggedSanitisedSubScope(t *testing.T) {
 	tscope.report(r)
 	r.cg.Wait()
 
-	assert.EqualValues(t, 1, r.counters["foo.beep"].val)
+	assert.EqualValues(t, 1, r.counters["foo_beep"].val)
 	assert.EqualValues(t, map[string]string{
 		"env":     "test_env",
 		"service": "test_service",
-	}, r.counters["foo.beep"].tags)
+	}, r.counters["foo_beep"].tags)
 }
 
 func TestTaggedExistingReturnsSameScope(t *testing.T) {
