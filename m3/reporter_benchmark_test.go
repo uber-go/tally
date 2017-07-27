@@ -23,11 +23,6 @@ package m3
 import (
 	"testing"
 	"time"
-
-	customtransport "github.com/uber-go/tally/m3/customtransports"
-	m3thrift "github.com/uber-go/tally/m3/thrift"
-
-	"github.com/apache/thrift/lib/go/thrift"
 )
 
 const (
@@ -41,10 +36,13 @@ const (
 )
 
 func BenchmarkNewMetric(b *testing.B) {
-	protocolFactory := thrift.NewTCompactProtocolFactory()
-	resourcePool := newResourcePool(protocolFactory)
-	benchReporter := &reporter{resourcePool: resourcePool}
-
+	r, _ := NewReporter(Options{
+		HostPorts:  []string{"127.0.0.1:9052"},
+		Service:    "test-service",
+		CommonTags: defaultCommonTags,
+	})
+	defer r.Close()
+	benchReporter := r.(*reporter)
 	b.ResetTimer()
 
 	for n := 0; n < b.N; n++ {
@@ -53,9 +51,13 @@ func BenchmarkNewMetric(b *testing.B) {
 }
 
 func BenchmarkCalulateSize(b *testing.B) {
-	protocolFactory := thrift.NewTCompactProtocolFactory()
-	resourcePool := newResourcePool(protocolFactory)
-	benchReporter := &reporter{resourcePool: resourcePool}
+	r, _ := NewReporter(Options{
+		HostPorts:  []string{"127.0.0.1:9052"},
+		Service:    "test-service",
+		CommonTags: defaultCommonTags,
+	})
+	defer r.Close()
+	benchReporter := r.(*reporter)
 
 	val := int64(123456)
 	met := benchReporter.newMetric("foo", nil, counterType)
@@ -69,26 +71,19 @@ func BenchmarkCalulateSize(b *testing.B) {
 }
 
 func BenchmarkTimer(b *testing.B) {
-	protocolFactory := thrift.NewTCompactProtocolFactory()
-	resourcePool := newResourcePool(protocolFactory)
-	tags := resourcePool.getTagList()
-	batch := resourcePool.getBatch()
-	batch.CommonTags = tags
-	batch.Metrics = []*m3thrift.Metric{}
-	proto := resourcePool.getProto()
-	batch.Write(proto)
-	calc := proto.Transport().(*customtransport.TCalcTransport)
-	calc.ResetCount()
-	benchReporter := &reporter{
-		calc:         calc,
-		calcProto:    proto,
-		resourcePool: resourcePool,
-		metCh:        make(chan sizedMetric, DefaultMaxQueueSize),
-	}
+	r, _ := NewReporter(Options{
+		HostPorts:  []string{"127.0.0.1:9052"},
+		Service:    "test-service",
+		CommonTags: defaultCommonTags,
+	})
+	defer r.Close()
+	benchReporter := r.(*reporter)
+	benchReporter.metCh = make(chan sizedMetric, DefaultMaxQueueSize)
 	// Close the met ch to end consume metrics loop
 	defer close(benchReporter.metCh)
 
 	go func() {
+		resourcePool := benchReporter.resourcePool
 		// Blindly consume metrics
 		for met := range benchReporter.metCh {
 			resourcePool.releaseShallowMetric(met.m)

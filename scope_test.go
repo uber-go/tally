@@ -30,6 +30,26 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+var (
+	// alphanumericSanitiserOpts is the options to create a sanitiser which uses
+	// the alphanumeric SanitiseFn.
+	alphanumericSanitiserOpts = SanitiseOptions{
+		NameCharacters: ValidCharacters{
+			Ranges:     AlphanumericRange,
+			Characters: UnderscoreDashCharacters,
+		},
+		KeyCharacters: ValidCharacters{
+			Ranges:     AlphanumericRange,
+			Characters: UnderscoreDashCharacters,
+		},
+		ValueCharacters: ValidCharacters{
+			Ranges:     AlphanumericRange,
+			Characters: UnderscoreDashCharacters,
+		},
+		ReplacementCharacter: DefaultReplacementCharacter,
+	}
+)
+
 type testIntValue struct {
 	val      int64
 	tags     map[string]string
@@ -345,6 +365,52 @@ func TestWriteOnce(t *testing.T) {
 	assert.Nil(t, r.timers["ticky"])
 }
 
+func TestCounterSanitised(t *testing.T) {
+	r := newTestStatsReporter()
+
+	root, closer := NewRootScope(ScopeOptions{
+		Reporter:        r,
+		SanitiseOptions: &alphanumericSanitiserOpts,
+	}, 0)
+	defer closer.Close()
+
+	s := root.(*scope)
+
+	r.cg.Add(1)
+	s.Counter("how?").Inc(1)
+	r.gg.Add(1)
+	s.Gauge("does!").Update(1)
+	r.tg.Add(1)
+	s.Timer("this!").Record(time.Millisecond * 175)
+	r.hg.Add(1)
+	s.Histogram("work1!?", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
+
+	s.report(r)
+	r.WaitAll()
+
+	assert.Nil(t, r.counters["how?"])
+	assert.EqualValues(t, 1, r.counters["how_"].val)
+	assert.Nil(t, r.gauges["does!"])
+	assert.EqualValues(t, 1, r.gauges["does_"].val)
+	assert.Nil(t, r.timers["this!"])
+	assert.EqualValues(t, time.Millisecond*175, r.timers["this_"].val)
+	assert.Nil(t, r.histograms["work1!?"])
+	assert.EqualValues(t, 1, r.histograms["work1__"].valueSamples[50.0])
+
+	r = newTestStatsReporter()
+	s.report(r)
+
+	assert.Nil(t, r.counters["how?"])
+	assert.Nil(t, r.counters["how_"])
+	assert.Nil(t, r.gauges["does!"])
+	assert.Nil(t, r.gauges["does_"])
+	assert.Nil(t, r.timers["this!"])
+	assert.Nil(t, r.timers["this_"])
+	assert.Nil(t, r.histograms["work1!?"])
+	assert.Nil(t, r.histograms["work1__"])
+}
+
 func TestCachedReporter(t *testing.T) {
 	r := newTestStatsReporter()
 
@@ -527,6 +593,36 @@ func TestTaggedSubScope(t *testing.T) {
 		"env":     "test",
 		"service": "test",
 	}, r.histograms["foo.bar"].tags)
+}
+
+func TestTaggedSanitisedSubScope(t *testing.T) {
+	r := newTestStatsReporter()
+
+	ts := map[string]string{"env": "test:env"}
+	root, closer := NewRootScope(ScopeOptions{
+		Prefix:          "foo",
+		Tags:            ts,
+		Reporter:        r,
+		SanitiseOptions: &alphanumericSanitiserOpts,
+	}, 0)
+	defer closer.Close()
+
+	s := root.(*scope)
+
+	tscope := root.Tagged(map[string]string{"service": "test.service"}).(*scope)
+
+	r.cg.Add(1)
+	tscope.Counter("beep").Inc(1)
+
+	s.report(r)
+	tscope.report(r)
+	r.cg.Wait()
+
+	assert.EqualValues(t, 1, r.counters["foo_beep"].val)
+	assert.EqualValues(t, map[string]string{
+		"env":     "test_env",
+		"service": "test_service",
+	}, r.counters["foo_beep"].tags)
 }
 
 func TestTaggedExistingReturnsSameScope(t *testing.T) {

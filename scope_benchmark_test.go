@@ -21,6 +21,7 @@
 package tally
 
 import (
+	"fmt"
 	"strconv"
 	"testing"
 )
@@ -33,6 +34,43 @@ func BenchmarkNameGeneration(b *testing.B) {
 	s := root.(*scope)
 	for n := 0; n < b.N; n++ {
 		s.fullyQualifiedName("take.me.to")
+	}
+}
+
+func BenchmarkCounterAllocation(b *testing.B) {
+	root, _ := NewRootScope(ScopeOptions{
+		Prefix:   "funkytown",
+		Reporter: NullStatsReporter,
+	}, 0)
+	s := root.(*scope)
+
+	ids := make([]string, 0, b.N)
+	for i := 0; i < b.N; i++ {
+		ids = append(ids, fmt.Sprintf("take.me.to.%d", i))
+	}
+	b.ResetTimer()
+
+	for n := 0; n < b.N; n++ {
+		s.Counter(ids[n])
+	}
+}
+
+func BenchmarkSanitisedCounterAllocation(b *testing.B) {
+	root, _ := NewRootScope(ScopeOptions{
+		Prefix:          "funkytown",
+		Reporter:        NullStatsReporter,
+		SanitiseOptions: &alphanumericSanitiserOpts,
+	}, 0)
+	s := root.(*scope)
+
+	ids := make([]string, 0, b.N)
+	for i := 0; i < b.N; i++ {
+		ids = append(ids, fmt.Sprintf("take.me.to.%d", i))
+	}
+	b.ResetTimer()
+
+	for n := 0; n < b.N; n++ {
+		s.Counter(ids[n])
 	}
 }
 
