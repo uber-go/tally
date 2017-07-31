@@ -64,7 +64,7 @@ type scope struct {
 	cachedReporter CachedStatsReporter
 	baseReporter   BaseStatsReporter
 	defaultBuckets Buckets
-	sanitiser      Sanitiser
+	sanitizer      Sanitizer
 
 	registry *scopeRegistry
 	status   scopeStatus
@@ -101,7 +101,7 @@ type ScopeOptions struct {
 	CachedReporter  CachedStatsReporter
 	Separator       string
 	DefaultBuckets  Buckets
-	SanitiseOptions *SanitiseOptions
+	SanitizeOptions *SanitizeOptions
 }
 
 // NewRootScope creates a new root Scope with a set of options and
@@ -123,9 +123,9 @@ func NewTestScope(
 }
 
 func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
-	sanitiser := NewNoOpSanitiser()
-	if o := opts.SanitiseOptions; o != nil {
-		sanitiser = NewSanitiser(*o)
+	sanitizer := NewNoOpSanitizer()
+	if o := opts.SanitizeOptions; o != nil {
+		sanitizer = NewSanitizer(*o)
 	}
 
 	if opts.Tags == nil {
@@ -147,13 +147,13 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 	}
 
 	s := &scope{
-		separator:      sanitiser.Name(opts.Separator),
-		prefix:         sanitiser.Name(opts.Prefix),
+		separator:      sanitizer.Name(opts.Separator),
+		prefix:         sanitizer.Name(opts.Prefix),
 		reporter:       opts.Reporter,
 		cachedReporter: opts.CachedReporter,
 		baseReporter:   baseReporter,
 		defaultBuckets: opts.DefaultBuckets,
-		sanitiser:      sanitiser,
+		sanitizer:      sanitizer,
 
 		registry: &scopeRegistry{
 			subscopes: make(map[string]*scope),
@@ -171,7 +171,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 
 	// NB(r): Take a copy of the tags on creation
 	// so that it cannot be modified after set.
-	s.tags = s.copyAndSanitiseMap(opts.Tags)
+	s.tags = s.copyAndSanitizeMap(opts.Tags)
 
 	// Register the root scope
 	s.registry.subscopes[scopeRegistryKey(s.prefix, s.tags)] = s
@@ -277,7 +277,7 @@ func (s *scope) reportRegistryWithLock() {
 }
 
 func (s *scope) Counter(name string) Counter {
-	name = s.sanitiser.Name(name)
+	name = s.sanitizer.Name(name)
 	s.cm.RLock()
 	val, ok := s.counters[name]
 	s.cm.RUnlock()
@@ -300,7 +300,7 @@ func (s *scope) Counter(name string) Counter {
 }
 
 func (s *scope) Gauge(name string) Gauge {
-	name = s.sanitiser.Name(name)
+	name = s.sanitizer.Name(name)
 	s.gm.RLock()
 	val, ok := s.gauges[name]
 	s.gm.RUnlock()
@@ -323,7 +323,7 @@ func (s *scope) Gauge(name string) Gauge {
 }
 
 func (s *scope) Timer(name string) Timer {
-	name = s.sanitiser.Name(name)
+	name = s.sanitizer.Name(name)
 	s.tm.RLock()
 	val, ok := s.timers[name]
 	s.tm.RUnlock()
@@ -348,7 +348,7 @@ func (s *scope) Timer(name string) Timer {
 }
 
 func (s *scope) Histogram(name string, b Buckets) Histogram {
-	name = s.sanitiser.Name(name)
+	name = s.sanitizer.Name(name)
 
 	if b == nil {
 		b = s.defaultBuckets
@@ -378,12 +378,12 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 }
 
 func (s *scope) Tagged(tags map[string]string) Scope {
-	tags = s.copyAndSanitiseMap(tags)
+	tags = s.copyAndSanitizeMap(tags)
 	return s.subscope(s.prefix, tags)
 }
 
 func (s *scope) SubScope(prefix string) Scope {
-	prefix = s.sanitiser.Name(prefix)
+	prefix = s.sanitizer.Name(prefix)
 	return s.subscope(s.fullyQualifiedName(prefix), nil)
 }
 
@@ -417,7 +417,7 @@ func (s *scope) subscope(prefix string, immutableTags map[string]string) Scope {
 		cachedReporter: s.cachedReporter,
 		baseReporter:   s.baseReporter,
 		defaultBuckets: s.defaultBuckets,
-		sanitiser:      s.sanitiser,
+		sanitizer:      s.sanitizer,
 		registry:       s.registry,
 
 		counters:   make(map[string]*counter),
@@ -521,26 +521,26 @@ func (s *scope) Close() error {
 	return nil
 }
 
-// NB(prateek): We assume concatenation of sanitised inputs is
-// sanitised. If that stops being true, then we need to sanitise the
+// NB(prateek): We assume concatenation of sanitized inputs is
+// sanitized. If that stops being true, then we need to sanitize the
 // output of this function.
 func (s *scope) fullyQualifiedName(name string) string {
 	if len(s.prefix) == 0 {
 		return name
 	}
-	// NB: we don't need to sanitise the output of this function as we
-	// sanitise all the the inputs (prefix, separator, name); and the
-	// output we're creating is a concatenation of the sanitised inputs.
+	// NB: we don't need to sanitize the output of this function as we
+	// sanitize all the the inputs (prefix, separator, name); and the
+	// output we're creating is a concatenation of the sanitized inputs.
 	// If we change the concatenation to involve other inputs or characters,
-	// we'll need to sanitise them too.
+	// we'll need to sanitize them too.
 	return fmt.Sprintf("%s%s%s", s.prefix, s.separator, name)
 }
 
-func (s *scope) copyAndSanitiseMap(tags map[string]string) map[string]string {
+func (s *scope) copyAndSanitizeMap(tags map[string]string) map[string]string {
 	result := make(map[string]string, len(tags))
 	for k, v := range tags {
-		k = s.sanitiser.Key(k)
-		v = s.sanitiser.Value(v)
+		k = s.sanitizer.Key(k)
+		v = s.sanitizer.Value(v)
 		result[k] = v
 	}
 	return result

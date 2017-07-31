@@ -55,11 +55,11 @@ func BenchmarkCounterAllocation(b *testing.B) {
 	}
 }
 
-func BenchmarkSanitisedCounterAllocation(b *testing.B) {
+func BenchmarkSanitizedCounterAllocation(b *testing.B) {
 	root, _ := NewRootScope(ScopeOptions{
 		Prefix:          "funkytown",
 		Reporter:        NullStatsReporter,
-		SanitiseOptions: &alphanumericSanitiserOpts,
+		SanitizeOptions: &alphanumericSanitizerOpts,
 	}, 0)
 	s := root.(*scope)
 

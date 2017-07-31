@@ -30,7 +30,7 @@ var (
 	DefaultReplacementCharacter = '_'
 
 	// AlphanumericRange is the range of alphanumeric characters.
-	AlphanumericRange = []SanitiseRange{
+	AlphanumericRange = []SanitizeRange{
 		{rune('a'), rune('z')},
 		{rune('A'), rune('Z')},
 		{rune('0'), rune('9')}}
@@ -49,78 +49,78 @@ var (
 		'_'}
 )
 
-// SanitiseFn returns a sanitised version of the input string.
-type SanitiseFn func(string) string
+// SanitizeFn returns a sanitized version of the input string.
+type SanitizeFn func(string) string
 
-// SanitiseRange is a range of characters (inclusive on both ends).
-type SanitiseRange [2]rune
+// SanitizeRange is a range of characters (inclusive on both ends).
+type SanitizeRange [2]rune
 
 // ValidCharacters is a collection of valid characters.
 type ValidCharacters struct {
-	Ranges     []SanitiseRange
+	Ranges     []SanitizeRange
 	Characters []rune
 }
 
-// SanitiseOptions are the set of configurable options for sanitisation.
-type SanitiseOptions struct {
+// SanitizeOptions are the set of configurable options for sanitisation.
+type SanitizeOptions struct {
 	NameCharacters       ValidCharacters
 	KeyCharacters        ValidCharacters
 	ValueCharacters      ValidCharacters
 	ReplacementCharacter rune
 }
 
-// Sanitiser sanitises the provided input based on the function executed.
-type Sanitiser interface {
-	// Name sanitises the provided `name` string.
+// Sanitizer sanitizes the provided input based on the function executed.
+type Sanitizer interface {
+	// Name sanitizes the provided `name` string.
 	Name(n string) string
 
-	// Key sanitises the provided `key` string.
+	// Key sanitizes the provided `key` string.
 	Key(k string) string
 
-	// Value sanitises the provided `value` string.
+	// Value sanitizes the provided `value` string.
 	Value(v string) string
 }
 
-// NewSanitiser returns a new sanitiser based on provided options.
-func NewSanitiser(opts SanitiseOptions) Sanitiser {
-	return sanitiser{
-		nameFn:  opts.NameCharacters.sanitiseFn(opts.ReplacementCharacter),
-		keyFn:   opts.KeyCharacters.sanitiseFn(opts.ReplacementCharacter),
-		valueFn: opts.ValueCharacters.sanitiseFn(opts.ReplacementCharacter),
+// NewSanitizer returns a new sanitizer based on provided options.
+func NewSanitizer(opts SanitizeOptions) Sanitizer {
+	return sanitizer{
+		nameFn:  opts.NameCharacters.sanitizeFn(opts.ReplacementCharacter),
+		keyFn:   opts.KeyCharacters.sanitizeFn(opts.ReplacementCharacter),
+		valueFn: opts.ValueCharacters.sanitizeFn(opts.ReplacementCharacter),
 	}
 }
 
-// NoOpSanitiseFn returns the input un-touched.
-func NoOpSanitiseFn(v string) string { return v }
+// NoOpSanitizeFn returns the input un-touched.
+func NoOpSanitizeFn(v string) string { return v }
 
-// NewNoOpSanitiser returns a sanitiser which returns all inputs un-touched.
-func NewNoOpSanitiser() Sanitiser {
-	return sanitiser{
-		nameFn:  NoOpSanitiseFn,
-		keyFn:   NoOpSanitiseFn,
-		valueFn: NoOpSanitiseFn,
+// NewNoOpSanitizer returns a sanitizer which returns all inputs un-touched.
+func NewNoOpSanitizer() Sanitizer {
+	return sanitizer{
+		nameFn:  NoOpSanitizeFn,
+		keyFn:   NoOpSanitizeFn,
+		valueFn: NoOpSanitizeFn,
 	}
 }
 
-type sanitiser struct {
-	nameFn  SanitiseFn
-	keyFn   SanitiseFn
-	valueFn SanitiseFn
+type sanitizer struct {
+	nameFn  SanitizeFn
+	keyFn   SanitizeFn
+	valueFn SanitizeFn
 }
 
-func (s sanitiser) Name(n string) string {
+func (s sanitizer) Name(n string) string {
 	return s.nameFn(n)
 }
 
-func (s sanitiser) Key(k string) string {
+func (s sanitizer) Key(k string) string {
 	return s.keyFn(k)
 }
 
-func (s sanitiser) Value(v string) string {
+func (s sanitizer) Value(v string) string {
 	return s.valueFn(v)
 }
 
-func (c *ValidCharacters) sanitiseFn(repChar rune) SanitiseFn {
+func (c *ValidCharacters) sanitizeFn(repChar rune) SanitizeFn {
 	return func(value string) string {
 		var buf *bytes.Buffer
 		for idx, ch := range value {

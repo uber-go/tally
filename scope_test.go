@@ -31,9 +31,9 @@ import (
 )
 
 var (
-	// alphanumericSanitiserOpts is the options to create a sanitiser which uses
-	// the alphanumeric SanitiseFn.
-	alphanumericSanitiserOpts = SanitiseOptions{
+	// alphanumericSanitizerOpts is the options to create a sanitizer which uses
+	// the alphanumeric SanitizeFn.
+	alphanumericSanitizerOpts = SanitizeOptions{
 		NameCharacters: ValidCharacters{
 			Ranges:     AlphanumericRange,
 			Characters: UnderscoreDashCharacters,
@@ -365,12 +365,12 @@ func TestWriteOnce(t *testing.T) {
 	assert.Nil(t, r.timers["ticky"])
 }
 
-func TestCounterSanitised(t *testing.T) {
+func TestCounterSanitized(t *testing.T) {
 	r := newTestStatsReporter()
 
 	root, closer := NewRootScope(ScopeOptions{
 		Reporter:        r,
-		SanitiseOptions: &alphanumericSanitiserOpts,
+		SanitizeOptions: &alphanumericSanitizerOpts,
 	}, 0)
 	defer closer.Close()
 
@@ -595,7 +595,7 @@ func TestTaggedSubScope(t *testing.T) {
 	}, r.histograms["foo.bar"].tags)
 }
 
-func TestTaggedSanitisedSubScope(t *testing.T) {
+func TestTaggedSanitizedSubScope(t *testing.T) {
 	r := newTestStatsReporter()
 
 	ts := map[string]string{"env": "test:env"}
@@ -603,7 +603,7 @@ func TestTaggedSanitisedSubScope(t *testing.T) {
 		Prefix:          "foo",
 		Tags:            ts,
 		Reporter:        r,
-		SanitiseOptions: &alphanumericSanitiserOpts,
+		SanitizeOptions: &alphanumericSanitizerOpts,
 	}, 0)
 	defer closer.Close()
 

@@ -26,22 +26,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestSanitiser() SanitiseFn {
+func newTestSanitizer() SanitizeFn {
 	c := &ValidCharacters{
 		Ranges:     AlphanumericRange,
 		Characters: UnderscoreDashCharacters,
 	}
-	return c.sanitiseFn(DefaultReplacementCharacter)
+	return c.sanitizeFn(DefaultReplacementCharacter)
 }
 
-func TestSanitiseIdentifierAllValidCharacters(t *testing.T) {
+func TestSanitizeIdentifierAllValidCharacters(t *testing.T) {
 	allValidChars := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
-	fn := newTestSanitiser()
+	fn := newTestSanitizer()
 	require.Equal(t, allValidChars, fn(allValidChars))
 }
 
-func TestSanitiseTestCases(t *testing.T) {
-	fn := newTestSanitiser()
+func TestSanitizeTestCases(t *testing.T) {
+	fn := newTestSanitizer()
 	type testCase struct {
 		input  string
 		output string
