@@ -18,27 +18,43 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package m3
+package tally
 
 import (
-	"github.com/uber-go/tally"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-var (
-	// DefaultSanitiserOpts are the options for the default M3 Sanitiser
-	DefaultSanitiserOpts = tally.SanitiseOptions{
-		NameCharacters: tally.ValidCharacters{
-			Ranges:     tally.AlphanumericRange,
-			Characters: tally.UnderscoreDashDotCharacters,
-		},
-		KeyCharacters: tally.ValidCharacters{
-			Ranges:     tally.AlphanumericRange,
-			Characters: tally.UnderscoreDashCharacters,
-		},
-		ValueCharacters: tally.ValidCharacters{
-			Ranges:     tally.AlphanumericRange,
-			Characters: tally.UnderscoreDashDotCharacters,
-		},
-		ReplacementCharacter: tally.DefaultReplacementCharacter,
+func newTestSanitizer() SanitizeFn {
+	c := &ValidCharacters{
+		Ranges:     AlphanumericRange,
+		Characters: UnderscoreDashCharacters,
 	}
-)
+	return c.sanitizeFn(DefaultReplacementCharacter)
+}
+
+func TestSanitizeIdentifierAllValidCharacters(t *testing.T) {
+	allValidChars := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+	fn := newTestSanitizer()
+	require.Equal(t, allValidChars, fn(allValidChars))
+}
+
+func TestSanitizeTestCases(t *testing.T) {
+	fn := newTestSanitizer()
+	type testCase struct {
+		input  string
+		output string
+	}
+
+	testCases := []testCase{
+		{"abcdef0AxS-s_Z", "abcdef0AxS-s_Z"},
+		{"a:b", "a_b"},
+		{"a! b", "a__b"},
+		{"?bZ", "_bZ"},
+	}
+
+	for _, tc := range testCases {
+		require.Equal(t, tc.output, fn(tc.input))
+	}
+}
