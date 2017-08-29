@@ -57,6 +57,9 @@ type Scope interface {
 
 	// Capabilities returns a description of metrics reporting capabilities.
 	Capabilities() Capabilities
+
+	// InstrumentedCall returns an InstrumentedCall with the given name
+	InstrumentedCall(name string) InstrumentedCall
 }
 
 // Counter is the interface for emitting counter type metrics.
@@ -101,6 +104,24 @@ type Histogram interface {
 type Stopwatch struct {
 	start    time.Time
 	recorder StopwatchRecorder
+}
+
+// SuccessFilter determines whether an error should be considered success
+type SuccessFilter func(err error) bool
+
+// An InstrumentedCall allows tracking the success, errors, and timing of blocks of code
+type InstrumentedCall interface {
+	// Exec executes the given block of code, and records whether it succeeded or
+	// failed, and the amount of time that it took
+	Exec(f func() error) error
+
+	// ExecWithFilter executes the given block of code, and records whether it succeeded or
+	// failed based on the result of a custom filter (e.g. the filter could determine a bad request error
+	// to be actually success for server logic), and the amount of time that it took
+	ExecWithFilter(f func() error, isSuccess SuccessFilter) error
+
+	// Tagged returns a new InstrumentedCall with the given set of tags
+	Tagged(tags map[string]string) InstrumentedCall
 }
 
 // NewStopwatch creates a new immutable stopwatch for recording the start
