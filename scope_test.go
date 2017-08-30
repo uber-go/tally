@@ -21,6 +21,7 @@
 package tally
 
 import (
+	"errors"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -311,6 +312,39 @@ func TestWriteReportLoop(t *testing.T) {
 		RecordValue(42.42)
 
 	r.WaitAll()
+}
+
+func TestInstrumentedCallSuccess(t *testing.T) {
+	r := newTestStatsReporter()
+	s, closer := NewRootScope(ScopeOptions{Reporter: r}, 10)
+	defer closer.Close()
+
+	r.cg.Add(1)
+	r.tg.Add(1)
+	err := s.InstrumentedCall("testInstrumented").Exec(func() error {
+		return nil
+	})
+	assert.Nil(t, err)
+
+	r.WaitAll()
+	assert.EqualValues(t, 1, r.counters["testInstrumented.success"].val)
+	assert.NotNil(t, r.timers["testInstrumented.timing"].val)
+}
+
+func TestInstrumentedCallFail(t *testing.T) {
+	r := newTestStatsReporter()
+	s, closer := NewRootScope(ScopeOptions{Reporter: r}, 10)
+	defer closer.Close()
+
+	r.cg.Add(1)
+	err := s.InstrumentedCall("testInstrumented").Exec(func() error {
+		return errors.New("failure")
+	})
+	assert.NotNil(t, err)
+
+	r.WaitAll()
+	assert.EqualValues(t, 1, r.counters["testInstrumented.errors"].val)
+	assert.Nil(t, r.timers["testInstrumented.timing"])
 }
 
 func TestCachedReportLoop(t *testing.T) {
