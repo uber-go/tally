@@ -499,16 +499,6 @@ func (s *scope) Snapshot() Snapshot {
 	return snap
 }
 
-// InstrumentedCall returns an InstrumentedCall with the given name
-func (s *scope) InstrumentedCall(name string) InstrumentedCall {
-	return &instrumentedCall{
-		scope:       s,
-		errorName:   fmt.Sprintf("%s.errors", name),
-		successName: fmt.Sprintf("%s.success", name),
-		timingName:  fmt.Sprintf("%s.timing", name),
-	}
-}
-
 func (s *scope) Close() error {
 	s.status.Lock()
 
@@ -761,49 +751,4 @@ func (s *histogramSnapshot) Values() map[float64]int64 {
 
 func (s *histogramSnapshot) Durations() map[time.Duration]int64 {
 	return s.durations
-}
-
-var defaultSuccessFilter = func(err error) bool {
-	return err == nil
-}
-
-type instrumentedCall struct {
-	scope       Scope
-	successName string
-	errorName   string
-	timingName  string
-}
-
-// Exec executes the given block of code, and records whether it succeeded or
-// failed, and the amount of time that it took
-func (call *instrumentedCall) Exec(f func() error) error {
-	return call.ExecWithFilter(f, defaultSuccessFilter)
-}
-
-// ExecWithFilter executes the given block of code, and records whether it succeeded or
-// failed based on the result of a custom filter (e.g. the filter could determine a bad request error
-// to be actually success for server logic), and the amount of time that it took
-func (call *instrumentedCall) ExecWithFilter(f func() error, isSuccess SuccessFilter) error {
-	sw := call.scope.Timer(call.timingName).Start()
-
-	err := f()
-	if err != nil && !isSuccess(err) {
-		call.scope.Counter(call.errorName).Inc(1.0)
-		return err
-	}
-
-	sw.Stop()
-	call.scope.Counter(call.successName).Inc(1.0)
-
-	return err
-}
-
-// Tagged returns a new InstrumentedCall with the given set of tags
-func (call *instrumentedCall) Tagged(tags map[string]string) InstrumentedCall {
-	return &instrumentedCall{
-		scope:       call.scope.Tagged(tags),
-		successName: call.successName,
-		errorName:   call.errorName,
-		timingName:  call.timingName,
-	}
 }

@@ -321,14 +321,16 @@ func TestInstrumentedCallSuccess(t *testing.T) {
 
 	r.cg.Add(1)
 	r.tg.Add(1)
-	err := s.InstrumentedCall("testInstrumented").Exec(func() error {
+	err := NewInstrumentedCall(s, "testInstrumented").Exec(func() error {
 		return nil
 	})
 	assert.Nil(t, err)
 
 	r.WaitAll()
-	assert.EqualValues(t, 1, r.counters["testInstrumented.success"].val)
-	assert.NotNil(t, r.timers["testInstrumented.timing"].val)
+	assert.EqualValues(t, 1, r.counters["testInstrumented"].val)
+	resultType, _ := r.counters["testInstrumented"].tags["result_type"]
+	assert.EqualValues(t, resultType, "success")
+	assert.NotNil(t, r.timers["testInstrumented.latency"].val)
 }
 
 func TestInstrumentedCallFail(t *testing.T) {
@@ -337,14 +339,16 @@ func TestInstrumentedCallFail(t *testing.T) {
 	defer closer.Close()
 
 	r.cg.Add(1)
-	err := s.InstrumentedCall("testInstrumented").Exec(func() error {
+	err := NewInstrumentedCall(s, "testInstrumented").Exec(func() error {
 		return errors.New("failure")
 	})
 	assert.NotNil(t, err)
 
 	r.WaitAll()
-	assert.EqualValues(t, 1, r.counters["testInstrumented.errors"].val)
-	assert.Nil(t, r.timers["testInstrumented.timing"])
+	assert.EqualValues(t, 1, r.counters["testInstrumented"].val)
+	resultType, _ := r.counters["testInstrumented"].tags["result_type"]
+	assert.EqualValues(t, resultType, "error")
+	assert.Nil(t, r.timers["testInstrumented.latency"])
 }
 
 func TestCachedReportLoop(t *testing.T) {
