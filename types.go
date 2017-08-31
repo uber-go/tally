@@ -151,8 +151,8 @@ type Capabilities interface {
 	Tagging() bool
 }
 
-// SuccessFilter determines whether an error should be considered success
-type SuccessFilter func(err error) bool
+// SuccessFilterFn determines whether an error should be considered success
+type SuccessFilterFn func(err error) bool
 
 // ExecFn will be executed in an InstrumentedCall
 type ExecFn func() error
@@ -166,5 +166,5 @@ type InstrumentedCall interface {
 	// ExecWithFilter executes the given block of code, and records whether it succeeded or
 	// failed based on the result of a custom filter (e.g. the filter could determine a bad request error
 	// to be actually success for server logic), and the amount of time that it took
-	ExecWithFilter(f ExecFn, isSuccess SuccessFilter) error
+	ExecWithFilter(f ExecFn, isSuccess SuccessFilterFn) error
 }
