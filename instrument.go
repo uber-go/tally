@@ -20,15 +20,11 @@
 
 package tally
 
-import (
-	"fmt"
-)
-
 const (
 	_resultType        = "result_type"
 	_resultTypeError   = "error"
 	_resultTypeSuccess = "success"
-	_timingFormat      = "%s.latency"
+	_timingFormat      = "latency"
 )
 
 // NewInstrumentedCall returns an InstrumentedCall with the given name
@@ -36,7 +32,7 @@ func NewInstrumentedCall(scope Scope, name string) InstrumentedCall {
 	return &instrumentedCall{
 		error:   scope.Tagged(map[string]string{_resultType: _resultTypeError}).Counter(name),
 		success: scope.Tagged(map[string]string{_resultType: _resultTypeSuccess}).Counter(name),
-		timing:  scope.Timer(fmt.Sprintf(_timingFormat, name)),
+		timing:  scope.SubScope(name).Timer(_timingFormat),
 	}
 }
 
