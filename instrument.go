@@ -24,12 +24,19 @@ import (
 	"fmt"
 )
 
+const (
+	_resultType        = "result_type"
+	_resultTypeError   = "error"
+	_resultTypeSuccess = "success"
+	_timingFormat      = "%s.latency"
+)
+
 // NewInstrumentedCall returns an InstrumentedCall with the given name
 func NewInstrumentedCall(scope Scope, name string) InstrumentedCall {
 	return &instrumentedCall{
-		error:   scope.Tagged(map[string]string{"result_type": "error"}).Counter(name),
-		success: scope.Tagged(map[string]string{"result_type": "success"}).Counter(name),
-		timing:  scope.Timer(fmt.Sprintf("%s.latency", name)),
+		error:   scope.Tagged(map[string]string{_resultType: _resultTypeError}).Counter(name),
+		success: scope.Tagged(map[string]string{_resultType: _resultTypeSuccess}).Counter(name),
+		timing:  scope.Timer(fmt.Sprintf(_timingFormat, name)),
 	}
 }
 
