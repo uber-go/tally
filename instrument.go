@@ -36,10 +36,6 @@ func NewInstrumentedCall(scope Scope, name string) InstrumentedCall {
 	}
 }
 
-var defaultSuccessFilter = func(err error) bool {
-	return err == nil
-}
-
 type instrumentedCall struct {
 	scope   Scope
 	success Counter
@@ -50,17 +46,9 @@ type instrumentedCall struct {
 // Exec executes the given block of code, and records whether it succeeded or
 // failed, and the amount of time that it took
 func (c *instrumentedCall) Exec(f ExecFn) error {
-	return c.ExecWithFilter(f, defaultSuccessFilter)
-}
-
-// ExecWithFilter executes the given block of code, and records whether it succeeded or
-// failed based on the result of a custom filter (e.g. the filter could determine a bad request error
-// to be actually success for server logic), and the amount of time that it took
-func (c *instrumentedCall) ExecWithFilter(f ExecFn, isSuccess SuccessFilterFn) error {
 	sw := c.timing.Start()
 
-	err := f()
-	if err != nil && !isSuccess(err) {
+	if err := f(); err != nil {
 		c.error.Inc(1.0)
 		return err
 	}
@@ -68,5 +56,5 @@ func (c *instrumentedCall) ExecWithFilter(f ExecFn, isSuccess SuccessFilterFn) e
 	sw.Stop()
 	c.success.Inc(1.0)
 
-	return err
+	return nil
 }
