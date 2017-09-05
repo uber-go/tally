@@ -18,43 +18,52 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package tally
+package instrument
 
-const (
-	_resultType        = "result_type"
-	_resultTypeError   = "error"
-	_resultTypeSuccess = "success"
-	_timingFormat      = "latency"
+import (
+	"errors"
+	"testing"
+
+	"github.com/uber-go/tally"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// NewInstrumentedCall returns an InstrumentedCall with the given name
-func NewInstrumentedCall(scope Scope, name string) InstrumentedCall {
-	return &instrumentedCall{
-		error:   scope.Tagged(map[string]string{_resultType: _resultTypeError}).Counter(name),
-		success: scope.Tagged(map[string]string{_resultType: _resultTypeSuccess}).Counter(name),
-		timing:  scope.SubScope(name).Timer(_timingFormat),
-	}
+func TestCallSuccess(t *testing.T) {
+	s := tally.NewTestScope("", nil)
+
+	err := NewCall(s, "test_call").Exec(func() error {
+		return nil
+	})
+	assert.Nil(t, err)
+
+	snapshot := s.Snapshot()
+	counters := snapshot.Counters()
+	timers := snapshot.Timers()
+
+	require.NotNil(t, counters["test_call+result_type=success"])
+	require.NotNil(t, timers["test_call.latency+"])
+
+	assert.Equal(t, int64(1), counters["test_call+result_type=success"].Value())
 }
 
-type instrumentedCall struct {
-	scope   Scope
-	success Counter
-	error   Counter
-	timing  Timer
-}
+func TestCallFail(t *testing.T) {
+	s := tally.NewTestScope("", nil)
 
-// Exec executes the given block of code, and records whether it succeeded or
-// failed, and the amount of time that it took
-func (c *instrumentedCall) Exec(f ExecFn) error {
-	sw := c.timing.Start()
+	expected := errors.New("an error")
+	err := NewCall(s, "test_call").Exec(func() error {
+		return expected
+	})
+	assert.NotNil(t, err)
+	assert.Equal(t, expected, err)
 
-	if err := f(); err != nil {
-		c.error.Inc(1.0)
-		return err
-	}
+	snapshot := s.Snapshot()
+	counters := snapshot.Counters()
+	timers := snapshot.Timers()
 
-	sw.Stop()
-	c.success.Inc(1.0)
+	require.NotNil(t, counters["test_call+result_type=error"])
+	require.NotNil(t, timers["test_call.latency+"])
 
-	return nil
+	assert.Equal(t, int64(1), counters["test_call+result_type=error"].Value())
 }
