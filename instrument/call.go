@@ -29,7 +29,14 @@ const (
 	timingSuffix      = "latency"
 )
 
-// NewCall returns an instrumented call with the given name
+// NewCall returns a Call that instruments a function using a given scope
+// and a label to name the metrics.
+// The following counters are created excluding {{ and }}:
+// {{name}}+result_type=success
+// {{name}}+result_type=error
+// The following timers are created excluding {{ and }} and replacing . with
+// the scope's separator:
+// {{name}}.latency
 func NewCall(scope tally.Scope, name string) Call {
 	return &call{
 		error:   scope.Tagged(map[string]string{resultType: resultTypeError}).Counter(name),
