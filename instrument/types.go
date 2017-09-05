@@ -20,12 +20,12 @@
 
 package instrument
 
-// ExecFn is a Call executable
+// ExecFn is an executable function that can be instrumented with a Call.
 type ExecFn func() error
 
-// Call allows tracking the success, errors, and timing of functions
+// Call allows tracking the successes, errors, and timing of functions.
 type Call interface {
 	// Exec executes a function and records whether it succeeded or
-	// failed, and the amount of time that it took
+	// failed, and the amount of time that it took.
 	Exec(f ExecFn) error
 }
