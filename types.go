@@ -150,3 +150,13 @@ type Capabilities interface {
 	// Tagging returns whether the reporter has the capability for tagged metrics.
 	Tagging() bool
 }
+
+// ExecFn will be executed in an InstrumentedCall
+type ExecFn func() error
+
+// An InstrumentedCall allows tracking the success, errors, and timing of blocks of code
+type InstrumentedCall interface {
+	// Exec executes the given block of code, and records whether it succeeded or
+	// failed, and the amount of time that it took
+	Exec(f ExecFn) error
+}
