@@ -18,34 +18,34 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package tally
+package instrument
+
+import "github.com/uber-go/tally"
 
 const (
-	_resultType        = "result_type"
-	_resultTypeError   = "error"
-	_resultTypeSuccess = "success"
-	_timingFormat      = "latency"
+	resultType        = "result_type"
+	resultTypeError   = "error"
+	resultTypeSuccess = "success"
+	timingSuffix      = "latency"
 )
 
-// NewInstrumentedCall returns an InstrumentedCall with the given name
-func NewInstrumentedCall(scope Scope, name string) InstrumentedCall {
-	return &instrumentedCall{
-		error:   scope.Tagged(map[string]string{_resultType: _resultTypeError}).Counter(name),
-		success: scope.Tagged(map[string]string{_resultType: _resultTypeSuccess}).Counter(name),
-		timing:  scope.SubScope(name).Timer(_timingFormat),
+// NewCall returns an instrumented call with the given name
+func NewCall(scope tally.Scope, name string) Call {
+	return &call{
+		error:   scope.Tagged(map[string]string{resultType: resultTypeError}).Counter(name),
+		success: scope.Tagged(map[string]string{resultType: resultTypeSuccess}).Counter(name),
+		timing:  scope.SubScope(name).Timer(timingSuffix),
 	}
 }
 
-type instrumentedCall struct {
-	scope   Scope
-	success Counter
-	error   Counter
-	timing  Timer
+type call struct {
+	scope   tally.Scope
+	success tally.Counter
+	error   tally.Counter
+	timing  tally.Timer
 }
 
-// Exec executes the given block of code, and records whether it succeeded or
-// failed, and the amount of time that it took
-func (c *instrumentedCall) Exec(f ExecFn) error {
+func (c *call) Exec(f ExecFn) error {
 	sw := c.timing.Start()
 
 	if err := f(); err != nil {
