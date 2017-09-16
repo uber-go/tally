@@ -22,6 +22,11 @@ By default it buffers counters, gauges and histograms at a specified interval bu
 	 - `github.com/uber-go/tally/prometheus`: Report prometheus metrics, timers by default are made summaries with an option to make them histograms instead.
 	 - `github.com/uber-go/tally/statsd`: Report statsd metrics, no support for tags.
 
+### Basics
+
+ - Scopes created with tally provide race-safe registration and use of all metric types `Counter`, `Gauge`, `Timer`, `Histogram`.
+ - `NewRootScope(...)` returns a `Scope` and `io.Closer`, the second return value is used to stop the scope's goroutine reporting values from the scope to it's reporter.  This is to reduce the footprint of `Scope` from the public API for those implementing it themselves to use in Go packages that take a tally `Scope`.
+
 ### Acquire a Scope ###
 ```go
 reporter = NewMyStatsReporter()  // Implement as you will
@@ -62,11 +67,11 @@ import (
 func newScope() (tally.Scope, io.Closer) {
 	statter, _ := statsd.NewBufferedClient("127.0.0.1:8125",
 		"stats", 100*time.Millisecond, 1440)
-	
+
 	reporter := tallystatsd.NewReporter(statter, tallystatsd.Options{
 		SampleRate: 1.0,
 	})
-	
+
 	scope, closer := tally.NewRootScope(tally.ScopeOptions{
 		Prefix:   "my-service",
 		Tags:     map[string]string{},
