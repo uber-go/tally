@@ -73,7 +73,7 @@ func TestBucketPairsSortsDurationBuckets(t *testing.T) {
 	pairs := BucketPairs(DurationBuckets{0 * time.Second, 2 * time.Second, 1 * time.Second})
 	require.Equal(t, 4, len(pairs))
 
-	assert.Equal(t, time.Duration(math.MinInt64), pairs[0].LowerBoundDuration())
+	assert.Equal(t, time.Duration(0), pairs[0].LowerBoundDuration())
 	assert.Equal(t, 0*time.Second, pairs[0].UpperBoundDuration())
 
 	assert.Equal(t, 0*time.Second, pairs[1].LowerBoundDuration())
