@@ -86,25 +86,6 @@ func TestBucketPairsSortsDurationBuckets(t *testing.T) {
 	assert.Equal(t, time.Duration(math.MaxInt64), pairs[3].UpperBoundDuration())
 }
 
-func TestBucketPairsDurationBucketsDoesntInsertMissingZero(t *testing.T) {
-	initial := 10
-	buckets, err := LinearDurationBuckets(
-		10*time.Millisecond,
-		10*time.Millisecond,
-		initial,
-	)
-	require.NoError(t, err)
-	require.Equal(t, initial, len(buckets))
-
-	pairs := BucketPairs(buckets)
-	assert.Equal(t, initial+1, len(pairs))
-	assert.Equal(t, time.Duration(math.MinInt64), pairs[0].LowerBoundDuration())
-	assert.NotEqual(t, time.Duration(0), pairs[0].UpperBoundDuration())
-
-	assert.Equal(t, 100*time.Millisecond, pairs[len(pairs)-1].LowerBoundDuration())
-	assert.Equal(t, time.Duration(math.MaxInt64), pairs[len(pairs)-1].UpperBoundDuration())
-}
-
 func TestMustMakeLinearValueBuckets(t *testing.T) {
 	assert.NotPanics(t, func() {
 		assert.Equal(t, ValueBuckets{
