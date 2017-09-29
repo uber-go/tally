@@ -123,8 +123,6 @@ func (v DurationBuckets) AsDurations() []time.Duration {
 // of buckets describing the lower and upper bounds for
 // each derived bucket.
 func BucketPairs(buckets Buckets) []BucketPair {
-	hasZero := false
-
 	if buckets == nil || buckets.Len() < 1 {
 		return []BucketPair{
 
@@ -137,43 +135,19 @@ func BucketPairs(buckets Buckets) []BucketPair {
 		}
 	}
 
-	if durationBuckets, ok := buckets.(DurationBuckets); ok {
-		// If using duration buckets separating negative times and
-		// positive times is very much desirable as depending on the
-		// reporter will create buckets "-infinity,0" and "0,{first_bucket}"
-		// instead of just "-infinity,{first_bucket}" which for time
-		// durations is not desirable nor pragmatic
-		for _, b := range buckets.AsDurations() {
-			if b == 0 {
-				hasZero = true
-				break
-			}
-		}
-		if !hasZero {
-			buckets = append(DurationBuckets{0}, durationBuckets...)
-		}
-	}
-
 	// Sort before iterating to create pairs
 	sort.Sort(buckets)
 
 	var (
-		asValueBuckets            = buckets.AsValues()
-		asDurationBuckets         = buckets.AsDurations()
-		pairs                     = make([]BucketPair, 0, buckets.Len()+2)
-		lowerBoundDefaultValue    = -math.MaxFloat64
-		lowerBoundDefaultDuration = time.Duration(math.MinInt64)
+		asValueBuckets    = buckets.AsValues()
+		asDurationBuckets = buckets.AsDurations()
+		pairs             = make([]BucketPair, 0, buckets.Len()+2)
 	)
 
-	if hasZero {
-		lowerBoundDefaultValue = float64(0)
-		lowerBoundDefaultDuration = time.Duration(0)
-	}
-
 	pairs = append(pairs, bucketPair{
-		lowerBoundValue:    lowerBoundDefaultValue,
+		lowerBoundValue:    -math.MaxFloat64,
 		upperBoundValue:    asValueBuckets[0],
-		lowerBoundDuration: lowerBoundDefaultDuration,
+		lowerBoundDuration: time.Duration(math.MinInt64),
 		upperBoundDuration: asDurationBuckets[0],
 	})
 

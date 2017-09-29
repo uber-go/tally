@@ -73,7 +73,7 @@ func TestBucketPairsSortsDurationBuckets(t *testing.T) {
 	pairs := BucketPairs(DurationBuckets{0 * time.Second, 2 * time.Second, 1 * time.Second})
 	require.Equal(t, 4, len(pairs))
 
-	assert.Equal(t, time.Duration(0), pairs[0].LowerBoundDuration())
+	assert.Equal(t, time.Duration(math.MinInt64), pairs[0].LowerBoundDuration())
 	assert.Equal(t, 0*time.Second, pairs[0].UpperBoundDuration())
 
 	assert.Equal(t, 0*time.Second, pairs[1].LowerBoundDuration())
@@ -86,7 +86,7 @@ func TestBucketPairsSortsDurationBuckets(t *testing.T) {
 	assert.Equal(t, time.Duration(math.MaxInt64), pairs[3].UpperBoundDuration())
 }
 
-func TestBucketPairsDurationBucketsInsertsMissingZero(t *testing.T) {
+func TestBucketPairsDurationBucketsDoesntInsertMissingZero(t *testing.T) {
 	initial := 10
 	buckets, err := LinearDurationBuckets(
 		10*time.Millisecond,
@@ -97,9 +97,9 @@ func TestBucketPairsDurationBucketsInsertsMissingZero(t *testing.T) {
 	require.Equal(t, initial, len(buckets))
 
 	pairs := BucketPairs(buckets)
-	assert.Equal(t, initial+2, len(pairs))
+	assert.Equal(t, initial+1, len(pairs))
 	assert.Equal(t, time.Duration(math.MinInt64), pairs[0].LowerBoundDuration())
-	assert.Equal(t, time.Duration(0), pairs[0].UpperBoundDuration())
+	assert.NotEqual(t, time.Duration(0), pairs[0].UpperBoundDuration())
 
 	assert.Equal(t, 100*time.Millisecond, pairs[len(pairs)-1].LowerBoundDuration())
 	assert.Equal(t, time.Duration(math.MaxInt64), pairs[len(pairs)-1].UpperBoundDuration())

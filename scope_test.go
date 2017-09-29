@@ -689,7 +689,6 @@ func TestSnapshot(t *testing.T) {
 
 	assert.EqualValues(t, map[float64]int64(nil), histograms["foo.buzz+env=test"].Values())
 	assert.EqualValues(t, map[time.Duration]int64{
-		0:               0,
 		time.Second * 2: 1,
 		time.Second * 4: 0,
 		math.MaxInt64:   0,
