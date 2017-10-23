@@ -25,7 +25,7 @@ import (
 	"net"
 
 	"github.com/apache/thrift/lib/go/thrift"
-	"github.com/uber-go/atomic"
+	"go.uber.org/atomic"
 )
 
 //MaxLength of UDP packet
