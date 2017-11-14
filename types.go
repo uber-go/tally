@@ -114,6 +114,11 @@ func (sw Stopwatch) Stop() {
 	sw.recorder.RecordStopwatch(sw.start)
 }
 
+// IsValid reports whether the StopWatch is valid for use.
+func (sw Stopwatch) IsValid() bool {
+	return sw.recorder != nil
+}
+
 // StopwatchRecorder is a recorder that is called when a stopwatch is
 // stopped with Stop().
 type StopwatchRecorder interface {
