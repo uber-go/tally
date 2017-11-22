@@ -45,157 +45,153 @@ func TestCapabilities(t *testing.T) {
 	assert.True(t, c.Tagging())
 }
 
-func TestDatadog(t *testing.T) {
-	apiKey := "blah"
+func TestGauge(t *testing.T) {
+	ch := make(chan []*metric)
+	defer close(ch)
 
-	t.Run("gauge", func(t *testing.T) {
-		ch := make(chan []*metric)
-		defer close(ch)
+	reporter, err := New("blah", HandlerFunc(newHandler(t, ch)))
+	assert.Nil(t, err)
 
-		reporter, err := New(apiKey, HandlerFunc(newHandler(t, ch)))
-		assert.Nil(t, err)
+	scope, closer := tally.NewRootScope(tally.ScopeOptions{Reporter: reporter}, time.Second)
+	defer closer.Close()
+	scope = scope.Tagged(map[string]string{"hello": "world"})
 
-		scope, closer := tally.NewRootScope(tally.ScopeOptions{Reporter: reporter}, time.Second)
-		defer closer.Close()
-		scope = scope.Tagged(map[string]string{"hello": "world"})
+	// Given
+	name := "sample"
+	value := 1.0
 
-		// Given
-		name := "sample"
-		value := 1.0
+	// When
+	g := scope.Gauge(name)
+	g.Update(value)
 
-		// When
-		g := scope.Gauge(name)
-		g.Update(value)
+	// Then
+	assert.Nil(t, closer.Close())
 
-		// Then
-		assert.Nil(t, closer.Close())
+	metrics := <-ch // wait for content to arrive
 
-		metrics := <-ch // wait for content to arrive
-
-		assert.Len(t, metrics, 1)
-		assertMetric(t, metrics[0], name, typeGauge, value, "hello:world")
-	})
-
-	t.Run("counter", func(t *testing.T) {
-		ch := make(chan []*metric)
-		defer close(ch)
-
-		reporter, err := New(apiKey, HandlerFunc(newHandler(t, ch)))
-		assert.Nil(t, err)
-
-		scope, closer := tally.NewRootScope(tally.ScopeOptions{Reporter: reporter}, time.Second)
-		defer closer.Close()
-		scope = scope.Tagged(map[string]string{"hello": "world"})
-
-		// Given
-		name := "sample"
-		value := int64(2)
-
-		// When
-		g := scope.Counter(name)
-		g.Inc(value)
-
-		// Then
-		assert.Nil(t, closer.Close())
-
-		metrics := <-ch // wait for content to arrive
-
-		assert.Len(t, metrics, 1)
-		assertMetric(t, metrics[0], name, typeCounter, float64(value), "hello:world")
-	})
-
-	t.Run("timer", func(t *testing.T) {
-		ch := make(chan []*metric)
-		defer close(ch)
-
-		reporter, err := New(apiKey, HandlerFunc(newHandler(t, ch)))
-		assert.Nil(t, err)
-
-		scope, closer := tally.NewRootScope(tally.ScopeOptions{Reporter: reporter}, time.Second)
-		defer closer.Close()
-		scope = scope.Tagged(map[string]string{"hello": "world"})
-
-		// Given
-		name := "sample"
-		value := time.Duration(time.Second)
-
-		// When
-		g := scope.Timer(name)
-		g.Record(value)
-
-		// Then
-		assert.Nil(t, closer.Close())
-
-		metrics := <-ch // wait for content to arrive
-
-		assert.Len(t, metrics, 1)
-		assertMetric(t, metrics[0], name, typeTimer, 1, "hello:world")
-	})
-
-	t.Run("histogram value", func(t *testing.T) {
-		ch := make(chan []*metric)
-		defer close(ch)
-
-		reporter, err := New(apiKey, HandlerFunc(newHandler(t, ch)))
-		assert.Nil(t, err)
-
-		scope, closer := tally.NewRootScope(tally.ScopeOptions{Reporter: reporter}, time.Second)
-		defer closer.Close()
-		scope = scope.Tagged(map[string]string{"hello": "world"})
-
-		// Given
-		name := "sample"
-		value := 1.0
-
-		// When
-		g := scope.Histogram(name, tally.ValueBuckets{0, 1.0, 2.0})
-		g.RecordValue(value)
-		g.RecordValue(value)
-
-		// Then
-		assert.Nil(t, closer.Close())
-
-		metrics := <-ch // wait for content to arrive
-
-		assert.Len(t, metrics, 3)
-		assertMetric(t, metrics[0], name+".min", typeGauge, 0, "hello:world")
-		assertMetric(t, metrics[1], name+".max", typeGauge, value, "hello:world")
-		assertMetric(t, metrics[2], name+".count", typeRate, 2, "hello:world")
-	})
-
-	t.Run("histogram duration", func(t *testing.T) {
-		ch := make(chan []*metric)
-		defer close(ch)
-
-		reporter, err := New(apiKey, HandlerFunc(newHandler(t, ch)))
-		assert.Nil(t, err)
-
-		scope, closer := tally.NewRootScope(tally.ScopeOptions{Reporter: reporter}, time.Second)
-		defer closer.Close()
-		scope = scope.Tagged(map[string]string{"hello": "world"})
-
-		// Given
-		name := "sample"
-		value := time.Second
-
-		// When
-		g := scope.Histogram(name, tally.DurationBuckets{0, time.Second, time.Minute})
-		g.RecordDuration(value)
-		g.RecordDuration(value)
-
-		// Then
-		assert.Nil(t, closer.Close())
-
-		metrics := <-ch // wait for content to arrive
-
-		assert.Len(t, metrics, 3)
-		assertMetric(t, metrics[0], name+".min", typeGauge, 0, "hello:world")
-		assertMetric(t, metrics[1], name+".max", typeGauge, 1, "hello:world")
-		assertMetric(t, metrics[2], name+".count", typeRate, 2, "hello:world")
-	})
+	assert.Len(t, metrics, 1)
+	assertMetric(t, metrics[0], name, typeGauge, value, "hello:world")
 }
 
-func TestBufferSize(t *testing.T) {
+func TestCounter(t *testing.T) {
+	ch := make(chan []*metric)
+	defer close(ch)
+
+	reporter, err := New("blah", HandlerFunc(newHandler(t, ch)))
+	assert.Nil(t, err)
+
+	scope, closer := tally.NewRootScope(tally.ScopeOptions{Reporter: reporter}, time.Second)
+	defer closer.Close()
+	scope = scope.Tagged(map[string]string{"hello": "world"})
+
+	// Given
+	name := "sample"
+	value := int64(2)
+
+	// When
+	g := scope.Counter(name)
+	g.Inc(value)
+
+	// Then
+	assert.Nil(t, closer.Close())
+
+	metrics := <-ch // wait for content to arrive
+
+	assert.Len(t, metrics, 1)
+	assertMetric(t, metrics[0], name, typeCounter, float64(value), "hello:world")
+}
+
+func TestTimer(t *testing.T) {
+	ch := make(chan []*metric)
+	defer close(ch)
+
+	reporter, err := New("blah", HandlerFunc(newHandler(t, ch)))
+	assert.Nil(t, err)
+
+	scope, closer := tally.NewRootScope(tally.ScopeOptions{Reporter: reporter}, time.Second)
+	defer closer.Close()
+	scope = scope.Tagged(map[string]string{"hello": "world"})
+
+	// Given
+	name := "sample"
+	value := time.Duration(time.Second)
+
+	// When
+	g := scope.Timer(name)
+	g.Record(value)
+
+	// Then
+	assert.Nil(t, closer.Close())
+
+	metrics := <-ch // wait for content to arrive
+
+	assert.Len(t, metrics, 1)
+	assertMetric(t, metrics[0], name, typeTimer, 1, "hello:world")
+}
+
+func TestHistogramValue(t *testing.T) {
+	ch := make(chan []*metric)
+	defer close(ch)
+
+	reporter, err := New("blah", HandlerFunc(newHandler(t, ch)))
+	assert.Nil(t, err)
+
+	scope, closer := tally.NewRootScope(tally.ScopeOptions{Reporter: reporter}, time.Second)
+	defer closer.Close()
+	scope = scope.Tagged(map[string]string{"hello": "world"})
+
+	// Given
+	name := "sample"
+	value := 1.0
+
+	// When
+	g := scope.Histogram(name, tally.ValueBuckets{0, 1.0, 2.0})
+	g.RecordValue(value)
+	g.RecordValue(value)
+
+	// Then
+	assert.Nil(t, closer.Close())
+
+	metrics := <-ch // wait for content to arrive
+
+	assert.Len(t, metrics, 3)
+	assertMetric(t, metrics[0], name+".min", typeGauge, 0, "hello:world")
+	assertMetric(t, metrics[1], name+".max", typeGauge, value, "hello:world")
+	assertMetric(t, metrics[2], name+".count", typeRate, 2, "hello:world")
+}
+
+func TestHistogramDuration(t *testing.T) {
+	ch := make(chan []*metric)
+	defer close(ch)
+
+	reporter, err := New("blah", HandlerFunc(newHandler(t, ch)))
+	assert.Nil(t, err)
+
+	scope, closer := tally.NewRootScope(tally.ScopeOptions{Reporter: reporter}, time.Second)
+	defer closer.Close()
+	scope = scope.Tagged(map[string]string{"hello": "world"})
+
+	// Given
+	name := "sample"
+	value := time.Second
+
+	// When
+	g := scope.Histogram(name, tally.DurationBuckets{0, time.Second, time.Minute})
+	g.RecordDuration(value)
+	g.RecordDuration(value)
+
+	// Then
+	assert.Nil(t, closer.Close())
+
+	metrics := <-ch // wait for content to arrive
+
+	assert.Len(t, metrics, 3)
+	assertMetric(t, metrics[0], name+".min", typeGauge, 0, "hello:world")
+	assertMetric(t, metrics[1], name+".max", typeGauge, 1, "hello:world")
+	assertMetric(t, metrics[2], name+".count", typeRate, 2, "hello:world")
+}
+
+func TestBufferSizeForcesFlush(t *testing.T) {
 	ch := make(chan []*metric)
 	defer close(ch)
 
@@ -215,19 +211,17 @@ func TestBufferSize(t *testing.T) {
 	assertMetric(t, metrics[0], "name", typeTimer, 1.0)
 }
 
-func TestOptions(t *testing.T) {
-	t.Run("BufferSize", func(t *testing.T) {
-		bufSize := 123
-		opts := options{}
-		BufferSize(bufSize)(&opts)
-		assert.EqualValues(t, bufSize, opts.bufferSize)
-	})
+func TestBufferSize(t *testing.T) {
+	bufSize := 123
+	opts := options{}
+	BufferSize(bufSize)(&opts)
+	assert.EqualValues(t, bufSize, opts.bufferSize)
+}
 
-	t.Run("Output", func(t *testing.T) {
-		opts := options{}
-		Debug(os.Stdout)(&opts)
-		assert.EqualValues(t, os.Stdout, opts.writer)
-	})
+func TestOutput(t *testing.T) {
+	opts := options{}
+	Debug(os.Stdout)(&opts)
+	assert.EqualValues(t, os.Stdout, opts.writer)
 }
 
 func assertMetric(t *testing.T, m *metric, name, metricType string, value float64, tags ...string) {
