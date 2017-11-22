@@ -16,6 +16,8 @@ import (
 )
 
 const (
+	// DefaultBufferSize contains the number of metrics the datadog reporter
+	// will capture before forcing a flush
 	DefaultBufferSize = 512
 )
 
