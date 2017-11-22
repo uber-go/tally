@@ -1,10 +1,10 @@
 package datadog
 
 import (
+	"bytes"
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -24,15 +24,19 @@ func newHandler(t *testing.T, ch chan []*metric) func(req *http.Request) (*http.
 		assert.Nil(t, json.Unmarshal(data, &s))
 		ch <- s.Metrics
 
-		w := httptest.NewRecorder()
-		w.WriteHeader(http.StatusOK)
-		return w.Result(), nil
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       ioutil.NopCloser(bytes.NewReader(nil)),
+		}, nil
 	}
 }
 
 func TestCapabilities(t *testing.T) {
 	reporter, err := New("blah", HandlerFunc(func(req *http.Request) (*http.Response, error) {
-		return httptest.NewRecorder().Result(), nil
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       ioutil.NopCloser(bytes.NewReader(nil)),
+		}, nil
 	}))
 	assert.Nil(t, err)
 

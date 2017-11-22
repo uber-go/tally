@@ -82,7 +82,7 @@ func (r *Reporter) Capabilities() tally.Capabilities {
 
 // post encoded metrics to datadog
 func (r *Reporter) post(data []byte) error {
-	req, err := http.NewRequest(http.MethodPost, r.endpoint, bytes.NewReader(data))
+	req, err := http.NewRequest("POST", r.endpoint, bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
