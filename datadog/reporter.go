@@ -2,7 +2,6 @@ package datadog
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -57,9 +56,6 @@ type series struct {
 }
 
 type Reporter struct {
-	ctx         context.Context
-	cancel      func()
-	done        chan struct{}
 	metrics     []*metric
 	bufSize     int
 	offset      int

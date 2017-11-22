@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tj/assert"
+	"github.com/stretchr/testify/assert"
 	"github.com/uber-go/tally"
 )
 
