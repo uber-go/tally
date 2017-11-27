@@ -136,7 +136,9 @@ func BucketPairs(buckets Buckets) []BucketPair {
 	}
 
 	// Sort before iterating to create pairs
-	sort.Sort(buckets)
+	if !sort.IsSorted(buckets) {
+		sort.Sort(buckets)
+	}
 
 	var (
 		asValueBuckets    = buckets.AsValues()
