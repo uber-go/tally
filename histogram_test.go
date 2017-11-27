@@ -165,3 +165,17 @@ func TestMustMakeExponentialDurationBucketsPanicsOnBadFactor(t *testing.T) {
 		MustMakeExponentialDurationBuckets(2*time.Second, 1, 2)
 	})
 }
+
+func TestBucketPairsNoRaceWhenSorted(t *testing.T) {
+	buckets := DurationBuckets{}
+	for i := 0; i < 99; i++ {
+		buckets = append(buckets, time.Duration(i) * time.Second)
+	}
+	newPair := func() {
+		pairs := BucketPairs(buckets)
+		require.Equal(t, 100, len(pairs))
+	}
+	for i := 0; i < 10; i++ {
+		go newPair()
+	}
+}
