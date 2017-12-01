@@ -179,3 +179,17 @@ func TestBucketPairsNoRaceWhenSorted(t *testing.T) {
 		go newPair()
 	}
 }
+
+func TestBucketPairsNoRaceWhenUnsorted(t *testing.T) {
+	buckets := DurationBuckets{}
+	for i := 100; i > 1; i-- {
+		buckets = append(buckets, time.Duration(i) * time.Second)
+	}
+	newPair := func() {
+		pairs := BucketPairs(buckets)
+		require.Equal(t, 100, len(pairs))
+	}
+	for i := 0; i < 10; i++ {
+		go newPair()
+	}
+}
