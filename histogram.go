@@ -135,12 +135,9 @@ func BucketPairs(buckets Buckets) []BucketPair {
 		}
 	}
 
-	// Sort before iterating to create pairs
-	sort.Sort(buckets)
-
 	var (
-		asValueBuckets    = buckets.AsValues()
-		asDurationBuckets = buckets.AsDurations()
+		asValueBuckets    = copyAndSortValues(buckets.AsValues())
+		asDurationBuckets = copyAndSortDurations(buckets.AsDurations())
 		pairs             = make([]BucketPair, 0, buckets.Len()+2)
 	)
 
@@ -173,6 +170,24 @@ func BucketPairs(buckets Buckets) []BucketPair {
 	})
 
 	return pairs
+}
+
+func copyAndSortValues(values []float64) []float64 {
+	valuesCopy := make([]float64, len(values))
+	for i := range values {
+		valuesCopy[i] = values[i]
+	}
+	sort.Sort(ValueBuckets(valuesCopy))
+	return valuesCopy
+}
+
+func copyAndSortDurations(durations []time.Duration) []time.Duration {
+	durationsCopy := make([]time.Duration, len(durations))
+	for i := range durations {
+		durationsCopy[i] = durations[i]
+	}
+	sort.Sort(DurationBuckets(durationsCopy))
+	return durationsCopy
 }
 
 type bucketPair struct {
