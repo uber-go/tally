@@ -169,7 +169,7 @@ func TestMustMakeExponentialDurationBucketsPanicsOnBadFactor(t *testing.T) {
 func TestBucketPairsNoRaceWhenSorted(t *testing.T) {
 	buckets := DurationBuckets{}
 	for i := 0; i < 99; i++ {
-		buckets = append(buckets, time.Duration(i) * time.Second)
+		buckets = append(buckets, time.Duration(i)*time.Second)
 	}
 	newPair := func() {
 		pairs := BucketPairs(buckets)
@@ -183,7 +183,7 @@ func TestBucketPairsNoRaceWhenSorted(t *testing.T) {
 func TestBucketPairsNoRaceWhenUnsorted(t *testing.T) {
 	buckets := DurationBuckets{}
 	for i := 100; i > 1; i-- {
-		buckets = append(buckets, time.Duration(i) * time.Second)
+		buckets = append(buckets, time.Duration(i)*time.Second)
 	}
 	newPair := func() {
 		pairs := BucketPairs(buckets)

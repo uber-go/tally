@@ -9,9 +9,10 @@ LINT_IGNORE = m3/thrift
 # stable release.
 GO_VERSION := $(shell go version | cut -d " " -f 3)
 GO_MINOR_VERSION := $(word 2,$(subst ., ,$(GO_VERSION)))
-LINTABLE_MINOR_VERSIONS := 6 7
-ifneq ($(filter $(LINTABLE_MINOR_VERSIONS),$(GO_MINOR_VERSION)),)
+UNLINTABLE_MINOR_VERSIONS := 5
 SHOULD_LINT := true
+ifneq ($(filter $(UNLINTABLE_MINOR_VERSIONS),$(GO_MINOR_VERSION)),)
+SHOULD_LINT = false
 endif
 
 
