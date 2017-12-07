@@ -350,9 +350,10 @@ func TestReporterHistogram(t *testing.T) {
 }
 
 func TestBatchSizes(t *testing.T) {
-	server := newSimpleServer(t)
-	go server.serve()
-	defer server.close()
+	var wg sync.WaitGroup
+	server := newFakeM3Server(t, &wg, false, Compact)
+	go server.Serve()
+	defer server.Close()
 
 	commonTags := map[string]string{
 		"env":    "test",
@@ -360,7 +361,7 @@ func TestBatchSizes(t *testing.T) {
 	}
 	maxPacketSize := int32(1440)
 	r, err := NewReporter(Options{
-		HostPorts:          []string{server.addr()},
+		HostPorts:          []string{server.Addr},
 		Service:            "test-service",
 		CommonTags:         commonTags,
 		MaxQueueSize:       10000,
@@ -383,6 +384,8 @@ func TestBatchSizes(t *testing.T) {
 			}
 		)
 		for atomic.LoadUint32(&stop) == 0 {
+			wg.Add(1)
+
 			metTypeRand := rand.Intn(9)
 			name := "size.test.metric.name" + strconv.Itoa(rand.Intn(50))
 
@@ -409,12 +412,12 @@ func TestBatchSizes(t *testing.T) {
 		r.Close()
 	}()
 
-	for len(server.getPackets()) < 100 {
+	for len(server.Packets()) < 100 {
 		time.Sleep(shortInterval)
 	}
 
 	atomic.StoreUint32(&stop, 1)
-	for _, packet := range server.getPackets() {
+	for _, packet := range server.Packets() {
 		require.True(t, len(packet) < int(maxPacketSize))
 	}
 }
@@ -494,61 +497,6 @@ func TestReporterHasReportingAndTaggingCapability(t *testing.T) {
 	assert.True(t, r.Capabilities().Tagging())
 }
 
-type simpleServer struct {
-	conn    *net.UDPConn
-	t       *testing.T
-	packets [][]byte
-	sync.Mutex
-	closed int32
-}
-
-func newSimpleServer(t *testing.T) *simpleServer {
-	addr, err := net.ResolveUDPAddr("udp", ":0")
-	require.NoError(t, err)
-
-	conn, err := net.ListenUDP(addr.Network(), addr)
-	require.NoError(t, err)
-
-	return &simpleServer{conn: conn, t: t}
-}
-
-func (s *simpleServer) serve() {
-	readBuf := make([]byte, 64000)
-	for atomic.LoadInt32(&s.closed) == 0 {
-		n, err := s.conn.Read(readBuf)
-		if err != nil {
-			if atomic.LoadInt32(&s.closed) == 0 {
-				s.t.Errorf("FakeM3Server failed to Read: %v", err)
-			}
-			return
-		}
-		s.Lock()
-		s.packets = append(s.packets, readBuf[0:n])
-		s.Unlock()
-		readBuf = make([]byte, 64000)
-	}
-}
-
-func (s *simpleServer) getPackets() [][]byte {
-	s.Lock()
-	defer s.Unlock()
-	copy := make([][]byte, len(s.packets))
-	for i, packet := range s.packets {
-		copy[i] = packet
-	}
-
-	return copy
-}
-
-func (s *simpleServer) close() error {
-	atomic.AddInt32(&s.closed, 1)
-	return s.conn.Close()
-}
-
-func (s *simpleServer) addr() string {
-	return s.conn.LocalAddr().String()
-}
-
 type fakeM3Server struct {
 	t         *testing.T
 	Service   *fakeM3Service
@@ -557,6 +505,12 @@ type fakeM3Server struct {
 	processor thrift.TProcessor
 	conn      *net.UDPConn
 	closed    int32
+	packets   fakeM3ServerPackets
+}
+
+type fakeM3ServerPackets struct {
+	sync.RWMutex
+	values [][]byte
 }
 
 func newFakeM3Server(t *testing.T, wg *sync.WaitGroup, countBatches bool, protocol Protocol) *fakeM3Server {
@@ -585,6 +539,11 @@ func (f *fakeM3Server) Serve() {
 			}
 			return
 		}
+
+		f.packets.Lock()
+		f.packets.values = append(f.packets.values, readBuf[0:n])
+		f.packets.Unlock()
+
 		trans, _ := customtransport.NewTBufferedReadTransport(bytes.NewBuffer(readBuf[0:n]))
 		var proto thrift.TProtocol
 		if f.protocol == Compact {
@@ -599,6 +558,18 @@ func (f *fakeM3Server) Serve() {
 func (f *fakeM3Server) Close() error {
 	atomic.AddInt32(&f.closed, 1)
 	return f.conn.Close()
+}
+
+func (f *fakeM3Server) Packets() [][]byte {
+	f.packets.Lock()
+	defer f.packets.Unlock()
+
+	copy := make([][]byte, len(f.packets.values))
+	for i, packet := range f.packets.values {
+		copy[i] = packet
+	}
+
+	return copy
 }
 
 func newFakeM3Service(wg *sync.WaitGroup, countBatches bool) *fakeM3Service {
