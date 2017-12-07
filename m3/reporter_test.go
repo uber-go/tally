@@ -350,8 +350,7 @@ func TestReporterHistogram(t *testing.T) {
 }
 
 func TestBatchSizes(t *testing.T) {
-	var wg sync.WaitGroup
-	server := newFakeM3Server(t, &wg, false, Compact)
+	server := newFakeM3Server(t, nil, false, Compact)
 	go server.Serve()
 	defer server.Close()
 
@@ -384,8 +383,6 @@ func TestBatchSizes(t *testing.T) {
 			}
 		)
 		for atomic.LoadUint32(&stop) == 0 {
-			wg.Add(1)
-
 			metTypeRand := rand.Intn(9)
 			name := "size.test.metric.name" + strconv.Itoa(rand.Intn(50))
 
@@ -599,13 +596,13 @@ func (m *fakeM3Service) getMetrics() []*m3thrift.Metric {
 func (m *fakeM3Service) EmitMetricBatch(batch *m3thrift.MetricBatch) (err error) {
 	m.lock.Lock()
 	m.batches = append(m.batches, batch)
-	if m.countBatches {
+	if m.wg != nil && m.countBatches {
 		m.wg.Done()
 	}
 
 	for _, metric := range batch.Metrics {
 		m.metrics = append(m.metrics, metric)
-		if !m.countBatches {
+		if m.wg != nil && !m.countBatches {
 			m.wg.Done()
 		}
 	}
