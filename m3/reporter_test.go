@@ -482,6 +482,68 @@ func TestIncludeHost(t *testing.T) {
 	assert.True(t, tagIncluded(withHost.commonTags, "host"))
 }
 
+func TestReporterResetTagsAfterReturnToPool(t *testing.T) {
+	var wg sync.WaitGroup
+	server := newFakeM3Server(t, &wg, false, Compact)
+	go server.Serve()
+	defer server.Close()
+
+	r, err := NewReporter(Options{
+		HostPorts:          []string{server.Addr},
+		Service:            "test-service",
+		CommonTags:         defaultCommonTags,
+		MaxQueueSize:       queueSize,
+		MaxPacketSizeBytes: maxPacketSize,
+	})
+	require.NoError(t, err)
+	defer r.Close()
+
+	// Intentionally allocate and leak counters to exhaust metric pool.
+	for i := 0; i < metricPoolSize-2; i++ {
+		r.AllocateCounter("placeholder", nil)
+	}
+
+	// Allocate two counter so there is only one more slot in the pool.
+	tags := map[string]string{"tagName1": "tagValue1"}
+	c1 := r.AllocateCounter("counterWithTags", tags)
+
+	// Report the counter with tags to take the last slot.
+	wg.Add(1)
+	c1.ReportCount(1)
+	r.Flush()
+	wg.Wait()
+
+	// Empty flush to ensure the copied metric is released.
+	r.Flush()
+	for {
+		rep := r.(*reporter)
+		if len(rep.metCh) == 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Allocate a new counter with no tags reusing the metric
+	// just released to the pool.
+	c2 := r.AllocateCounter("counterWithNoTags", nil)
+
+	// Report the counter with no tags.
+	wg.Add(1)
+	c2.ReportCount(1)
+	r.Flush()
+	wg.Wait()
+
+	// Verify that first reported counter has tags and the second
+	// reported counter has no tags.
+	metrics := server.Service.getMetrics()
+	require.Equal(t, 2, len(metrics))
+	require.Equal(t, len(tags), len(metrics[0].GetTags()))
+	for tag := range metrics[0].GetTags() {
+		require.Equal(t, tags[tag.GetTagName()], tag.GetTagValue())
+	}
+	require.Equal(t, 0, len(metrics[1].GetTags()))
+}
+
 func TestReporterHasReportingAndTaggingCapability(t *testing.T) {
 	r, err := NewReporter(Options{
 		HostPorts:  []string{"127.0.0.1:9052"},

@@ -207,6 +207,8 @@ func (r *resourcePool) releaseMetric(metric *m3thrift.Metric) {
 }
 
 func (r *resourcePool) releaseShallowMetric(metric *m3thrift.Metric) {
+	metric.Name = ""
+	metric.Tags = nil
 	metric.Timestamp = nil
 
 	metVal := metric.MetricValue

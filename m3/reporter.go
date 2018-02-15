@@ -367,6 +367,8 @@ func (r *reporter) newMetric(
 			metTags[metTag] = true
 		}
 		m.Tags = metTags
+	} else {
+		m.Tags = nil
 	}
 	m.Timestamp = &maxInt64
 
