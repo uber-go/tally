@@ -67,3 +67,45 @@ func TestCallFail(t *testing.T) {
 
 	assert.Equal(t, int64(1), counters["test_call+result_type=error"].Value())
 }
+
+func TestCallSuccessfulFail(t *testing.T) {
+	s := tally.NewTestScope("", nil)
+	filter := func(_ error) bool { return true }
+
+	expected := errors.New("an error")
+	err := NewCall(s, "test_call").ExecWithFilter(func() error {
+		return expected
+	}, filter)
+	assert.NotNil(t, err)
+	assert.Equal(t, expected, err)
+
+	snapshot := s.Snapshot()
+	counters := snapshot.Counters()
+	timers := snapshot.Timers()
+
+	require.NotNil(t, counters["test_call+result_type=error"])
+	require.NotNil(t, timers["test_call.latency+"])
+
+	assert.Equal(t, int64(1), counters["test_call+result_type=success"].Value())
+}
+
+func TestCallFailFail(t *testing.T) {
+	s := tally.NewTestScope("", nil)
+	filter := func(_ error) bool { return false }
+
+	expected := errors.New("an error")
+	err := NewCall(s, "test_call").ExecWithFilter(func() error {
+		return expected
+	}, filter)
+	assert.NotNil(t, err)
+	assert.Equal(t, expected, err)
+
+	snapshot := s.Snapshot()
+	counters := snapshot.Counters()
+	timers := snapshot.Timers()
+
+	require.NotNil(t, counters["test_call+result_type=error"])
+	require.NotNil(t, timers["test_call.latency+"])
+
+	assert.Equal(t, int64(1), counters["test_call+result_type=error"].Value())
+}

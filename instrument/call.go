@@ -65,3 +65,18 @@ func (c *call) Exec(f ExecFn) error {
 
 	return nil
 }
+
+func (c *call) ExecWithFilter(f ExecFn, success SuccessFilter) error {
+	sw := c.timing.Start()
+	err := f()
+
+	if err := f(); err != nil && !success(err) {
+		c.error.Inc(1.0)
+		return err
+	}
+
+	sw.Stop()
+	c.success.Inc(1.0)
+
+	return err
+}
