@@ -25,7 +25,7 @@ type ExecFn func() error
 
 // FilterFn takes in an error and, if the error does not actually indicate
 // a failure, returns true. If the error does actually indicate failure, the
-// function returns false.
+// function returns false. Can be used with the ExecWithFilter function.
 type FilterFn func(err error) bool
 
 // Call allows tracking the successes, errors, and timing of functions.
@@ -33,11 +33,4 @@ type Call interface {
 	// Exec executes a function and records whether it succeeded or
 	// failed, and the amount of time that it took.
 	Exec(f ExecFn) error
-
-	// Exec executes a function and records whether it succeeded or
-	// failed, and the amount of time that it took. ExecWithFilter
-	// will always return the error associted with the called function.
-	// However, it will decide whether or not classify that error as
-	// a success or failure based on the provided SuccessFilter.
-	ExecWithFilter(f ExecFn, filter FilterFn) error
 }

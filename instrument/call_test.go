@@ -73,7 +73,8 @@ func TestCallSuccessfulFail(t *testing.T) {
 	filter := func(_ error) bool { return true }
 
 	expected := errors.New("an error")
-	err := NewCall(s, "test_call").ExecWithFilter(func() error {
+	call := NewCall(s, "test_call")
+	err := ExecWithFilter(call, func() error {
 		return expected
 	}, filter)
 	assert.NotNil(t, err)
@@ -94,7 +95,8 @@ func TestCallFailFail(t *testing.T) {
 	filter := func(_ error) bool { return false }
 
 	expected := errors.New("an error")
-	err := NewCall(s, "test_call").ExecWithFilter(func() error {
+	call := NewCall(s, "test_call")
+	err := ExecWithFilter(call, func() error {
 		return expected
 	}, filter)
 	assert.NotNil(t, err)
