@@ -6,7 +6,6 @@ import:
   subpackages:
   - statsd
 - package: github.com/facebookgo/clock
-  version: 600d898af40aa09a7a93ecb9265d87b0504b6f03
 - package: github.com/prometheus/client_golang
   version: ^0.8.0
   subpackages:
