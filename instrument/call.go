@@ -39,7 +39,7 @@ const (
 // {{name}}.latency
 func NewCall(scope tally.Scope, name string) Call {
 	return &call{
-		error:   scope.Tagged(map[string]string{resultType: resultTypeError}).Counter(name),
+		err:     scope.Tagged(map[string]string{resultType: resultTypeError}).Counter(name),
 		success: scope.Tagged(map[string]string{resultType: resultTypeSuccess}).Counter(name),
 		timing:  scope.SubScope(name).Timer(timingSuffix),
 	}
@@ -48,20 +48,20 @@ func NewCall(scope tally.Scope, name string) Call {
 type call struct {
 	scope   tally.Scope
 	success tally.Counter
-	error   tally.Counter
+	err     tally.Counter
 	timing  tally.Timer
 }
 
 func (c *call) Exec(f ExecFn) error {
 	sw := c.timing.Start()
+	err := f()
+	sw.Stop()
 
-	if err := f(); err != nil {
-		c.error.Inc(1.0)
+	if err != nil {
+		c.err.Inc(1)
 		return err
 	}
 
-	sw.Stop()
-	c.success.Inc(1.0)
-
+	c.success.Inc(1)
 	return nil
 }

@@ -23,6 +23,7 @@ package instrument
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/uber-go/tally"
 
@@ -33,7 +34,9 @@ import (
 func TestCallSuccess(t *testing.T) {
 	s := tally.NewTestScope("", nil)
 
+	sleepFor := time.Microsecond
 	err := NewCall(s, "test_call").Exec(func() error {
+		time.Sleep(time.Microsecond)
 		return nil
 	})
 	assert.Nil(t, err)
@@ -46,13 +49,17 @@ func TestCallSuccess(t *testing.T) {
 	require.NotNil(t, timers["test_call.latency+"])
 
 	assert.Equal(t, int64(1), counters["test_call+result_type=success"].Value())
+	require.Equal(t, 1, len(timers["test_call.latency+"].Values()))
+	assert.True(t, timers["test_call.latency+"].Values()[0] >= sleepFor)
 }
 
 func TestCallFail(t *testing.T) {
 	s := tally.NewTestScope("", nil)
 
+	sleepFor := time.Microsecond
 	expected := errors.New("an error")
 	err := NewCall(s, "test_call").Exec(func() error {
+		time.Sleep(sleepFor)
 		return expected
 	})
 	assert.NotNil(t, err)
@@ -66,4 +73,6 @@ func TestCallFail(t *testing.T) {
 	require.NotNil(t, timers["test_call.latency+"])
 
 	assert.Equal(t, int64(1), counters["test_call+result_type=error"].Value())
+	require.Equal(t, 1, len(timers["test_call.latency+"].Values()))
+	assert.True(t, timers["test_call.latency+"].Values()[0] >= sleepFor)
 }
