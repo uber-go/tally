@@ -25,8 +25,6 @@ import (
 	"io"
 	"sync"
 	"time"
-
-	"github.com/facebookgo/clock"
 )
 
 var (
@@ -35,7 +33,7 @@ var (
 	// DefaultSeparator is the default separator used to join nested scopes
 	DefaultSeparator = "."
 
-	globalClock = clock.New()
+	globalNow = time.Now
 
 	defaultScopeBuckets = DurationBuckets{
 		0 * time.Millisecond,

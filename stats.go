@@ -181,11 +181,11 @@ func (t *timer) Record(interval time.Duration) {
 }
 
 func (t *timer) Start() Stopwatch {
-	return NewStopwatch(globalClock.Now(), t)
+	return NewStopwatch(globalNow(), t)
 }
 
 func (t *timer) RecordStopwatch(stopwatchStart time.Time) {
-	d := globalClock.Now().Sub(stopwatchStart)
+	d := globalNow().Sub(stopwatchStart)
 	t.Record(d)
 }
 
@@ -367,11 +367,11 @@ func (h *histogram) RecordDuration(value time.Duration) {
 }
 
 func (h *histogram) Start() Stopwatch {
-	return NewStopwatch(globalClock.Now(), h)
+	return NewStopwatch(globalNow(), h)
 }
 
 func (h *histogram) RecordStopwatch(stopwatchStart time.Time) {
-	d := globalClock.Now().Sub(stopwatchStart)
+	d := globalNow().Sub(stopwatchStart)
 	h.RecordDuration(d)
 }
 
