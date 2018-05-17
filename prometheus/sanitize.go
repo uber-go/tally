@@ -29,15 +29,15 @@ var (
 	DefaultSanitizerOpts = tally.SanitizeOptions{
 		NameCharacters: tally.ValidCharacters{
 			Ranges:     tally.AlphanumericRange,
-			Characters: tally.UnderscoreDashCharacters,
+			Characters: tally.UnderscoreCharacters,
 		},
 		KeyCharacters: tally.ValidCharacters{
 			Ranges:     tally.AlphanumericRange,
-			Characters: tally.UnderscoreDashCharacters,
+			Characters: tally.UnderscoreCharacters,
 		},
 		ValueCharacters: tally.ValidCharacters{
 			Ranges:     tally.AlphanumericRange,
-			Characters: tally.UnderscoreDashCharacters,
+			Characters: tally.UnderscoreCharacters,
 		},
 		ReplacementCharacter: tally.DefaultReplacementCharacter,
 	}

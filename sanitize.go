@@ -35,6 +35,10 @@ var (
 		{rune('A'), rune('Z')},
 		{rune('0'), rune('9')}}
 
+	// UnderscoreCharacters is just an underscore character.
+	UnderscoreCharacters = []rune{
+		'_'}
+
 	// UnderscoreDashCharacters is a slice of underscore, and
 	// dash characters.
 	UnderscoreDashCharacters = []rune{

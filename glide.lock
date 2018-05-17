@@ -1,5 +1,5 @@
-hash: 63daf51f6fff142e7b13003e7fcc5972abd4ddcb67bfa6046ae6d95e7f7b7e64
-updated: 2018-05-16T23:30:35.54451-04:00
+hash: d0097dab7d41d8ef6443539484d3e6a7ade8e172da717ca6f2b6b0de0419e5d3
+updated: 2018-05-17T10:52:52.541763-04:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -23,7 +23,7 @@ imports:
   - prometheus
   - prometheus/promhttp
 - name: github.com/m3db/prometheus_client_model
-  version: fa8ad6fec33561be4280a8f0514318c79d7f6cb6
+  version: 8b2299a4bf7d7fc10835527021716d4b4a6e8700
   subpackages:
   - go
 - name: github.com/m3db/prometheus_common
