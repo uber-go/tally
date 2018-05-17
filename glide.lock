@@ -1,5 +1,5 @@
-hash: a15f875f47ee23f61d18d37812ef104f915f724fecd41178e8c4219973d63713
-updated: 2017-10-23T15:30:26.971475424-07:00
+hash: 63daf51f6fff142e7b13003e7fcc5972abd4ddcb67bfa6046ae6d95e7f7b7e64
+updated: 2018-05-16T23:30:35.54451-04:00
 imports:
 - name: github.com/apache/thrift
   version: 9549b25c77587b29be4e0b5c258221a4ed85d37a
@@ -17,29 +17,27 @@ imports:
   version: 130e6b02ab059e7b717a096f397c5b60111cae74
   subpackages:
   - proto
-- name: github.com/matttproud/golang_protobuf_extensions
-  version: c12348ce28de40eed0136aa2b644d0ee0650e56c
-  subpackages:
-  - pbutil
-- name: github.com/prometheus/client_golang
-  version: c5b7fccd204277076155f10851dad72b76a49317
+- name: github.com/m3db/prometheus_client_golang
+  version: 8ae269d24972b8695572fa6b2e3718b5ea82d6b4
   subpackages:
   - prometheus
   - prometheus/promhttp
-- name: github.com/prometheus/client_model
+- name: github.com/m3db/prometheus_client_model
   version: fa8ad6fec33561be4280a8f0514318c79d7f6cb6
   subpackages:
   - go
-- name: github.com/prometheus/common
-  version: 6d76b79f239843a04e8ad8dfd8fcadfa3920236f
+- name: github.com/m3db/prometheus_common
+  version: 25aaa3dff79bb48116615ebe1dea6a494b74ce77
   subpackages:
   - expfmt
   - internal/bitbucket.org/ww/goautoneg
   - model
-- name: github.com/prometheus/procfs
-  version: e645f4e5aaa8506fc71d6edbc5c4ff02c04c46f2
+- name: github.com/m3db/prometheus_procfs
+  version: 1878d9fbb537119d24b21ca07effd591627cd160
+- name: github.com/matttproud/golang_protobuf_extensions
+  version: c12348ce28de40eed0136aa2b644d0ee0650e56c
   subpackages:
-  - xfs
+  - pbutil
 - name: go.uber.org/atomic
   version: 4e336646b2ef9fc6e47be8e21594178f98e5ebcf
 - name: gopkg.in/validator.v2
