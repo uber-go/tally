@@ -21,7 +21,10 @@
 package prometheus
 
 import (
+	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -45,6 +48,11 @@ type Configuration struct {
 	// DefaultSummaryObjectives if specified will set the default summary
 	// objectives to be used by the reporter.
 	DefaultSummaryObjectives []SummaryObjective `yaml:"defaultSummaryObjectives"`
+
+	// OnError specifies what to do when an error either with listening
+	// on the specified listen address or registering a metric with the
+	// Prometheus. By default the registerer will panic.
+	OnError string `yaml:"onError"`
 }
 
 // HistogramObjective is a Prometheus histogram bucket.
@@ -62,16 +70,34 @@ type SummaryObjective struct {
 
 // ConfigurationOptions allows some error callbacks to be registered.
 type ConfigurationOptions struct {
-	OnError         func(e error)
-	onRegisterError func(e error)
+	OnError func(e error)
 }
 
 // NewReporter creates a new M3 reporter from this configuration.
 func (c Configuration) NewReporter(
 	configOpts ConfigurationOptions,
 ) (Reporter, error) {
+	if configOpts.OnError == nil {
+		switch c.OnError {
+		case "stderr":
+			configOpts.OnError = func(err error) {
+				fmt.Fprintf(os.Stderr, "tally prometheus reporter error: %v\n", err)
+			}
+		case "log":
+			configOpts.OnError = func(err error) {
+				log.Printf("tally prometheus reporter error: %v\n", err)
+			}
+		case "none":
+			configOpts.OnError = func(err error) {}
+		default:
+			configOpts.OnError = func(err error) {
+				panic(err)
+			}
+		}
+	}
+
 	var opts Options
-	opts.OnRegisterError = configOpts.onRegisterError
+	opts.OnRegisterError = configOpts.OnError
 
 	switch c.TimerType {
 	case "summary":
@@ -110,9 +136,7 @@ func (c Configuration) NewReporter(
 		mux.Handle(path, reporter.HTTPHandler())
 		go func() {
 			if err := http.ListenAndServe(addr, mux); err != nil {
-				if configOpts.OnError != nil {
-					configOpts.OnError(err)
-				}
+				configOpts.OnError(err)
 			}
 		}()
 	}
