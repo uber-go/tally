@@ -18,18 +18,18 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package m3
+package prometheus
 
 import (
 	"github.com/uber-go/tally"
 )
 
 var (
-	// DefaultSanitizerOpts are the options for the default M3 sanitizer.
+	// DefaultSanitizerOpts are the options for the default Prometheus sanitizer.
 	DefaultSanitizerOpts = tally.SanitizeOptions{
 		NameCharacters: tally.ValidCharacters{
 			Ranges:     tally.AlphanumericRange,
-			Characters: tally.UnderscoreDashDotCharacters,
+			Characters: tally.UnderscoreDashCharacters,
 		},
 		KeyCharacters: tally.ValidCharacters{
 			Ranges:     tally.AlphanumericRange,
@@ -37,7 +37,7 @@ var (
 		},
 		ValueCharacters: tally.ValidCharacters{
 			Ranges:     tally.AlphanumericRange,
-			Characters: tally.UnderscoreDashDotCharacters,
+			Characters: tally.UnderscoreDashCharacters,
 		},
 		ReplacementCharacter: tally.DefaultReplacementCharacter,
 	}

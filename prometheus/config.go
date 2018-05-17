@@ -99,7 +99,7 @@ func (c Configuration) NewReporter(
 	reporter := NewReporter(opts)
 
 	path := "/metrics"
-	if handlerPath := strings.TrimSpace(c.HandlerPath); handlerPath == "" {
+	if handlerPath := strings.TrimSpace(c.HandlerPath); handlerPath != "" {
 		path = handlerPath
 	}
 
