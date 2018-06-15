@@ -143,6 +143,7 @@ type metricID string
 type reporter struct {
 	sync.RWMutex
 	registerer      prom.Registerer
+	gatherer        prom.Gatherer
 	timerType       TimerType
 	objectives      map[float64]float64
 	buckets         []float64
@@ -224,7 +225,7 @@ func (m noopMetric) DurationBucket(lower, upper time.Duration) tally.CachedHisto
 }
 
 func (r *reporter) HTTPHandler() http.Handler {
-	return promhttp.Handler()
+	return promhttp.HandlerFor(r.gatherer, promhttp.HandlerOpts{})
 }
 
 // TimerType describes a type of timer
@@ -243,6 +244,10 @@ type Options struct {
 	// Registerer is the prometheus registerer to register
 	// metrics with. Use nil to specify the default registerer.
 	Registerer prom.Registerer
+
+	// Gatherer is the prometheus gatherer to gather
+	// metrics with. Use nil to specify the default gatherer.
+	Gatherer prom.Gatherer
 
 	// DefaultTimerType is the default type timer type to create
 	// when using timers. It's default value is a summary timer type.
@@ -269,6 +274,9 @@ func NewReporter(opts Options) Reporter {
 	if opts.Registerer == nil {
 		opts.Registerer = prom.DefaultRegisterer
 	}
+	if opts.Gatherer == nil {
+		opts.Gatherer = prom.DefaultGatherer
+	}
 	if opts.DefaultHistogramBuckets == nil {
 		opts.DefaultHistogramBuckets = DefaultHistogramBuckets()
 	}
@@ -280,8 +288,10 @@ func NewReporter(opts Options) Reporter {
 			panic(err)
 		}
 	}
+
 	return &reporter{
 		registerer:      opts.Registerer,
+		gatherer:        opts.Gatherer,
 		timerType:       opts.DefaultTimerType,
 		buckets:         opts.DefaultHistogramBuckets,
 		objectives:      opts.DefaultSummaryObjectives,
