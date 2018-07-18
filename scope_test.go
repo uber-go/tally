@@ -528,7 +528,8 @@ func TestSubScope(t *testing.T) {
 	root, closer := NewRootScope(ScopeOptions{Prefix: "foo", Reporter: r}, 0)
 	defer closer.Close()
 
-	s := root.SubScope("mork").(*scope)
+	tags := map[string]string{"foo": "bar"}
+	s := root.Tagged(tags).SubScope("mork").(*scope)
 	r.cg.Add(1)
 	s.Counter("bar").Inc(1)
 	s.Counter("bar").Inc(20)
@@ -543,10 +544,17 @@ func TestSubScope(t *testing.T) {
 	s.report(r)
 	r.WaitAll()
 
+	// Assert prefixed correctly
 	assert.EqualValues(t, 21, r.counters["foo.mork.bar"].val)
 	assert.EqualValues(t, 1, r.gauges["foo.mork.zed"].val)
 	assert.EqualValues(t, time.Millisecond*175, r.timers["foo.mork.blork"].val)
 	assert.EqualValues(t, 1, r.histograms["foo.mork.baz"].valueSamples[50.0])
+
+	// Assert tags inherited
+	assert.Equal(t, tags, r.counters["foo.mork.bar"].tags)
+	assert.Equal(t, tags, r.gauges["foo.mork.zed"].tags)
+	assert.Equal(t, tags, r.timers["foo.mork.blork"].tags)
+	assert.Equal(t, tags, r.histograms["foo.mork.baz"].tags)
 }
 
 func TestTaggedSubScope(t *testing.T) {
