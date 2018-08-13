@@ -120,6 +120,13 @@ func NewTestScope(
 	return newRootScope(ScopeOptions{Prefix: prefix, Tags: tags}, 0)
 }
 
+// NewReportableScope creates a new ReportableScope with a set of options.
+// Must provide either a StatsReporter or a CachedStatsReporter.
+func NewReportableScope(opts ScopeOptions) ReportableScope {
+	s := newRootScope(opts, 0)
+	return s
+}
+
 func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 	sanitizer := NewNoOpSanitizer()
 	if o := opts.SanitizeOptions; o != nil {
@@ -179,6 +186,10 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 	}
 
 	return s
+}
+
+func (s *scope) Report() {
+	s.reportLoopRun()
 }
 
 // report dumps all aggregated stats into the reporter. Should be called automatically by the root scope periodically.

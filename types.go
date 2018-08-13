@@ -59,6 +59,14 @@ type Scope interface {
 	Capabilities() Capabilities
 }
 
+// ReportableScope is a wrapper arround Scope with Report method for manual reportig data.
+type ReportableScope interface {
+	Scope
+
+	// Manual report metrics from scope and subscopes to reporter
+	Report()
+}
+
 // Counter is the interface for emitting counter type metrics.
 type Counter interface {
 	// Inc increments the counter by a delta.
