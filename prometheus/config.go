@@ -38,6 +38,11 @@ type Configuration struct {
 	// handler on the default HTTP serve mux without listening.
 	ListenAddress string `yaml:"listenAddress"`
 
+	// DynamicListenAddress if specified will be used instead of just registering the
+	// handler on the default HTTP serve mux without listening.
+	// Note: if DynamicListenAddress is specified, ListenAddress is ignored.
+	DynamicListenAddress *ListenAddressConfiguration `yaml:"dynamicListenAddress"`
+
 	// TimerType is the default Prometheus type to use for Tally timers.
 	TimerType string `yaml:"timerType"`
 
@@ -129,7 +134,12 @@ func (c Configuration) NewReporter(
 		path = handlerPath
 	}
 
-	if addr := strings.TrimSpace(c.ListenAddress); addr == "" {
+	addr, resolved, err := c.resolveListenAddress()
+	if err != nil {
+		return nil, err
+	}
+
+	if !resolved {
 		http.Handle(path, reporter.HTTPHandler())
 	} else {
 		mux := http.NewServeMux()
@@ -142,4 +152,23 @@ func (c Configuration) NewReporter(
 	}
 
 	return reporter, nil
+}
+
+func (c Configuration) resolveListenAddress() (addr string, resolved bool, err error) {
+	// first try DynamicListenAddress
+	if c.DynamicListenAddress != nil {
+		addr, err := c.DynamicListenAddress.Resolve()
+		if err != nil {
+			return "", false, err
+		}
+		return addr, true, nil
+	}
+
+	// next, try ListenAddress
+	addr = strings.TrimSpace(c.ListenAddress)
+	if addr == "" {
+		return "", false, nil
+	}
+
+	return addr, true, nil
 }
