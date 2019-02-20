@@ -59,16 +59,6 @@ func newTestReporterScope(
 
 	return r, scope, func() {
 		assert.NoError(t, closer.Close())
-
-		// Ensure reporter is closed too
-		var open, readStatus bool
-		select {
-		case _, open = <-r.(*reporter).metCh:
-			readStatus = true
-		default:
-		}
-		assert.True(t, readStatus)
-		assert.False(t, open)
 	}
 }
 
