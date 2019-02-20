@@ -193,6 +193,24 @@ func TestNewReporterErrors(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestReporterRaceCondition checks if therem is race condition between reporter closing
+// and metric reporting, when run with race detector on, this test should pass
+func TestReporterRaceCondition(t *testing.T) {
+	r, err := NewReporter(Options{
+		HostPorts:          []string{"localhost:8888"},
+		Service:            "test-service",
+		CommonTags:         defaultCommonTags,
+		MaxQueueSize:       queueSize,
+		MaxPacketSizeBytes: maxPacketSize,
+	})
+	require.NoError(t, err)
+
+	go func() {
+		r.AllocateTimer("my-timer", nil).ReportTimer(10 * time.Millisecond)
+	}()
+	r.Close()
+}
+
 // TestReporterFinalFlush ensures the Reporter emits the last batch of metrics
 // after close
 func TestReporterFinalFlush(t *testing.T) {
