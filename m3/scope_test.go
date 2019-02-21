@@ -59,6 +59,14 @@ func newTestReporterScope(
 
 	return r, scope, func() {
 		assert.NoError(t, closer.Close())
+
+		// Ensure reporter is closed too
+		r := r.(*reporter)
+		r.status.RLock()
+		closed := r.status.closed
+		r.status.RUnlock()
+
+		assert.True(t, closed)
 	}
 }
 

@@ -72,15 +72,15 @@ func BenchmarkCalulateSize(b *testing.B) {
 
 func BenchmarkTimer(b *testing.B) {
 	r, _ := NewReporter(Options{
-		HostPorts:  []string{"127.0.0.1:9052"},
-		Service:    "test-service",
-		CommonTags: defaultCommonTags,
+		HostPorts:    []string{"127.0.0.1:9052"},
+		Service:      "test-service",
+		CommonTags:   defaultCommonTags,
+		MaxQueueSize: DefaultMaxQueueSize,
 	})
+
 	defer r.Close()
+
 	benchReporter := r.(*reporter)
-	benchReporter.metCh = make(chan sizedMetric, DefaultMaxQueueSize)
-	// Close the met ch to end consume metrics loop
-	defer close(benchReporter.metCh)
 
 	go func() {
 		resourcePool := benchReporter.resourcePool

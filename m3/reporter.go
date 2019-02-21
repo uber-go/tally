@@ -70,7 +70,6 @@ const (
 
 	emitMetricBatchOverhead    = 19
 	minMetricBucketIDTagLength = 4
-	closeSignal                = -1
 )
 
 // Initialize max vars in init function to avoid lint error.
@@ -95,6 +94,7 @@ const (
 var (
 	errNoHostPorts   = errors.New("at least one entry for HostPorts is required")
 	errCommonTagSize = errors.New("common tags serialized size exceeds packet size")
+	errAlreadyClosed = errors.New("reporter already closed")
 )
 
 // Reporter is an M3 reporter.
@@ -120,9 +120,14 @@ type reporter struct {
 	bucketIDTagName string
 	bucketTagName   string
 	bucketValFmt    string
-	closeChan       chan struct{}
 
-	metCh chan sizedMetric
+	status reporterStatus
+	metCh  chan sizedMetric
+}
+
+type reporterStatus struct {
+	sync.RWMutex
+	closed bool
 }
 
 // Options is a set of options for the M3 reporter.
@@ -236,7 +241,6 @@ func NewReporter(opts Options) (Reporter, error) {
 		bucketTagName:   opts.HistogramBucketName,
 		bucketValFmt:    "%." + strconv.Itoa(int(opts.HistogramBucketTagPrecision)) + "f",
 		metCh:           make(chan sizedMetric, opts.MaxQueueSize),
-		closeChan:       make(chan struct{}),
 	}
 
 	r.processors.Add(1)
@@ -431,61 +435,40 @@ func (r *reporter) reportCopyMetric(
 		copy.MetricValue.Timer = t
 	}
 
-	select {
-	case <-r.closeChan:
-		return
-	default:
+	r.status.RLock()
+	if !r.status.closed {
+		select {
+		case r.metCh <- sizedMetric{copy, size}:
+		default:
+		}
 	}
-
-	// NB: It is possible that the reporter is not closed when we
-	// check closeChan but is closed after our check, in this case
-	// the metric is sent to metCh even though the reporter is closed.
-	// The receiver of metCh has stopped consuming from the channel,
-	// so the sending here could have 2 outcomes:
-	// - blocks because the buffered channel if full
-	// - does not block because the buffered channel is not full
-	// Either way because of select the goroutine running this code
-	// path is not blocked.
-	// Sending to metCh after close can only happen in above case.
-	// It is reasonable to assume there will be no senders after close
-	// (e.g. sever shutdown), but even there are senders after close it
-	// will be no-op with the closeChan check above.
-	select {
-	case <-r.closeChan:
-		return
-	case r.metCh <- sizedMetric{copy, size}:
-	default:
-	}
+	r.status.RUnlock()
 }
 
 // Flush sends an empty sizedMetric to signal a flush.
 func (r *reporter) Flush() {
-
-	r.metCh <- sizedMetric{}
+	r.status.RLock()
+	if !r.status.closed {
+		r.metCh <- sizedMetric{}
+	}
+	r.status.RUnlock()
 }
 
 // Close waits for metrics to be flushed before closing the backend.
 func (r *reporter) Close() (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("close error occurred: %v", r)
-		}
-	}()
+	r.status.Lock()
+	if r.status.closed {
+		r.status.Unlock()
+		return errAlreadyClosed
+	}
 
-	close(r.closeChan)
-
-	// NB: Instead of closing metCh (which should be done by senders in principle),
-	// we send a special sizedMetric (similar to Flush) to signal the closing of
-	// reporter, so that the receiver can stop from consuming from the channel.
-	// Since we have the above way to stop the consumer, it is okay we on longer
-	// close the channel. This is arguably the most appropriate way to stop
-	// producing/consuming  for a multi-producer-single-consumer channel.
-	// The channel will be eventually garbage collected if no goroutines
-	// reference it any more, whether it is closed or not.
-	r.metCh <- sizedMetric{size: closeSignal}
+	r.status.closed = true
+	close(r.metCh)
+	r.status.Unlock()
 
 	r.processors.Wait()
-	return
+
+	return nil
 }
 
 func (r *reporter) Capabilities() tally.Capabilities {
@@ -505,9 +488,6 @@ func (r *reporter) process() {
 	bytes := int32(0)
 
 	for smet := range r.metCh {
-		if smet.m == nil && smet.size == closeSignal {
-			break
-		}
 		if smet.m == nil {
 			// Explicit flush requested
 			if len(mets) > 0 {
