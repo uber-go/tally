@@ -1,4 +1,4 @@
-// Copyright (c) 2018 Uber Technologies, Inc.
+// Copyright (c) 2019 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -94,6 +94,7 @@ const (
 var (
 	errNoHostPorts   = errors.New("at least one entry for HostPorts is required")
 	errCommonTagSize = errors.New("common tags serialized size exceeds packet size")
+	errAlreadyClosed = errors.New("reporter already closed")
 )
 
 // Reporter is an M3 reporter.
@@ -119,9 +120,14 @@ type reporter struct {
 	bucketIDTagName string
 	bucketTagName   string
 	bucketValFmt    string
-	closeChan       chan struct{}
 
-	metCh chan sizedMetric
+	status reporterStatus
+	metCh  chan sizedMetric
+}
+
+type reporterStatus struct {
+	sync.RWMutex
+	closed bool
 }
 
 // Options is a set of options for the M3 reporter.
@@ -429,41 +435,40 @@ func (r *reporter) reportCopyMetric(
 		copy.MetricValue.Timer = t
 	}
 
-	// NB(r): This is to avoid sending on a closed channel,
-	// it's faster to actually defer/recover than acquire
-	// a read lock here to ensure we aren't closed: benchmarked
-	// this with BenchmarkTimer in reporter_benchmark_test.go
-	defer func() {
-		recover()
-	}()
-
-	select {
-	case r.metCh <- sizedMetric{copy, size}:
-	default:
+	r.status.RLock()
+	if !r.status.closed {
+		select {
+		case r.metCh <- sizedMetric{copy, size}:
+		default:
+		}
 	}
+	r.status.RUnlock()
 }
 
-// Flush implements tally.CachedStatsReporter.
+// Flush sends an empty sizedMetric to signal a flush.
 func (r *reporter) Flush() {
-	// Avoid send on a closed channel
-	defer func() {
-		recover()
-	}()
-
-	r.metCh <- sizedMetric{}
+	r.status.RLock()
+	if !r.status.closed {
+		r.metCh <- sizedMetric{}
+	}
+	r.status.RUnlock()
 }
 
 // Close waits for metrics to be flushed before closing the backend.
 func (r *reporter) Close() (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("close error occurred: %v", r)
-		}
-	}()
+	r.status.Lock()
+	if r.status.closed {
+		r.status.Unlock()
+		return errAlreadyClosed
+	}
 
+	r.status.closed = true
 	close(r.metCh)
+	r.status.Unlock()
+
 	r.processors.Wait()
-	return
+
+	return nil
 }
 
 func (r *reporter) Capabilities() tally.Capabilities {

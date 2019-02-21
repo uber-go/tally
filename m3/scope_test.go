@@ -1,4 +1,4 @@
-// Copyright (c) 2018 Uber Technologies, Inc.
+// Copyright (c) 2019 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -61,14 +61,12 @@ func newTestReporterScope(
 		assert.NoError(t, closer.Close())
 
 		// Ensure reporter is closed too
-		var open, readStatus bool
-		select {
-		case _, open = <-r.(*reporter).metCh:
-			readStatus = true
-		default:
-		}
-		assert.True(t, readStatus)
-		assert.False(t, open)
+		r := r.(*reporter)
+		r.status.RLock()
+		closed := r.status.closed
+		r.status.RUnlock()
+
+		assert.True(t, closed)
 	}
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2018 Uber Technologies, Inc.
+// Copyright (c) 2019 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -191,6 +191,24 @@ func TestNewReporterErrors(t *testing.T) {
 		Service:   "test-service",
 	})
 	assert.Error(t, err)
+}
+
+// TestReporterRaceCondition checks if therem is race condition between reporter closing
+// and metric reporting, when run with race detector on, this test should pass
+func TestReporterRaceCondition(t *testing.T) {
+	r, err := NewReporter(Options{
+		HostPorts:          []string{"localhost:8888"},
+		Service:            "test-service",
+		CommonTags:         defaultCommonTags,
+		MaxQueueSize:       queueSize,
+		MaxPacketSizeBytes: maxPacketSize,
+	})
+	require.NoError(t, err)
+
+	go func() {
+		r.AllocateTimer("my-timer", nil).ReportTimer(10 * time.Millisecond)
+	}()
+	r.Close()
 }
 
 // TestReporterFinalFlush ensures the Reporter emits the last batch of metrics
