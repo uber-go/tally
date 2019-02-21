@@ -27,7 +27,7 @@ lint:
 	@echo "Installing test dependencies for vet..."
 	@go test -i $(PKGS)
 	@echo "Checking vet..."
-	@$(foreach dir,$(PKG_FILES),go tool vet $(dir) 2>&1 | grep -v $(LINT_IGNORE) | tee -a lint.log;)
+	@$(foreach dir,$(PKG_FILES),go vet $(dir) 2>&1 | grep -v $(LINT_IGNORE) | tee -a lint.log;)
 	@echo "Checking lint..."
 	@$(foreach dir,$(PKGS),golint $(dir) 2>&1 | grep -v $(LINT_IGNORE) | tee -a lint.log;)
 	@echo "Checking for unresolved FIXMEs..."
