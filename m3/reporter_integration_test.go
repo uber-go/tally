@@ -60,7 +60,7 @@ func main() {
 
 	scope.Counter("my-counter").Inc(42)
 	scope.Gauge("my-gauge").Update(123)
-	scope.Timer("my-gauge").Record(456 * time.Millisecond)
+	scope.Timer("my-timer").Record(456 * time.Millisecond)
 }
 	`
 )
