@@ -21,6 +21,7 @@
 package tally
 
 import (
+	"golang.org/x/net/context"
 	"fmt"
 	"sort"
 	"time"
@@ -50,7 +51,10 @@ type Scope interface {
 	Histogram(name string, buckets Buckets) Histogram
 
 	// Tagged returns a new child scope with the given tags and current tags.
-	Tagged(tags map[string]string) Scope
+	Tagged(tags map[string]string, ctx ...context.Context) Scope
+
+	// TaggedWithContext required the context to extract the tenancy value, return a new child scope with tenancy tag plus given tags
+	TaggedWithContext(ctx context.Context, tags map[string]string) Scope
 
 	// SubScope returns a new child scope appending a further name prefix.
 	SubScope(name string) Scope

@@ -21,6 +21,13 @@
 package tally
 
 import (
+	"code.uber.internal/infra/tenancy-client-go.git/tenancyfx"
+	"encoding/base64"
+	"encoding/json"
+	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go"
+	"go.uber.org/config"
+	"golang.org/x/net/context"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -812,4 +819,64 @@ func TestScopeFlushOnClose(t *testing.T) {
 	assert.EqualValues(t, 1, r.counters["foo"].val)
 
 	assert.NoError(t, closer.Close())
+}
+
+func TestMixedTenancyScope(t *testing.T) {
+	r := newTestStatsReporter()
+
+	cfg, _ := config.NewYAMLProviderFromBytes([]byte("tenancyMode: testtenancy\n"))
+	// create the tenancyClientResult for the tenancyClient
+	tenancyClientResult, _ := tenancyfx.NewTenancyClient(tenancyfx.TenancyClientParams{Config: cfg})
+
+	productionCtx := createContext(tenancyfx.ProductionTenancyString)
+	stagingCtx := createContext(tenancyfx.TestingTenancyString)
+
+	root, closer := NewRootScope(ScopeOptions{
+		Reporter:      r,
+		TenancyClient: tenancyClientResult.TenancyClient,
+	}, time.Second)
+
+	prodScope := root.TaggedWithContext(productionCtx, map[string]string{})
+	stagingScope := root.TaggedWithContext(stagingCtx, map[string]string{})
+
+	prodCounter := prodScope.Counter("bar")
+	stagingCounter := stagingScope.Counter("bar")
+
+	defer closer.Close()
+
+	prodS := prodScope.(*scope)
+	stagingS := stagingScope.(*scope)
+
+	r.cg.Add(2)
+	prodCounter.Inc(10)
+	prodS.report(r)
+
+	assert.EqualValues(t, 10, r.counters["bar"].val)
+	assert.EqualValues(t, map[string]string{
+		"tenancy":     "production",
+	}, r.counters["bar"].tags)
+
+	stagingCounter.Inc(20)
+	stagingS.report(r)
+	r.WaitAll()
+
+	assert.EqualValues(t, 20, r.counters["bar"].val)
+	assert.EqualValues(t, map[string]string{
+		"tenancy":     "testing",
+	}, r.counters["bar"].tags)
+}
+
+func createContext(tenancy string) context.Context{
+	tracer, closer := jaeger.NewTracer("tenancy-client-testing", jaeger.NewConstSampler(true), jaeger.NewNullReporter())
+	defer closer.Close()
+	span := tracer.StartSpan("span")
+	initialBaggage := tenancyfx.TenancyBaggage{RequestTenancy: tenancy}
+
+	tenancyJSON, _ := json.Marshal(initialBaggage)
+	rawTenancyBaggage := base64.URLEncoding.EncodeToString(tenancyJSON)
+	span.SetBaggageItem(tenancyfx.TenancyKey, rawTenancyBaggage)
+
+	// get the context
+	ctx := opentracing.ContextWithSpan(context.Background(), span)
+	return ctx
 }

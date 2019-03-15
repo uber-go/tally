@@ -21,7 +21,9 @@
 package tally
 
 import (
+	"code.uber.internal/infra/tenancy-client-go.git/tenancyfx"
 	"fmt"
+	"golang.org/x/net/context"
 	"io"
 	"sync"
 	"time"
@@ -63,6 +65,7 @@ type scope struct {
 	baseReporter   BaseStatsReporter
 	defaultBuckets Buckets
 	sanitizer      Sanitizer
+	tenancyClient  tenancyfx.TenancyClient
 
 	registry *scopeRegistry
 	status   scopeStatus
@@ -100,6 +103,7 @@ type ScopeOptions struct {
 	Separator       string
 	DefaultBuckets  Buckets
 	SanitizeOptions *SanitizeOptions
+	TenancyClient   tenancyfx.TenancyClient
 }
 
 // NewRootScope creates a new root Scope with a set of options and
@@ -152,6 +156,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		baseReporter:   baseReporter,
 		defaultBuckets: opts.DefaultBuckets,
 		sanitizer:      sanitizer,
+		tenancyClient:  opts.TenancyClient,
 
 		registry: &scopeRegistry{
 			subscopes: make(map[string]*scope),
@@ -375,7 +380,37 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 	return val
 }
 
-func (s *scope) Tagged(tags map[string]string) Scope {
+func (s *scope) Tagged(tags map[string]string, context ...context.Context) Scope {
+	if len(context) > 0 {
+		if s.tenancyClient != nil && s.tenancyClient.IsServiceOnboardedToTestTenancy() {
+			for _, ctx := range context {
+				tenancy, err := s.tenancyClient.GetRequestTenancy(ctx)
+				if err == nil {
+					if tenancy == tenancyfx.ProductionTenancy {
+						tags[tenancyfx.TenancyKey] = string(tenancyfx.ProductionTenancy)
+					} else if tenancy == tenancyfx.TestingTenancy {
+						tags[tenancyfx.TenancyKey] = string(tenancyfx.TestingTenancy)
+					}
+				}
+			}
+		}
+	}
+	tags = s.copyAndSanitizeMap(tags)
+	return s.subscope(s.prefix, tags)
+}
+
+func (s *scope) TaggedWithContext(ctx context.Context, tags map[string]string) Scope {
+	if s.tenancyClient != nil && s.tenancyClient.IsServiceOnboardedToTestTenancy() && ctx != nil {
+		tenancy, err := s.tenancyClient.GetRequestTenancy(ctx)
+		if err == nil {
+			if tenancy == tenancyfx.ProductionTenancy {
+				tags[tenancyfx.TenancyKey] = string(tenancyfx.ProductionTenancy)
+			} else if tenancy == tenancyfx.TestingTenancy {
+				tags[tenancyfx.TenancyKey] = string(tenancyfx.TestingTenancy)
+			}
+		}
+	}
+
 	tags = s.copyAndSanitizeMap(tags)
 	return s.subscope(s.prefix, tags)
 }
