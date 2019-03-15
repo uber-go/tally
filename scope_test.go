@@ -21,13 +21,13 @@
 package tally
 
 import (
-	"code.uber.internal/infra/tenancy-client-go.git/tenancyfx"
+	"code.uber.internal/infra/tenancy-client-go/tenancyfx"
 	"encoding/base64"
 	"encoding/json"
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go"
 	"go.uber.org/config"
-	"golang.org/x/net/context"
+	"context"
 	"math"
 	"sync"
 	"sync/atomic"

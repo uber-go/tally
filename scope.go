@@ -21,9 +21,9 @@
 package tally
 
 import (
-	"code.uber.internal/infra/tenancy-client-go.git/tenancyfx"
+	"code.uber.internal/infra/tenancy-client-go/tenancyfx"
 	"fmt"
-	"golang.org/x/net/context"
+	"context"
 	"io"
 	"sync"
 	"time"

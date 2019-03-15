@@ -21,7 +21,7 @@
 package tally
 
 import (
-	"golang.org/x/net/context"
+	"context"
 	"fmt"
 	"sort"
 	"time"

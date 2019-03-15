@@ -21,8 +21,6 @@ import:
   - lib/go/thrift
 - package: go.uber.org/atomic
   version: ^1
-- package: code.uber.internal/infra/tenancy-client-go.git
-  version: master
 testImport:
 - package: github.com/axw/gocov
   version: 54b98cfcac0c63fb3f9bd8e7ad241b724d4e985b
