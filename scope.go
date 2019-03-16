@@ -55,8 +55,11 @@ var (
 )
 
 const (
+	// TestingTenancy is used to check the passing tenancy string
 	TestingTenancy     = "testing"
+	// ProductionTenancy is used to check the passing tenancy string
 	ProductionTenancy  = "production"
+	// TenancyKey is the key value for tenancy tag
 	TenancyKey         = "request-tenancy"
 )
 type scope struct {
