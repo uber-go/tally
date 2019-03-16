@@ -21,9 +21,12 @@
 package tally
 
 import (
-	"code.uber.internal/infra/tenancy-client-go/tenancyfx"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"context"
+	"github.com/opentracing/opentracing-go"
 	"io"
 	"sync"
 	"time"
@@ -56,6 +59,15 @@ var (
 	}
 )
 
+const (
+	TestingTenancy     = "testing"
+	ProductionTenancy  = "production"
+	EmptyTenancy       = ""
+	ProductionTenancyString = "uber/production"
+	TestingTenancyString    = "uber/testing"
+	EmptyTenancyString      = ""
+	TenancyKey              = "request-tenancy"
+)
 type scope struct {
 	separator      string
 	prefix         string
@@ -65,7 +77,6 @@ type scope struct {
 	baseReporter   BaseStatsReporter
 	defaultBuckets Buckets
 	sanitizer      Sanitizer
-	tenancyClient  tenancyfx.TenancyClient
 
 	registry *scopeRegistry
 	status   scopeStatus
@@ -92,6 +103,17 @@ type scopeRegistry struct {
 	subscopes map[string]*scope
 }
 
+// ServiceUnderTestConfig contains request configs that are specific to a service under test
+type ServiceUnderTestConfig struct {
+	RoutingRedirect string `json:"routing_redirect"`
+}
+
+// TenancyBaggage represents the contents of the requestTenancy Jaeger baggage
+type TenancyBaggage struct {
+	RequestTenancy    string                            `json:"request_tenancy"`
+	ServicesUnderTest map[string]ServiceUnderTestConfig `json:"services_under_test"`
+}
+
 var scopeRegistryKey = KeyForPrefixedStringMap
 
 // ScopeOptions is a set of options to construct a scope.
@@ -103,7 +125,6 @@ type ScopeOptions struct {
 	Separator       string
 	DefaultBuckets  Buckets
 	SanitizeOptions *SanitizeOptions
-	TenancyClient   tenancyfx.TenancyClient
 }
 
 // NewRootScope creates a new root Scope with a set of options and
@@ -156,7 +177,6 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		baseReporter:   baseReporter,
 		defaultBuckets: opts.DefaultBuckets,
 		sanitizer:      sanitizer,
-		tenancyClient:  opts.TenancyClient,
 
 		registry: &scopeRegistry{
 			subscopes: make(map[string]*scope),
@@ -380,33 +400,64 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 	return val
 }
 
+func TenancyContextHandler(context context.Context) (string, error){
+	baggage, err := getTenancyBaggage(context)
+	if err != nil {
+		return EmptyTenancyString, err
+	}
+	rawTenancy := baggage.RequestTenancy
+	if rawTenancy == EmptyTenancyString {
+		// If no tenancy is supplied in the request, default to production tenancy
+		return ProductionTenancy, nil
+	} else if rawTenancy == TestingTenancyString {
+		return TestingTenancy, nil
+	} else if rawTenancy == ProductionTenancyString {
+		return ProductionTenancy, nil
+	} else {
+		return EmptyTenancy, fmt.Errorf("tenancy string is not valid pattern: '%s'", rawTenancy)
+	}
+}
+
+func getTenancyBaggage(ctx context.Context) (TenancyBaggage, error) {
+	var baggage TenancyBaggage
+	var err error
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		rawBaggage := span.BaggageItem(TenancyKey)
+		if bytes, err := base64.URLEncoding.DecodeString(rawBaggage); err == nil {
+			err = json.Unmarshal(bytes, &baggage)
+		}
+	} else {
+		err = errors.New("getTenancyBaggage could not find span from given context")
+	}
+	return baggage, err
+}
+
 func (s *scope) Tagged(tags map[string]string, context ...context.Context) Scope {
 	if len(context) > 0 {
-		if s.tenancyClient != nil && s.tenancyClient.IsServiceOnboardedToTestTenancy() {
-			for _, ctx := range context {
-				tenancy, err := s.tenancyClient.GetRequestTenancy(ctx)
-				if err == nil {
-					if tenancy == tenancyfx.ProductionTenancy {
-						tags[tenancyfx.TenancyKey] = string(tenancyfx.ProductionTenancy)
-					} else if tenancy == tenancyfx.TestingTenancy {
-						tags[tenancyfx.TenancyKey] = string(tenancyfx.TestingTenancy)
-					}
+		for _, ctx := range context {
+			tenancy, err := TenancyContextHandler(ctx)
+			if err == nil {
+				if tenancy == ProductionTenancy {
+					tags[TenancyKey] = ProductionTenancy
+				} else if tenancy == TestingTenancy {
+					tags[TenancyKey] = TestingTenancy
 				}
 			}
 		}
 	}
+
 	tags = s.copyAndSanitizeMap(tags)
 	return s.subscope(s.prefix, tags)
 }
 
 func (s *scope) TaggedWithContext(ctx context.Context, tags map[string]string) Scope {
-	if s.tenancyClient != nil && s.tenancyClient.IsServiceOnboardedToTestTenancy() && ctx != nil {
-		tenancy, err := s.tenancyClient.GetRequestTenancy(ctx)
+	if ctx != nil {
+		tenancy, err := TenancyContextHandler(ctx)
 		if err == nil {
-			if tenancy == tenancyfx.ProductionTenancy {
-				tags[tenancyfx.TenancyKey] = string(tenancyfx.ProductionTenancy)
-			} else if tenancy == tenancyfx.TestingTenancy {
-				tags[tenancyfx.TenancyKey] = string(tenancyfx.TestingTenancy)
+			if tenancy == ProductionTenancy {
+				tags[TenancyKey] = ProductionTenancy
+			} else if tenancy == TestingTenancy {
+				tags[TenancyKey] = TestingTenancy
 			}
 		}
 	}
