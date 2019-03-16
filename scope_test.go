@@ -21,11 +21,6 @@
 package tally
 
 import (
-	"context"
-	"encoding/base64"
-	"encoding/json"
-	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -822,15 +817,12 @@ func TestScopeFlushOnClose(t *testing.T) {
 func TestMixedTenancyScope(t *testing.T) {
 	r := newTestStatsReporter()
 
-	productionCtx := createContext(ProductionTenancyString)
-	stagingCtx := createContext(TestingTenancyString)
-
 	root, closer := NewRootScope(ScopeOptions{
 		Reporter:      r,
 	}, time.Second)
 
-	prodScope := root.TaggedWithContext(productionCtx, map[string]string{})
-	stagingScope := root.TaggedWithContext(stagingCtx, map[string]string{})
+	prodScope := root.TaggedWithTenancy(ProductionTenancy, map[string]string{})
+	stagingScope := root.TaggedWithTenancy(TestingTenancy, map[string]string{})
 
 	prodCounter := prodScope.Counter("bar")
 	stagingCounter := stagingScope.Counter("bar")
@@ -857,19 +849,4 @@ func TestMixedTenancyScope(t *testing.T) {
 	assert.EqualValues(t, map[string]string{
 		"request-tenancy":     "testing",
 	}, r.counters["bar"].tags)
-}
-
-func createContext(tenancy string) context.Context{
-	tracer, closer := jaeger.NewTracer("tenancy-client-testing", jaeger.NewConstSampler(true), jaeger.NewNullReporter())
-	defer closer.Close()
-	span := tracer.StartSpan("span")
-	initialBaggage := TenancyBaggage{RequestTenancy: tenancy}
-
-	tenancyJSON, _ := json.Marshal(initialBaggage)
-	rawTenancyBaggage := base64.URLEncoding.EncodeToString(tenancyJSON)
-	span.SetBaggageItem(TenancyKey, rawTenancyBaggage)
-
-	// get the context
-	ctx := opentracing.ContextWithSpan(context.Background(), span)
-	return ctx
 }
