@@ -649,6 +649,8 @@ func (s *scope) Snapshot() Snapshot {
 				id := KeyForPrefixedStringMap(name, tags)
 				var val int64
 				for _, counter := range counters {
+					// If there are multiple counters created due to expiry,
+					// add the values together
 					val += counter.snapshot()
 				}
 
@@ -666,6 +668,8 @@ func (s *scope) Snapshot() Snapshot {
 			if len(gauges) > 0 {
 				name := ss.fullyQualifiedName(key)
 				id := KeyForPrefixedStringMap(name, tags)
+				// If there are multiple gauges created due to expiry,
+				// pick the value of the first gauge
 				snap.gauges[id] = &gaugeSnapshot{
 					name:  name,
 					tags:  tags,
@@ -702,6 +706,8 @@ func (s *scope) Snapshot() Snapshot {
 				values := histograms[0].snapshotValues()
 				durations := histograms[0].snapshotDurations()
 
+				// If there are multiple histograms created due to expiry,
+				// combine the values
 				for i := 1; i < len(histograms); i++ {
 					for k, v := range histograms[i].snapshotValues() {
 						if _, exists := values[k]; !exists {

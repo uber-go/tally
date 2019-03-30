@@ -85,11 +85,13 @@ func (c *counter) Inc(v int64) {
 
 		scope.cm.Lock()
 		if counters, ok := scope.counters[c.name]; !ok {
+			// No counters with the same name were created since expiry
 			scope.counters[c.name] = []*counter{c}
 		} else {
 			exists := false
 			for _, counter := range counters {
 				if counter == c {
+					// This counter was reinserted already by another routine
 					exists = true
 					break
 				}
@@ -97,24 +99,23 @@ func (c *counter) Inc(v int64) {
 
 			if !exists {
 				// Another counter with the same name was created
-				// so add this to slice
+				// and this expired counter is not in the list so add to slice
 				scope.counters[c.name] = append(scope.counters[c.name], c)
 			}
 		}
 		scope.cm.Unlock()
 
 		atomic.StoreUint32(&c.expired, 0)
-		atomic.StoreInt64(&c.lastUpdateUnix, globalNow().Unix())
 	}
 }
 
 func (c *counter) value() int64 {
 	curr := atomic.LoadInt64(&c.curr)
-
 	prev := atomic.LoadInt64(&c.prev)
 	if prev == curr {
 		return 0
 	}
+
 	atomic.StoreInt64(&c.prev, curr)
 	return curr - prev
 }
@@ -195,6 +196,7 @@ func (g *gauge) Update(v float64) {
 			exists := false
 			for _, gauge := range gauges {
 				if gauge == g {
+					// This gauge was reinserted already by another routine
 					exists = true
 					break
 				}
@@ -209,7 +211,6 @@ func (g *gauge) Update(v float64) {
 		scope.gm.Unlock()
 
 		atomic.StoreUint32(&g.expired, 0)
-		atomic.StoreInt64(&g.lastUpdateUnix, globalNow().Unix())
 	}
 }
 
@@ -514,8 +515,8 @@ func (h *histogram) RecordValue(value float64) {
 	h.buckets[idx].samples.Inc(1)
 
 	if atomic.LoadUint32(&h.expired) == 1 && h.scope != nil {
-		// Histogram has expired, but direct ref was held and counter
-		// was incremented, therefore insert back into scope
+		// Histogram has expired, but direct ref was held and histogram
+		// was updated, therefore insert back into scope
 		scope := h.scope.getCurrentScope()
 
 		scope.hm.Lock()
@@ -525,6 +526,7 @@ func (h *histogram) RecordValue(value float64) {
 			exists := false
 			for _, histogram := range histograms {
 				if histogram == h {
+					// Another routine has already inserted this histogram
 					exists = true
 					break
 				}
@@ -539,7 +541,6 @@ func (h *histogram) RecordValue(value float64) {
 		scope.hm.Unlock()
 
 		atomic.StoreUint32(&h.expired, 0)
-		atomic.StoreInt64(&h.lastUpdateUnix, globalNow().Unix())
 	}
 }
 
@@ -552,8 +553,8 @@ func (h *histogram) RecordDuration(value time.Duration) {
 	h.buckets[idx].samples.Inc(1)
 
 	if atomic.LoadUint32(&h.expired) == 1 && h.scope != nil {
-		// Histogram has expired, but direct ref was held and counter
-		// was incremented, therefore insert back into scope
+		// Histogram has expired, but direct ref was held and histogram
+		// was updated, therefore insert back into scope
 		scope := h.scope.getCurrentScope()
 
 		scope.hm.Lock()
@@ -564,6 +565,7 @@ func (h *histogram) RecordDuration(value time.Duration) {
 			for _, histogram := range histograms {
 				if histogram == h {
 					exists = true
+					// Another routine has already inserted this histogram
 					break
 				}
 			}
@@ -577,7 +579,6 @@ func (h *histogram) RecordDuration(value time.Duration) {
 		scope.hm.Unlock()
 
 		atomic.StoreUint32(&h.expired, 0)
-		atomic.StoreInt64(&h.lastUpdateUnix, globalNow().Unix())
 	}
 }
 
