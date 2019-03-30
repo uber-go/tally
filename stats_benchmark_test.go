@@ -25,8 +25,24 @@ import (
 	"time"
 )
 
+func BenchmarkSimpleCounterInc(b *testing.B) {
+	c := &testSimpleCounter{}
+	for n := 0; n < b.N; n++ {
+		c.Inc(1)
+	}
+}
+
+func BenchmarkAlwaysCheckCounterInc(b *testing.B) {
+	s := newRootScope(ScopeOptions{Reporter: newTestStatsReporter()}, 0)
+	c := newTestAlwaysCheckCounter("", s)
+	for n := 0; n < b.N; n++ {
+		c.Inc(1)
+	}
+}
+
 func BenchmarkCounterInc(b *testing.B) {
-	c := &counter{}
+	scope := NewTestScope("", nil)
+	c := scope.Counter("test")
 	for n := 0; n < b.N; n++ {
 		c.Inc(1)
 	}

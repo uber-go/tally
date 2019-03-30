@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -34,6 +35,9 @@ var (
 	DefaultSeparator = "."
 
 	globalNow = time.Now
+
+	// defaultExpiry is the default expiry period for scopes and metrics
+	defaultExpiry = 11 * time.Minute
 
 	defaultScopeBuckets = DurationBuckets{
 		0 * time.Millisecond,
@@ -55,27 +59,33 @@ var (
 )
 
 type scope struct {
-	separator      string
-	prefix         string
-	tags           map[string]string
-	reporter       StatsReporter
-	cachedReporter CachedStatsReporter
-	baseReporter   BaseStatsReporter
-	defaultBuckets Buckets
-	sanitizer      Sanitizer
+	separator           string
+	prefix              string
+	tags                map[string]string
+	reporter            StatsReporter
+	cachedReporter      CachedStatsReporter
+	baseReporter        BaseStatsReporter
+	defaultBuckets      Buckets
+	sanitizer           Sanitizer
+	expirePeriodSeconds int64
 
-	registry *scopeRegistry
-	status   scopeStatus
+	registry    *scopeRegistry
+	status      scopeStatus
+	createdUnix int64
+	expired     uint32 // indicates whether current scope is expired
 
 	cm sync.RWMutex
 	gm sync.RWMutex
 	tm sync.RWMutex
 	hm sync.RWMutex
 
-	counters   map[string]*counter
-	gauges     map[string]*gauge
-	timers     map[string]*timer
-	histograms map[string]*histogram
+	// The metric objects have the names themselves, so could save mem
+	// by having slices of counters per scope, but at cost of iterating
+	// all metrics of same type per scope
+	counters   map[string][]*counter
+	gauges     map[string][]*gauge
+	timers     map[string][]*timer
+	histograms map[string][]*histogram
 }
 
 type scopeStatus struct {
@@ -86,7 +96,8 @@ type scopeStatus struct {
 
 type scopeRegistry struct {
 	sync.RWMutex
-	subscopes map[string]*scope
+	subscopes           map[string]*scope
+	expirePeriodSeconds int64
 }
 
 var scopeRegistryKey = KeyForPrefixedStringMap
@@ -100,6 +111,7 @@ type ScopeOptions struct {
 	Separator       string
 	DefaultBuckets  Buckets
 	SanitizeOptions *SanitizeOptions
+	ExpiryPeriod    time.Duration
 }
 
 // NewRootScope creates a new root Scope with a set of options and
@@ -144,6 +156,10 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		opts.DefaultBuckets = defaultScopeBuckets
 	}
 
+	if opts.ExpiryPeriod == 0 {
+		opts.ExpiryPeriod = defaultExpiry
+	}
+
 	s := &scope{
 		separator:      sanitizer.Name(opts.Separator),
 		prefix:         sanitizer.Name(opts.Prefix),
@@ -152,19 +168,21 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		baseReporter:   baseReporter,
 		defaultBuckets: opts.DefaultBuckets,
 		sanitizer:      sanitizer,
+		createdUnix:    globalNow().Unix(),
 
 		registry: &scopeRegistry{
-			subscopes: make(map[string]*scope),
+			subscopes:           make(map[string]*scope),
+			expirePeriodSeconds: int64(opts.ExpiryPeriod.Seconds()),
 		},
 		status: scopeStatus{
 			closed: false,
 			quit:   make(chan struct{}, 1),
 		},
 
-		counters:   make(map[string]*counter),
-		gauges:     make(map[string]*gauge),
-		timers:     make(map[string]*timer),
-		histograms: make(map[string]*histogram),
+		counters:   make(map[string][]*counter),
+		gauges:     make(map[string][]*gauge),
+		timers:     make(map[string][]*timer),
+		histograms: make(map[string][]*histogram),
 	}
 
 	// NB(r): Take a copy of the tags on creation
@@ -182,52 +200,164 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 }
 
 // report dumps all aggregated stats into the reporter. Should be called automatically by the root scope periodically.
-func (s *scope) report(r StatsReporter) {
-	s.cm.RLock()
-	for name, counter := range s.counters {
-		counter.report(s.fullyQualifiedName(name), s.tags, r)
-	}
-	s.cm.RUnlock()
+func (s *scope) report(r StatsReporter) bool {
+	var numMetrics, i int
 
-	s.gm.RLock()
-	for name, gauge := range s.gauges {
-		gauge.report(s.fullyQualifiedName(name), s.tags, r)
-	}
-	s.gm.RUnlock()
+	s.cm.Lock()
+	for name, counters := range s.counters {
+		for _, counter := range counters {
+			if expired := counter.report(s.fullyQualifiedName(name), s.tags, r); !expired {
+				counters[i] = counter
+				i++
+			}
+		}
 
-	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
+		if i == 0 {
+			delete(s.counters, name)
+		} else {
+			s.counters[name] = counters[:i]
+		}
 
-	s.hm.RLock()
-	for name, histogram := range s.histograms {
-		histogram.report(s.fullyQualifiedName(name), s.tags, r)
+		i = 0
 	}
-	s.hm.RUnlock()
+
+	numMetrics += len(s.counters)
+	s.cm.Unlock()
+
+	s.gm.Lock()
+	for name, gauges := range s.gauges {
+		for _, gauge := range gauges {
+			if expired := gauge.report(s.fullyQualifiedName(name), s.tags, r); !expired {
+				gauges[i] = gauge
+				i++
+			}
+		}
+
+		if i == 0 {
+			delete(s.gauges, name)
+		} else {
+			s.gauges[name] = gauges[:i]
+		}
+
+		i = 0
+	}
+
+	numMetrics += len(s.gauges)
+	s.gm.Unlock()
+
+	// We do nothing for timers here because timers report directly to ths StatsReporter without buffering.
+	// If the scope is expired, new timers will be added to the fresh scope and refs to existing timers
+	// will continue to emit them directly to the reporters.
+
+	s.hm.Lock()
+	for name, histograms := range s.histograms {
+		for _, histogram := range histograms {
+			if expired := histogram.report(s.fullyQualifiedName(name), s.tags, r); !expired {
+				histograms[i] = histogram
+				i++
+			}
+		}
+
+		if i == 0 {
+			delete(s.histograms, name)
+		} else {
+			s.histograms[name] = histograms[:i]
+		}
+
+		i = 0
+	}
+
+	numMetrics += len(s.histograms)
+	s.hm.Unlock()
+
+	if numMetrics == 0 && globalNow().Unix() > s.createdUnix+s.getExpirySeconds() {
+		// All metrics for the scope have expired and it's been longer than the
+		// expiry period.
+		return true
+	}
 
 	r.Flush()
+	return false
 }
 
-func (s *scope) cachedReport(c CachedStatsReporter) {
-	s.cm.RLock()
-	for _, counter := range s.counters {
-		counter.cachedReport()
-	}
-	s.cm.RUnlock()
+func (s *scope) cachedReport(c CachedStatsReporter) bool {
+	var numMetrics, i int
 
-	s.gm.RLock()
-	for _, gauge := range s.gauges {
-		gauge.cachedReport()
-	}
-	s.gm.RUnlock()
+	s.cm.Lock()
+	for key, counters := range s.counters {
+		for _, counter := range counters {
+			if expired := counter.cachedReport(); !expired {
+				counters[i] = counter
+				i++
+			}
+		}
 
-	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
+		if i == 0 {
+			delete(s.counters, key)
+		} else {
+			s.counters[key] = counters[:i]
+		}
 
-	s.hm.RLock()
-	for _, histogram := range s.histograms {
-		histogram.cachedReport()
+		i = 0
 	}
-	s.hm.RUnlock()
+
+	numMetrics += len(s.counters)
+	s.cm.Unlock()
+
+	s.gm.Lock()
+	for key, gauges := range s.gauges {
+		for _, gauge := range gauges {
+			if expired := gauge.cachedReport(); !expired {
+				gauges[i] = gauge
+				i++
+			}
+		}
+
+		if i == 0 {
+			delete(s.gauges, key)
+		} else {
+			s.gauges[key] = gauges[:i]
+		}
+
+		i = 0
+	}
+
+	numMetrics += len(s.gauges)
+	s.gm.Unlock()
+
+	// We do nothing for timers here because timers report directly to ths StatsReporter without buffering.
+	// If the scope is expired, new timers will be added to the fresh scope and refs to existing timers
+	// will continue to emit them directly to the reporters.
+
+	s.hm.Lock()
+	for key, histograms := range s.histograms {
+		for _, histogram := range histograms {
+			if expired := histogram.cachedReport(); !expired {
+				histograms[i] = histogram
+				i++
+			}
+		}
+
+		if i == 0 {
+			delete(s.histograms, key)
+		} else {
+			s.histograms[key] = histograms[:i]
+		}
+
+		i = 0
+	}
+
+	numMetrics += len(s.histograms)
+	s.hm.Unlock()
+
+	if numMetrics == 0 && globalNow().Unix() > s.createdUnix+s.getExpirySeconds() {
+		// All metrics for the scope have expired and it's been longer than the
+		// expiry period.
+		return true
+	}
 
 	c.Flush()
+	return false
 }
 
 // reportLoop is used by the root scope for periodic reporting
@@ -261,118 +391,182 @@ func (s *scope) reportLoopRun() {
 
 // reports current registry with scope status lock held
 func (s *scope) reportRegistryWithLock() {
-	s.registry.RLock()
+	s.registry.Lock()
 	if s.reporter != nil {
-		for _, ss := range s.registry.subscopes {
-			ss.report(s.reporter)
+		for name, ss := range s.registry.subscopes {
+			if expired := ss.report(s.reporter); expired {
+				delete(s.registry.subscopes, name)
+				atomic.StoreUint32(&ss.expired, 1)
+			}
 		}
 	} else if s.cachedReporter != nil {
-		for _, ss := range s.registry.subscopes {
-			ss.cachedReport(s.cachedReporter)
+		for name, ss := range s.registry.subscopes {
+			if expired := ss.cachedReport(s.cachedReporter); expired {
+				delete(s.registry.subscopes, name)
+				atomic.StoreUint32(&ss.expired, 1)
+			}
 		}
 	}
-	s.registry.RUnlock()
+	s.registry.Unlock()
+}
+
+// getExpirySeconds gets the expiry period of metrics for this scope
+func (s *scope) getExpirySeconds() int64 {
+	return s.registry.expirePeriodSeconds
+}
+
+// hasExpired indicates whether the scope is expired
+func (s *scope) hasExpired() bool {
+	return atomic.LoadUint32(&s.expired) == 1
+}
+
+// getCurrentScope gets the current active scope which could
+// be this scope or another if another was created after this
+// one expired
+func (s *scope) getCurrentScope() *scope {
+	if s.hasExpired() {
+		// scope has expired. Go grab the current one from the registry
+		// TODO(martinm) - cache the registryKey in scope if expired occurs often
+		registryName := scopeRegistryKey(s.prefix, s.tags)
+		s.registry.RLock()
+		curScope, exists := s.registry.subscopes[registryName]
+		s.registry.RLock()
+
+		if exists {
+			// A new scope exists, return that instead of the current one
+			return curScope
+		}
+
+		// No new scope has been created since this one expired, re-insert into the registry
+		s.registry.Lock()
+		curScope, exists = s.registry.subscopes[registryName]
+		if exists {
+			s.registry.Unlock()
+			return curScope
+		}
+
+		s.registry.subscopes[registryName] = s
+		atomic.StoreUint32(&s.expired, 0)
+		s.createdUnix = globalNow().Unix()
+		s.registry.Unlock()
+	}
+
+	return s
 }
 
 func (s *scope) Counter(name string) Counter {
 	name = s.sanitizer.Name(name)
-	s.cm.RLock()
-	val, ok := s.counters[name]
-	s.cm.RUnlock()
-	if !ok {
-		s.cm.Lock()
-		val, ok = s.counters[name]
-		if !ok {
+	curScope := s.getCurrentScope()
+	curScope.cm.RLock()
+	counters, ok := curScope.counters[name]
+	curScope.cm.RUnlock()
+	if !ok || len(counters) == 0 {
+		curScope.cm.Lock()
+		counters, ok = curScope.counters[name]
+		if !ok || len(counters) == 0 {
 			var cachedCounter CachedCount
-			if s.cachedReporter != nil {
-				cachedCounter = s.cachedReporter.AllocateCounter(
-					s.fullyQualifiedName(name), s.tags,
+			if curScope.cachedReporter != nil {
+				cachedCounter = curScope.cachedReporter.AllocateCounter(
+					curScope.fullyQualifiedName(name), curScope.tags,
 				)
 			}
-			val = newCounter(cachedCounter)
-			s.counters[name] = val
+			counters = []*counter{newCounter(cachedCounter, name, curScope)}
+			curScope.counters[name] = counters
 		}
-		s.cm.Unlock()
+		curScope.cm.Unlock()
 	}
-	return val
+
+	return counters[0]
 }
 
 func (s *scope) Gauge(name string) Gauge {
 	name = s.sanitizer.Name(name)
-	s.gm.RLock()
-	val, ok := s.gauges[name]
-	s.gm.RUnlock()
-	if !ok {
-		s.gm.Lock()
-		val, ok = s.gauges[name]
-		if !ok {
+	curScope := s.getCurrentScope()
+
+	curScope.gm.RLock()
+	gauges, ok := curScope.gauges[name]
+	curScope.gm.RUnlock()
+	if !ok || len(gauges) == 0 {
+		curScope.gm.Lock()
+		gauges, ok = curScope.gauges[name]
+		if !ok || len(gauges) == 0 {
 			var cachedGauge CachedGauge
-			if s.cachedReporter != nil {
-				cachedGauge = s.cachedReporter.AllocateGauge(
-					s.fullyQualifiedName(name), s.tags,
+			if curScope.cachedReporter != nil {
+				cachedGauge = curScope.cachedReporter.AllocateGauge(
+					curScope.fullyQualifiedName(name), curScope.tags,
 				)
 			}
-			val = newGauge(cachedGauge)
-			s.gauges[name] = val
+
+			gauges = []*gauge{newGauge(cachedGauge, name, curScope)}
+			curScope.gauges[name] = gauges
 		}
 		s.gm.Unlock()
 	}
-	return val
+
+	return gauges[0]
 }
 
 func (s *scope) Timer(name string) Timer {
 	name = s.sanitizer.Name(name)
-	s.tm.RLock()
-	val, ok := s.timers[name]
-	s.tm.RUnlock()
-	if !ok {
-		s.tm.Lock()
-		val, ok = s.timers[name]
-		if !ok {
+	curScope := s.getCurrentScope()
+
+	curScope.tm.RLock()
+	timers, ok := curScope.timers[name]
+	curScope.tm.RUnlock()
+	if !ok || len(timers) == 0 {
+		curScope.tm.Lock()
+		timers, ok = curScope.timers[name]
+		if !ok || len(timers) == 0 {
 			var cachedTimer CachedTimer
-			if s.cachedReporter != nil {
-				cachedTimer = s.cachedReporter.AllocateTimer(
-					s.fullyQualifiedName(name), s.tags,
+			if curScope.cachedReporter != nil {
+				cachedTimer = curScope.cachedReporter.AllocateTimer(
+					curScope.fullyQualifiedName(name), curScope.tags,
 				)
 			}
-			val = newTimer(
-				s.fullyQualifiedName(name), s.tags, s.reporter, cachedTimer,
-			)
-			s.timers[name] = val
+
+			timers = []*timer{newTimer(
+				curScope.fullyQualifiedName(name), curScope.tags, curScope.reporter, cachedTimer,
+			)}
+			curScope.timers[name] = timers
 		}
-		s.tm.Unlock()
+		curScope.tm.Unlock()
 	}
-	return val
+
+	return timers[0]
 }
 
 func (s *scope) Histogram(name string, b Buckets) Histogram {
 	name = s.sanitizer.Name(name)
+	curScope := s.getCurrentScope()
 
 	if b == nil {
-		b = s.defaultBuckets
+		b = curScope.defaultBuckets
 	}
 
-	s.hm.RLock()
-	val, ok := s.histograms[name]
-	s.hm.RUnlock()
-	if !ok {
-		s.hm.Lock()
-		val, ok = s.histograms[name]
-		if !ok {
+	curScope.hm.RLock()
+	histograms, ok := curScope.histograms[name]
+	curScope.hm.RUnlock()
+	if !ok || len(histograms) == 0 {
+		curScope.hm.Lock()
+		histograms, ok = curScope.histograms[name]
+		if !ok || len(histograms) == 0 {
 			var cachedHistogram CachedHistogram
-			if s.cachedReporter != nil {
-				cachedHistogram = s.cachedReporter.AllocateHistogram(
-					s.fullyQualifiedName(name), s.tags, b,
+			if curScope.cachedReporter != nil {
+				cachedHistogram = curScope.cachedReporter.AllocateHistogram(
+					curScope.fullyQualifiedName(name), curScope.tags, b,
 				)
 			}
-			val = newHistogram(
-				s.fullyQualifiedName(name), s.tags, s.reporter, b, cachedHistogram,
-			)
-			s.histograms[name] = val
+
+			histograms = []*histogram{newHistogram(curScope.tags, curScope.reporter,
+				b, cachedHistogram, curScope, name,
+			)}
+			curScope.histograms[name] = histograms
 		}
-		s.hm.Unlock()
+
+		curScope.hm.Unlock()
 	}
-	return val
+
+	return histograms[0]
 }
 
 func (s *scope) Tagged(tags map[string]string) Scope {
@@ -389,42 +583,44 @@ func (s *scope) subscope(prefix string, immutableTags map[string]string) Scope {
 	immutableTags = mergeRightTags(s.tags, immutableTags)
 	key := scopeRegistryKey(prefix, immutableTags)
 
-	s.registry.RLock()
-	existing, ok := s.registry.subscopes[key]
+	curScope := s.getCurrentScope()
+	curScope.registry.RLock()
+	existing, ok := curScope.registry.subscopes[key]
 	if ok {
-		s.registry.RUnlock()
+		curScope.registry.RUnlock()
 		return existing
 	}
-	s.registry.RUnlock()
+	curScope.registry.RUnlock()
 
-	s.registry.Lock()
-	defer s.registry.Unlock()
+	curScope.registry.Lock()
+	defer curScope.registry.Unlock()
 
-	existing, ok = s.registry.subscopes[key]
+	existing, ok = curScope.registry.subscopes[key]
 	if ok {
 		return existing
 	}
 
 	subscope := &scope{
-		separator: s.separator,
+		separator: curScope.separator,
 		prefix:    prefix,
 		// NB(prateek): don't need to copy the tags here,
 		// we assume the map provided is immutable.
 		tags:           immutableTags,
-		reporter:       s.reporter,
-		cachedReporter: s.cachedReporter,
-		baseReporter:   s.baseReporter,
-		defaultBuckets: s.defaultBuckets,
-		sanitizer:      s.sanitizer,
-		registry:       s.registry,
+		reporter:       curScope.reporter,
+		cachedReporter: curScope.cachedReporter,
+		baseReporter:   curScope.baseReporter,
+		defaultBuckets: curScope.defaultBuckets,
+		sanitizer:      curScope.sanitizer,
+		registry:       curScope.registry,
+		createdUnix:    globalNow().Unix(),
 
-		counters:   make(map[string]*counter),
-		gauges:     make(map[string]*gauge),
-		timers:     make(map[string]*timer),
-		histograms: make(map[string]*histogram),
+		counters:   make(map[string][]*counter),
+		gauges:     make(map[string][]*gauge),
+		timers:     make(map[string][]*timer),
+		histograms: make(map[string][]*histogram),
 	}
 
-	s.registry.subscopes[key] = subscope
+	curScope.registry.subscopes[key] = subscope
 	return subscope
 }
 
@@ -437,58 +633,101 @@ func (s *scope) Capabilities() Capabilities {
 
 func (s *scope) Snapshot() Snapshot {
 	snap := newSnapshot()
-
-	s.registry.RLock()
-	for _, ss := range s.registry.subscopes {
+	curScope := s.getCurrentScope()
+	curScope.registry.RLock()
+	for _, ss := range curScope.registry.subscopes {
 		// NB(r): tags are immutable, no lock required to read.
-		tags := make(map[string]string, len(s.tags))
+		tags := make(map[string]string, len(curScope.tags))
 		for k, v := range ss.tags {
 			tags[k] = v
 		}
 
 		ss.cm.RLock()
-		for key, c := range ss.counters {
-			name := ss.fullyQualifiedName(key)
-			id := KeyForPrefixedStringMap(name, tags)
-			snap.counters[id] = &counterSnapshot{
-				name:  name,
-				tags:  tags,
-				value: c.snapshot(),
+		for key, counters := range ss.counters {
+			if len(counters) > 0 {
+				name := ss.fullyQualifiedName(key)
+				id := KeyForPrefixedStringMap(name, tags)
+				var val int64
+				for _, counter := range counters {
+					val += counter.snapshot()
+				}
+
+				snap.counters[id] = &counterSnapshot{
+					name:  name,
+					tags:  tags,
+					value: val,
+				}
 			}
 		}
 		ss.cm.RUnlock()
+
 		ss.gm.RLock()
-		for key, g := range ss.gauges {
-			name := ss.fullyQualifiedName(key)
-			id := KeyForPrefixedStringMap(name, tags)
-			snap.gauges[id] = &gaugeSnapshot{
-				name:  name,
-				tags:  tags,
-				value: g.snapshot(),
+		for key, gauges := range ss.gauges {
+			if len(gauges) > 0 {
+				name := ss.fullyQualifiedName(key)
+				id := KeyForPrefixedStringMap(name, tags)
+				snap.gauges[id] = &gaugeSnapshot{
+					name:  name,
+					tags:  tags,
+					value: gauges[0].snapshot(),
+				}
 			}
 		}
 		ss.gm.RUnlock()
+
 		ss.tm.RLock()
-		for key, t := range ss.timers {
-			name := ss.fullyQualifiedName(key)
-			id := KeyForPrefixedStringMap(name, tags)
-			snap.timers[id] = &timerSnapshot{
-				name:   name,
-				tags:   tags,
-				values: t.snapshot(),
+		for key, timers := range ss.timers {
+			if len(timers) > 0 {
+				name := ss.fullyQualifiedName(key)
+				id := KeyForPrefixedStringMap(name, tags)
+				values := timers[0].snapshot()
+				for i := 1; i < len(timers); i++ {
+					values = append(values, timers[i].snapshot()...)
+				}
+
+				snap.timers[id] = &timerSnapshot{
+					name:   name,
+					tags:   tags,
+					values: values,
+				}
 			}
 		}
 		ss.tm.RUnlock()
+
 		ss.hm.RLock()
-		for key, h := range ss.histograms {
-			name := ss.fullyQualifiedName(key)
-			id := KeyForPrefixedStringMap(name, tags)
-			snap.histograms[id] = &histogramSnapshot{
-				name:      name,
-				tags:      tags,
-				values:    h.snapshotValues(),
-				durations: h.snapshotDurations(),
+		for key, histograms := range ss.histograms {
+			if len(histograms) > 0 {
+				name := ss.fullyQualifiedName(key)
+				id := KeyForPrefixedStringMap(name, tags)
+				values := histograms[0].snapshotValues()
+				durations := histograms[0].snapshotDurations()
+
+				for i := 1; i < len(histograms); i++ {
+					for k, v := range histograms[i].snapshotValues() {
+						if _, exists := values[k]; !exists {
+							values[k] = 0
+						}
+
+						values[k] = values[k] + v
+					}
+
+					for k, v := range histograms[i].snapshotDurations() {
+						if _, exists := durations[k]; !exists {
+							durations[k] = 0
+						}
+
+						durations[k] = durations[k] + v
+					}
+				}
+
+				snap.histograms[id] = &histogramSnapshot{
+					name:      name,
+					tags:      tags,
+					values:    values,
+					durations: durations,
+				}
 			}
+
 		}
 		ss.hm.RUnlock()
 	}

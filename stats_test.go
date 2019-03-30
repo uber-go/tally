@@ -22,11 +22,49 @@ package tally
 
 import (
 	"math/rand"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 )
+
+type testSimpleCounter struct {
+	prev int64
+	curr int64
+}
+
+func (c *testSimpleCounter) Inc(v int64) {
+	atomic.AddInt64(&c.curr, v)
+}
+
+type testAlwaysCheckCounter struct {
+	prev           int64
+	curr           int64
+	lastUpdateUnix int64
+	scope          *scope
+	name           string
+}
+
+func newTestAlwaysCheckCounter(name string, scope *scope) *testAlwaysCheckCounter {
+	return &testAlwaysCheckCounter{
+		scope:          scope,
+		name:           name,
+		lastUpdateUnix: globalNow().Unix(),
+	}
+}
+
+func (c *testAlwaysCheckCounter) Inc(v int64) {
+	atomic.AddInt64(&c.curr, v)
+
+	now := globalNow().Unix()
+	if c.scope != nil && (now-atomic.SwapInt64(&c.lastUpdateUnix, now)) > c.scope.registry.expirePeriodSeconds {
+		// This would be expired logic that's never triggered
+		scope := c.scope.getCurrentScope()
+		scope.cm.Lock()
+		scope.cm.Unlock()
+	}
+}
 
 type statsTestReporter struct {
 	last            interface{}
@@ -84,7 +122,7 @@ func (r *statsTestReporter) Capabilities() Capabilities {
 func (r *statsTestReporter) Flush() {}
 
 func TestCounter(t *testing.T) {
-	counter := newCounter(nil)
+	counter := newCounter(nil, "", nil)
 	r := newStatsTestReporter()
 
 	counter.Inc(1)
@@ -101,7 +139,7 @@ func TestCounter(t *testing.T) {
 }
 
 func TestGauge(t *testing.T) {
-	gauge := newGauge(nil)
+	gauge := newGauge(nil, "", nil)
 	r := newStatsTestReporter()
 
 	gauge.Update(42)
@@ -128,7 +166,7 @@ func TestTimer(t *testing.T) {
 func TestHistogramValueSamples(t *testing.T) {
 	r := newStatsTestReporter()
 	buckets := MustMakeLinearValueBuckets(0, 10, 10)
-	h := newHistogram("h1", nil, r, buckets, nil)
+	h := newHistogram(nil, r, buckets, nil, nil, "h1")
 
 	var offset float64
 	for i := 0; i < 3; i++ {
@@ -149,7 +187,7 @@ func TestHistogramValueSamples(t *testing.T) {
 func TestHistogramDurationSamples(t *testing.T) {
 	r := newStatsTestReporter()
 	buckets := MustMakeLinearDurationBuckets(0, 10*time.Millisecond, 10)
-	h := newHistogram("h1", nil, r, buckets, nil)
+	h := newHistogram(nil, r, buckets, nil, nil, "h1")
 
 	var offset time.Duration
 	for i := 0; i < 3; i++ {

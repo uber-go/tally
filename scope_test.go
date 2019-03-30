@@ -30,6 +30,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+const testFullyQualifiedName = "test.fully.qualified.name"
+
 var (
 	// alphanumericSanitizerOpts is the options to create a sanitizer which uses
 	// the alphanumeric SanitizeFn.
@@ -49,6 +51,17 @@ var (
 		ReplacementCharacter: DefaultReplacementCharacter,
 	}
 )
+
+type testNamedCounter struct {
+	prev        int64
+	curr        int64
+	cachedCount CachedCount
+	name        string
+}
+
+func (c *testNamedCounter) Inc(v int64) {
+	atomic.AddInt64(&c.curr, v)
+}
 
 type testIntValue struct {
 	val      int64

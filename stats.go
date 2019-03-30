@@ -57,17 +57,55 @@ func (c *capabilities) Tagging() bool {
 }
 
 type counter struct {
-	prev        int64
-	curr        int64
-	cachedCount CachedCount
+	prev           int64
+	curr           int64
+	cachedCount    CachedCount
+	lastUpdateUnix int64
+	expired        uint32
+	scope          *scope
+	name           string
 }
 
-func newCounter(cachedCount CachedCount) *counter {
-	return &counter{cachedCount: cachedCount}
+func newCounter(cachedCount CachedCount, name string, scope *scope) *counter {
+	return &counter{
+		cachedCount:    cachedCount,
+		scope:          scope,
+		name:           name,
+		lastUpdateUnix: globalNow().Unix(),
+	}
 }
 
 func (c *counter) Inc(v int64) {
 	atomic.AddInt64(&c.curr, v)
+
+	if atomic.LoadUint32(&c.expired) == 1 && c.scope != nil {
+		// Counter has expired, but direct ref was held and counter
+		// was incremented, therefore insert back into scope
+		scope := c.scope.getCurrentScope()
+
+		scope.cm.Lock()
+		if counters, ok := scope.counters[c.name]; !ok {
+			scope.counters[c.name] = []*counter{c}
+		} else {
+			exists := false
+			for _, counter := range counters {
+				if counter == c {
+					exists = true
+					break
+				}
+			}
+
+			if !exists {
+				// Another counter with the same name was created
+				// so add this to slice
+				scope.counters[c.name] = append(scope.counters[c.name], c)
+			}
+		}
+		scope.cm.Unlock()
+
+		atomic.StoreUint32(&c.expired, 0)
+		atomic.StoreInt64(&c.lastUpdateUnix, globalNow().Unix())
+	}
 }
 
 func (c *counter) value() int64 {
@@ -81,22 +119,41 @@ func (c *counter) value() int64 {
 	return curr - prev
 }
 
-func (c *counter) report(name string, tags map[string]string, r StatsReporter) {
+func (c *counter) report(name string, tags map[string]string, r StatsReporter) bool {
 	delta := c.value()
-	if delta == 0 {
-		return
+	if delta != 0 {
+		r.ReportCounter(name, tags, delta)
+		atomic.StoreInt64(&c.lastUpdateUnix, globalNow().Unix())
+
+		return false
 	}
 
-	r.ReportCounter(name, tags, delta)
+	// Check if counter has expired
+	if c.scope != nil && globalNow().Unix() >
+		atomic.LoadInt64(&c.lastUpdateUnix)+c.scope.registry.expirePeriodSeconds {
+		atomic.StoreUint32(&c.expired, 1)
+		return true
+	}
+
+	return false
 }
 
-func (c *counter) cachedReport() {
+func (c *counter) cachedReport() bool {
 	delta := c.value()
-	if delta == 0 {
-		return
+	if delta != 0 {
+		c.cachedCount.ReportCount(delta)
+		atomic.StoreInt64(&c.lastUpdateUnix, globalNow().Unix())
+		return false
 	}
 
-	c.cachedCount.ReportCount(delta)
+	// Check if counter has expired
+	if c.scope != nil && globalNow().Unix() >
+		atomic.LoadInt64(&c.lastUpdateUnix)+c.scope.registry.expirePeriodSeconds {
+		atomic.StoreUint32(&c.expired, 1)
+		return true
+	}
+
+	return false
 }
 
 func (c *counter) snapshot() int64 {
@@ -104,34 +161,94 @@ func (c *counter) snapshot() int64 {
 }
 
 type gauge struct {
-	updated     uint64
-	curr        uint64
-	cachedGauge CachedGauge
+	updated        uint64
+	curr           uint64
+	cachedGauge    CachedGauge
+	lastUpdateUnix int64
+	expired        uint32
+	scope          *scope
+	name           string
 }
 
-func newGauge(cachedGauge CachedGauge) *gauge {
-	return &gauge{cachedGauge: cachedGauge}
+func newGauge(cachedGauge CachedGauge, name string, scope *scope) *gauge {
+	return &gauge{
+		cachedGauge:    cachedGauge,
+		scope:          scope,
+		lastUpdateUnix: globalNow().Unix(),
+		name:           name,
+	}
 }
 
 func (g *gauge) Update(v float64) {
 	atomic.StoreUint64(&g.curr, math.Float64bits(v))
 	atomic.StoreUint64(&g.updated, 1)
+
+	if atomic.LoadUint32(&g.expired) == 1 && g.scope != nil {
+		// Gauge has expired, but direct ref was held and gauge
+		// was updated, therefore insert back into scope
+		scope := g.scope.getCurrentScope()
+
+		scope.gm.Lock()
+		if gauges, ok := scope.gauges[g.name]; !ok {
+			scope.gauges[g.name] = []*gauge{g}
+		} else {
+			exists := false
+			for _, gauge := range gauges {
+				if gauge == g {
+					exists = true
+					break
+				}
+			}
+
+			if !exists {
+				// Another gauge with the same name was created, so add this
+				// to slice
+				scope.gauges[g.name] = append(scope.gauges[g.name], g)
+			}
+		}
+		scope.gm.Unlock()
+
+		atomic.StoreUint32(&g.expired, 0)
+		atomic.StoreInt64(&g.lastUpdateUnix, globalNow().Unix())
+	}
 }
 
 func (g *gauge) value() float64 {
 	return math.Float64frombits(atomic.LoadUint64(&g.curr))
 }
 
-func (g *gauge) report(name string, tags map[string]string, r StatsReporter) {
+func (g *gauge) report(name string, tags map[string]string, r StatsReporter) bool {
 	if atomic.SwapUint64(&g.updated, 0) == 1 {
 		r.ReportGauge(name, tags, g.value())
+		atomic.StoreInt64(&g.lastUpdateUnix, globalNow().Unix())
+		return false
 	}
+
+	// Check if gauge has expired
+	if g.scope != nil && globalNow().Unix() >
+		atomic.LoadInt64(&g.lastUpdateUnix)+g.scope.registry.expirePeriodSeconds {
+		atomic.StoreUint32(&g.expired, 1)
+		return true
+	}
+
+	return false
 }
 
-func (g *gauge) cachedReport() {
+func (g *gauge) cachedReport() bool {
 	if atomic.SwapUint64(&g.updated, 0) == 1 {
 		g.cachedGauge.ReportGauge(g.value())
+		atomic.StoreInt64(&g.lastUpdateUnix, globalNow().Unix())
+		return false
 	}
+
+	// Check if gauge has expired
+	if g.scope != nil && globalNow().Unix() >
+		atomic.LoadInt64(&g.lastUpdateUnix)+g.scope.registry.expirePeriodSeconds {
+		atomic.StoreUint32(&g.expired, 1)
+		return true
+	}
+
+	return false
 }
 
 func (g *gauge) snapshot() float64 {
@@ -257,13 +374,16 @@ func (r *timerNoReporterSink) Flush() {
 
 type histogram struct {
 	htype            histogramType
-	name             string
 	tags             map[string]string
 	reporter         StatsReporter
 	specification    Buckets
 	buckets          []histogramBucket
 	lookupByValue    []float64
 	lookupByDuration []int
+	lastUpdateUnix   int64
+	expired          uint32
+	scope            *scope
+	name             string
 }
 
 type histogramType int
@@ -274,11 +394,12 @@ const (
 )
 
 func newHistogram(
-	name string,
 	tags map[string]string,
 	reporter StatsReporter,
 	buckets Buckets,
 	cachedHistogram CachedHistogram,
+	scope *scope,
+	name string,
 ) *histogram {
 	htype := valueHistogramType
 	if _, ok := buckets.(DurationBuckets); ok {
@@ -289,13 +410,15 @@ func newHistogram(
 
 	h := &histogram{
 		htype:            htype,
-		name:             name,
 		tags:             tags,
 		reporter:         reporter,
 		specification:    buckets,
 		buckets:          make([]histogramBucket, 0, len(pairs)),
 		lookupByValue:    make([]float64, 0, len(pairs)),
 		lookupByDuration: make([]int, 0, len(pairs)),
+		scope:            scope,
+		name:             name,
+		lastUpdateUnix:   globalNow().Unix(),
 	}
 
 	for _, pair := range pairs {
@@ -314,7 +437,8 @@ func (h *histogram) addBucket(b histogramBucket) {
 	h.lookupByDuration = append(h.lookupByDuration, int(b.durationUpperBound))
 }
 
-func (h *histogram) report(name string, tags map[string]string, r StatsReporter) {
+func (h *histogram) report(name string, tags map[string]string, r StatsReporter) bool {
+	newValues := false
 	for i := range h.buckets {
 		samples := h.buckets[i].samples.value()
 		if samples == 0 {
@@ -330,10 +454,27 @@ func (h *histogram) report(name string, tags map[string]string, r StatsReporter)
 				h.buckets[i].durationLowerBound, h.buckets[i].durationUpperBound,
 				samples)
 		}
+
+		newValues = true
 	}
+
+	if newValues {
+		atomic.StoreInt64(&h.lastUpdateUnix, globalNow().Unix())
+		return false
+	}
+
+	// Check if histogram has expired
+	if h.scope != nil && globalNow().Unix() >
+		atomic.LoadInt64(&h.lastUpdateUnix)+h.scope.registry.expirePeriodSeconds {
+		atomic.StoreUint32(&h.expired, 1)
+		return true
+	}
+
+	return false
 }
 
-func (h *histogram) cachedReport() {
+func (h *histogram) cachedReport() bool {
+	newValues := false
 	for i := range h.buckets {
 		samples := h.buckets[i].samples.value()
 		if samples == 0 {
@@ -345,7 +486,23 @@ func (h *histogram) cachedReport() {
 		case durationHistogramType:
 			h.buckets[i].cachedDurationBucket.ReportSamples(samples)
 		}
+
+		newValues = true
 	}
+
+	if newValues {
+		atomic.StoreInt64(&h.lastUpdateUnix, globalNow().Unix())
+		return false
+	}
+
+	// Check if histogram has expired
+	if h.scope != nil && globalNow().Unix() >
+		atomic.LoadInt64(&h.lastUpdateUnix)+h.scope.registry.expirePeriodSeconds {
+		atomic.StoreUint32(&h.expired, 1)
+		return true
+	}
+
+	return false
 }
 
 func (h *histogram) RecordValue(value float64) {
@@ -355,6 +512,35 @@ func (h *histogram) RecordValue(value float64) {
 	// we always have a math.MaxFloat64 bucket.
 	idx := sort.SearchFloat64s(h.lookupByValue, value)
 	h.buckets[idx].samples.Inc(1)
+
+	if atomic.LoadUint32(&h.expired) == 1 && h.scope != nil {
+		// Histogram has expired, but direct ref was held and counter
+		// was incremented, therefore insert back into scope
+		scope := h.scope.getCurrentScope()
+
+		scope.hm.Lock()
+		if histograms, ok := scope.histograms[h.name]; !ok {
+			scope.histograms[h.name] = []*histogram{h}
+		} else {
+			exists := false
+			for _, histogram := range histograms {
+				if histogram == h {
+					exists = true
+					break
+				}
+			}
+
+			if !exists {
+				// Another histogram with the same name was created
+				// so add this to slice
+				scope.histograms[h.name] = append(scope.histograms[h.name], h)
+			}
+		}
+		scope.hm.Unlock()
+
+		atomic.StoreUint32(&h.expired, 0)
+		atomic.StoreInt64(&h.lastUpdateUnix, globalNow().Unix())
+	}
 }
 
 func (h *histogram) RecordDuration(value time.Duration) {
@@ -364,6 +550,35 @@ func (h *histogram) RecordDuration(value time.Duration) {
 	// we always have a math.MaxInt64 bucket.
 	idx := sort.SearchInts(h.lookupByDuration, int(value))
 	h.buckets[idx].samples.Inc(1)
+
+	if atomic.LoadUint32(&h.expired) == 1 && h.scope != nil {
+		// Histogram has expired, but direct ref was held and counter
+		// was incremented, therefore insert back into scope
+		scope := h.scope.getCurrentScope()
+
+		scope.hm.Lock()
+		if histograms, ok := scope.histograms[h.name]; !ok {
+			scope.histograms[h.name] = []*histogram{h}
+		} else {
+			exists := false
+			for _, histogram := range histograms {
+				if histogram == h {
+					exists = true
+					break
+				}
+			}
+
+			if !exists {
+				// Another histogram with the same name was created
+				// so add this to slice
+				scope.histograms[h.name] = append(scope.histograms[h.name], h)
+			}
+		}
+		scope.hm.Unlock()
+
+		atomic.StoreUint32(&h.expired, 0)
+		atomic.StoreInt64(&h.lastUpdateUnix, globalNow().Unix())
+	}
 }
 
 func (h *histogram) Start() Stopwatch {
@@ -421,7 +636,7 @@ func newHistogramBucket(
 	cachedHistogram CachedHistogram,
 ) histogramBucket {
 	bucket := histogramBucket{
-		samples:            newCounter(nil),
+		samples:            newCounter(nil, "", nil),
 		valueLowerBound:    valueLowerBound,
 		valueUpperBound:    valueUpperBound,
 		durationLowerBound: durationLowerBound,
