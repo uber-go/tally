@@ -133,6 +133,17 @@ func (c *counter) report(name string, tags map[string]string, r StatsReporter) b
 	if c.scope != nil && globalNow().Unix() >
 		atomic.LoadInt64(&c.lastUpdateUnix)+c.scope.registry.expirePeriodSeconds {
 		atomic.StoreUint32(&c.expired, 1)
+		// Check once more for possible race where value updated between
+		// beginning of this call
+		delta = c.value()
+		if delta != 0 {
+			r.ReportCounter(name, tags, delta)
+			atomic.StoreInt64(&c.lastUpdateUnix, globalNow().Unix())
+			atomic.StoreUint32(&c.expired, 0)
+
+			return false
+		}
+
 		return true
 	}
 
@@ -151,6 +162,18 @@ func (c *counter) cachedReport() bool {
 	if c.scope != nil && globalNow().Unix() >
 		atomic.LoadInt64(&c.lastUpdateUnix)+c.scope.registry.expirePeriodSeconds {
 		atomic.StoreUint32(&c.expired, 1)
+
+		// Check once more for possible race where value updated between
+		// beginning of this call
+		delta = c.value()
+		if delta != 0 {
+			c.cachedCount.ReportCount(delta)
+			atomic.StoreInt64(&c.lastUpdateUnix, globalNow().Unix())
+			atomic.StoreUint32(&c.expired, 0)
+
+			return false
+		}
+
 		return true
 	}
 
@@ -229,6 +252,17 @@ func (g *gauge) report(name string, tags map[string]string, r StatsReporter) boo
 	if g.scope != nil && globalNow().Unix() >
 		atomic.LoadInt64(&g.lastUpdateUnix)+g.scope.registry.expirePeriodSeconds {
 		atomic.StoreUint32(&g.expired, 1)
+
+		// Check once more for possible race where value updated between
+		// beginning of this call
+		if atomic.SwapUint64(&g.updated, 0) == 1 {
+			r.ReportGauge(name, tags, g.value())
+			atomic.StoreInt64(&g.lastUpdateUnix, globalNow().Unix())
+			atomic.StoreUint32(&g.expired, 0)
+
+			return false
+		}
+
 		return true
 	}
 
@@ -246,6 +280,17 @@ func (g *gauge) cachedReport() bool {
 	if g.scope != nil && globalNow().Unix() >
 		atomic.LoadInt64(&g.lastUpdateUnix)+g.scope.registry.expirePeriodSeconds {
 		atomic.StoreUint32(&g.expired, 1)
+
+		// Check once more for possible race where value updated between
+		// beginning of this call
+		if atomic.SwapUint64(&g.updated, 0) == 1 {
+			g.cachedGauge.ReportGauge(g.value())
+			atomic.StoreInt64(&g.lastUpdateUnix, globalNow().Unix())
+			atomic.StoreUint32(&g.expired, 0)
+
+			return false
+		}
+
 		return true
 	}
 
@@ -438,7 +483,7 @@ func (h *histogram) addBucket(b histogramBucket) {
 	h.lookupByDuration = append(h.lookupByDuration, int(b.durationUpperBound))
 }
 
-func (h *histogram) report(name string, tags map[string]string, r StatsReporter) bool {
+func (h *histogram) reportValues(name string, tags map[string]string, r StatsReporter) bool {
 	newValues := false
 	for i := range h.buckets {
 		samples := h.buckets[i].samples.value()
@@ -459,7 +504,11 @@ func (h *histogram) report(name string, tags map[string]string, r StatsReporter)
 		newValues = true
 	}
 
-	if newValues {
+	return newValues
+}
+
+func (h *histogram) report(name string, tags map[string]string, r StatsReporter) bool {
+	if h.reportValues(name, tags, r) {
 		atomic.StoreInt64(&h.lastUpdateUnix, globalNow().Unix())
 		return false
 	}
@@ -468,13 +517,23 @@ func (h *histogram) report(name string, tags map[string]string, r StatsReporter)
 	if h.scope != nil && globalNow().Unix() >
 		atomic.LoadInt64(&h.lastUpdateUnix)+h.scope.registry.expirePeriodSeconds {
 		atomic.StoreUint32(&h.expired, 1)
+
+		// Check once more for possible race where values updated between
+		// beginning of this call
+		if h.reportValues(name, tags, r) {
+			atomic.StoreInt64(&h.lastUpdateUnix, globalNow().Unix())
+			atomic.StoreUint32(&h.expired, 0)
+
+			return false
+		}
+
 		return true
 	}
 
 	return false
 }
 
-func (h *histogram) cachedReport() bool {
+func (h *histogram) cachedReportValues() bool {
 	newValues := false
 	for i := range h.buckets {
 		samples := h.buckets[i].samples.value()
@@ -491,7 +550,11 @@ func (h *histogram) cachedReport() bool {
 		newValues = true
 	}
 
-	if newValues {
+	return newValues
+}
+
+func (h *histogram) cachedReport() bool {
+	if h.cachedReportValues() {
 		atomic.StoreInt64(&h.lastUpdateUnix, globalNow().Unix())
 		return false
 	}
@@ -500,6 +563,16 @@ func (h *histogram) cachedReport() bool {
 	if h.scope != nil && globalNow().Unix() >
 		atomic.LoadInt64(&h.lastUpdateUnix)+h.scope.registry.expirePeriodSeconds {
 		atomic.StoreUint32(&h.expired, 1)
+
+		// Check once more for possible race where values updated between
+		// beginning of this call
+		if h.cachedReportValues() {
+			atomic.StoreInt64(&h.lastUpdateUnix, globalNow().Unix())
+			atomic.StoreUint32(&h.expired, 0)
+
+			return false
+		}
+
 		return true
 	}
 

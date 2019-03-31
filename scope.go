@@ -474,6 +474,12 @@ func (s *scope) Counter(name string) Counter {
 			curScope.counters[name] = counters
 		}
 		curScope.cm.Unlock()
+
+		// Protect against race where scope was expired since beginning
+		// of this call
+		if curScope.hasExpired() {
+			return s.Counter(name)
+		}
 	}
 
 	return counters[0]
@@ -501,6 +507,12 @@ func (s *scope) Gauge(name string) Gauge {
 			curScope.gauges[name] = gauges
 		}
 		s.gm.Unlock()
+
+		// Protect against race where scope was expired since beginning
+		// of this call
+		if curScope.hasExpired() {
+			return s.Gauge(name)
+		}
 	}
 
 	return gauges[0]
@@ -530,6 +542,12 @@ func (s *scope) Timer(name string) Timer {
 			curScope.timers[name] = timers
 		}
 		curScope.tm.Unlock()
+
+		// Protect against race where scope was expired since beginning
+		// of this call
+		if curScope.hasExpired() {
+			return s.Timer(name)
+		}
 	}
 
 	return timers[0]
@@ -564,6 +582,12 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 		}
 
 		curScope.hm.Unlock()
+
+		// Protect against race where scope was expired since beginning
+		// of this call
+		if curScope.hasExpired() {
+			return s.Histogram(name, b)
+		}
 	}
 
 	return histograms[0]
@@ -583,35 +607,34 @@ func (s *scope) subscope(prefix string, immutableTags map[string]string) Scope {
 	immutableTags = mergeRightTags(s.tags, immutableTags)
 	key := scopeRegistryKey(prefix, immutableTags)
 
-	curScope := s.getCurrentScope()
-	curScope.registry.RLock()
-	existing, ok := curScope.registry.subscopes[key]
+	s.registry.RLock()
+	existing, ok := s.registry.subscopes[key]
 	if ok {
-		curScope.registry.RUnlock()
+		s.registry.RUnlock()
 		return existing
 	}
-	curScope.registry.RUnlock()
+	s.registry.RUnlock()
 
-	curScope.registry.Lock()
-	defer curScope.registry.Unlock()
+	s.registry.Lock()
+	defer s.registry.Unlock()
 
-	existing, ok = curScope.registry.subscopes[key]
+	existing, ok = s.registry.subscopes[key]
 	if ok {
 		return existing
 	}
 
 	subscope := &scope{
-		separator: curScope.separator,
+		separator: s.separator,
 		prefix:    prefix,
 		// NB(prateek): don't need to copy the tags here,
 		// we assume the map provided is immutable.
 		tags:           immutableTags,
-		reporter:       curScope.reporter,
-		cachedReporter: curScope.cachedReporter,
-		baseReporter:   curScope.baseReporter,
-		defaultBuckets: curScope.defaultBuckets,
-		sanitizer:      curScope.sanitizer,
-		registry:       curScope.registry,
+		reporter:       s.reporter,
+		cachedReporter: s.cachedReporter,
+		baseReporter:   s.baseReporter,
+		defaultBuckets: s.defaultBuckets,
+		sanitizer:      s.sanitizer,
+		registry:       s.registry,
 		createdUnix:    globalNow().Unix(),
 
 		counters:   make(map[string][]*counter),
@@ -620,7 +643,7 @@ func (s *scope) subscope(prefix string, immutableTags map[string]string) Scope {
 		histograms: make(map[string][]*histogram),
 	}
 
-	curScope.registry.subscopes[key] = subscope
+	s.registry.subscopes[key] = subscope
 	return subscope
 }
 
