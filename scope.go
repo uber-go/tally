@@ -156,7 +156,9 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		opts.DefaultBuckets = defaultScopeBuckets
 	}
 
-	if opts.ExpiryPeriod == 0 {
+	if opts.ExpiryPeriod < time.Second {
+		// ExpiryPeriod cannot be less than a second since we
+		// perform expiry calcuation on time.Unix()
 		opts.ExpiryPeriod = defaultExpiry
 	}
 
@@ -430,7 +432,7 @@ func (s *scope) getCurrentScope() *scope {
 		registryName := scopeRegistryKey(s.prefix, s.tags)
 		s.registry.RLock()
 		curScope, exists := s.registry.subscopes[registryName]
-		s.registry.RLock()
+		s.registry.RUnlock()
 
 		if exists {
 			// A new scope exists, return that instead of the current one

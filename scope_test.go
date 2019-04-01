@@ -826,3 +826,43 @@ func TestScopeFlushOnClose(t *testing.T) {
 
 	assert.NoError(t, closer.Close())
 }
+
+func TestScopeExpiryOptions(t *testing.T) {
+	r := newTestStatsReporter()
+
+	scope := newRootScope(ScopeOptions{Reporter: r, ExpiryPeriod: time.Second}, time.Hour)
+	assert.Equal(t, int64(1), scope.registry.expirePeriodSeconds)
+
+	scope = newRootScope(ScopeOptions{Reporter: r, ExpiryPeriod: time.Millisecond}, time.Hour)
+	assert.Equal(t, int64(defaultExpiry.Seconds()), scope.registry.expirePeriodSeconds)
+
+	scope = newRootScope(ScopeOptions{Reporter: r}, time.Hour)
+	assert.Equal(t, int64(defaultExpiry.Seconds()), scope.registry.expirePeriodSeconds)
+
+	scope = newRootScope(ScopeOptions{Reporter: r, ExpiryPeriod: 10 * time.Second}, time.Hour)
+	assert.Equal(t, int64(10), scope.registry.expirePeriodSeconds)
+}
+
+func TestRootScopeExpiry(t *testing.T) {
+	r := newTestStatsReporter()
+	scope := newRootScope(ScopeOptions{Reporter: r, ExpiryPeriod: time.Second}, time.Hour)
+
+	for scope.hasExpired() == false {
+		scope.reportLoopRun()
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	assert.Equal(t, 0, len(scope.registry.subscopes))
+	ss := scope.subscope("test", nil)
+	assert.True(t, scope.hasExpired())
+	assert.Equal(t, 1, len(scope.registry.subscopes))
+	key := scopeRegistryKey("test", nil)
+	assert.Equal(t, scope.registry.subscopes[key], ss)
+
+	c := scope.Counter("testCount")
+	c.Inc(1)
+	assert.False(t, scope.hasExpired())
+	assert.Equal(t, 2, len(scope.registry.subscopes))
+	key = scopeRegistryKey("", nil)
+	assert.Equal(t, scope.registry.subscopes[key], scope)
+}
