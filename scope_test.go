@@ -1122,6 +1122,7 @@ func TestScopeSnapshotMultiMetric(t *testing.T) {
 	b, err := LinearDurationBuckets(time.Second, time.Second, 10)
 	assert.NoError(t, err)
 	expiredHistogram := expiredScope.Histogram("hist", b)
+	expiredHistogram2 := expiredScope.Histogram("hist2", MustMakeLinearValueBuckets(0, 10, 10))
 
 	for expiredScope.hasExpired() == false {
 		scope.reportLoopRun()
@@ -1136,6 +1137,7 @@ func TestScopeSnapshotMultiMetric(t *testing.T) {
 	newGauge := newScope.Gauge("gauge")
 	newTimer := newScope.Timer("timer")
 	newHistogram := newScope.Histogram("hist", b)
+	newHistogram2 := newScope.Histogram("hist2", MustMakeLinearValueBuckets(0, 10, 10))
 
 	r.cg.Add(2)
 	expiredCounter.Inc(1)
@@ -1147,14 +1149,18 @@ func TestScopeSnapshotMultiMetric(t *testing.T) {
 	expiredTimer.Record(time.Second)
 	newTimer.Record(2 * time.Second)
 	newTimer.Record(3 * time.Second)
-	r.hg.Add(1)
+	r.hg.Add(4)
 	expiredHistogram.RecordDuration(5 * time.Second)
-	newHistogram.RecordDuration(6 * time.Second)
+	sw := newHistogram.Start()
+	sw.Stop()
+	expiredHistogram2.RecordValue(42.5)
+	newHistogram2.RecordValue(52.5)
 
 	assert.Equal(t, 2, len(newScope.counters["count"]))
 	assert.Equal(t, 2, len(newScope.gauges["gauge"]))
 	assert.Equal(t, 1, len(newScope.timers["timer"]))
 	assert.Equal(t, 2, len(newScope.histograms["hist"]))
+	assert.Equal(t, 2, len(newScope.histograms["hist2"]))
 
 	snapshot := newScope.Snapshot()
 	counters := snapshot.Counters()
@@ -1165,15 +1171,18 @@ func TestScopeSnapshotMultiMetric(t *testing.T) {
 	assert.Equal(t, 1, len(counters))
 	assert.Equal(t, 1, len(gauges))
 	assert.Equal(t, 1, len(timers))
-	assert.Equal(t, 1, len(histograms))
+	assert.Equal(t, 2, len(histograms))
 
 	assert.Equal(t, "test.count", counters["test.count+"].Name())
 	assert.Equal(t, "test.gauge", gauges["test.gauge+"].Name())
 	assert.Equal(t, "test.timer", timers["test.timer+"].Name())
 	assert.Equal(t, "test.hist", histograms["test.hist+"].Name())
+	assert.Equal(t, "test.hist2", histograms["test.hist2+"].Name())
 
 	assert.Equal(t, int64(2), counters["test.count+"].Value())
 	assert.Equal(t, float64(3), gauges["test.gauge+"].Value())
 	assert.Equal(t, int64(1), histograms["test.hist+"].Durations()[5*time.Second])
-	assert.Equal(t, int64(1), histograms["test.hist+"].Durations()[6*time.Second])
+	assert.Equal(t, int64(1), histograms["test.hist+"].Durations()[time.Second])
+	assert.Equal(t, int64(1), histograms["test.hist2+"].Values()[50.0])
+	assert.Equal(t, int64(1), histograms["test.hist2+"].Values()[60.0])
 }
