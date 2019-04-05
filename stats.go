@@ -79,33 +79,25 @@ func (c *counter) Inc(v int64) {
 	atomic.AddInt64(&c.curr, v)
 
 	if atomic.LoadUint32(&c.expired) == 1 && c.scope != nil {
+		if !atomic.CompareAndSwapUint32(&c.expired, 1, 0) {
+			// Another routine got here first
+			return
+		}
 		// Counter has expired, but direct ref was held and counter
 		// was incremented, therefore insert back into scope
 		scope := c.scope.getCurrentScope()
 
 		scope.cm.Lock()
-		if counters, ok := scope.counters[c.name]; !ok {
+		if _, ok := scope.counters[c.name]; !ok {
 			// No counters with the same name were created since expiry
 			scope.counters[c.name] = []*counter{c}
 		} else {
-			exists := false
-			for _, counter := range counters {
-				if counter == c {
-					// This counter was reinserted already by another routine
-					exists = true
-					break
-				}
-			}
-
-			if !exists {
-				// Another counter with the same name was created
-				// and this expired counter is not in the list so add to slice
-				scope.counters[c.name] = append(scope.counters[c.name], c)
-			}
+			// Another counter with the same name was created
+			// and this expired counter is not in the list so add to slice
+			scope.counters[c.name] = append(scope.counters[c.name], c)
 		}
-		scope.cm.Unlock()
 
-		atomic.StoreUint32(&c.expired, 0)
+		scope.cm.Unlock()
 	}
 }
 
@@ -208,32 +200,25 @@ func (g *gauge) Update(v float64) {
 	atomic.StoreUint64(&g.updated, 1)
 
 	if atomic.LoadUint32(&g.expired) == 1 && g.scope != nil {
+		if !atomic.CompareAndSwapUint32(&g.expired, 1, 0) {
+			// Another routine got here first
+			return
+		}
+
 		// Gauge has expired, but direct ref was held and gauge
 		// was updated, therefore insert back into scope
 		scope := g.scope.getCurrentScope()
 
 		scope.gm.Lock()
-		if gauges, ok := scope.gauges[g.name]; !ok {
+		if _, ok := scope.gauges[g.name]; !ok {
 			scope.gauges[g.name] = []*gauge{g}
 		} else {
-			exists := false
-			for _, gauge := range gauges {
-				if gauge == g {
-					// This gauge was reinserted already by another routine
-					exists = true
-					break
-				}
-			}
-
-			if !exists {
-				// Another gauge with the same name was created, so add this
-				// to slice
-				scope.gauges[g.name] = append(scope.gauges[g.name], g)
-			}
+			// Another gauge with the same name was created, so add this
+			// to slice
+			scope.gauges[g.name] = append(scope.gauges[g.name], g)
 		}
-		scope.gm.Unlock()
 
-		atomic.StoreUint32(&g.expired, 0)
+		scope.gm.Unlock()
 	}
 }
 
@@ -588,32 +573,25 @@ func (h *histogram) RecordValue(value float64) {
 	h.buckets[idx].samples.Inc(1)
 
 	if atomic.LoadUint32(&h.expired) == 1 && h.scope != nil {
+		if !atomic.CompareAndSwapUint32(&h.expired, 1, 0) {
+			// Another routine got here first
+			return
+		}
+
 		// Histogram has expired, but direct ref was held and histogram
 		// was updated, therefore insert back into scope
 		scope := h.scope.getCurrentScope()
 
 		scope.hm.Lock()
-		if histograms, ok := scope.histograms[h.name]; !ok {
+		if _, ok := scope.histograms[h.name]; !ok {
 			scope.histograms[h.name] = []*histogram{h}
 		} else {
-			exists := false
-			for _, histogram := range histograms {
-				if histogram == h {
-					// Another routine has already inserted this histogram
-					exists = true
-					break
-				}
-			}
-
-			if !exists {
-				// Another histogram with the same name was created
-				// so add this to slice
-				scope.histograms[h.name] = append(scope.histograms[h.name], h)
-			}
+			// Another histogram with the same name was created
+			// so add this to slice
+			scope.histograms[h.name] = append(scope.histograms[h.name], h)
 		}
-		scope.hm.Unlock()
 
-		atomic.StoreUint32(&h.expired, 0)
+		scope.hm.Unlock()
 	}
 }
 

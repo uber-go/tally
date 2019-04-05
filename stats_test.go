@@ -30,12 +30,20 @@ import (
 )
 
 type testSimpleCounter struct {
-	prev int64
-	curr int64
+	prev    int64
+	curr    int64
+	expired uint32
 }
 
 func (c *testSimpleCounter) Inc(v int64) {
 	atomic.AddInt64(&c.curr, v)
+}
+
+func (c *testSimpleCounter) IncWithExpiredCheck(v int64) {
+	atomic.AddInt64(&c.curr, v)
+	if atomic.CompareAndSwapUint32(&c.expired, 1, 0) {
+		c.prev = 1
+	}
 }
 
 type testAlwaysCheckCounter struct {

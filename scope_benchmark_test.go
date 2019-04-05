@@ -56,6 +56,18 @@ func BenchmarkCounterAllocation(b *testing.B) {
 	}
 }
 
+func BenchmarkMetricLookup(b *testing.B) {
+	root, _ := NewRootScope(ScopeOptions{
+		Prefix:   "funkytown",
+		Reporter: NullStatsReporter,
+	}, 0)
+
+	for i := 0; i < b.N; i++ {
+		root.SubScope("myScope").Tagged(
+			map[string]string{"testTag": "testValue", "testTag2": "testValue"}).Counter("test").Inc(1)
+	}
+}
+
 func BenchmarkSanitizedCounterAllocation(b *testing.B) {
 	root, _ := NewRootScope(ScopeOptions{
 		Prefix:          "funkytown",

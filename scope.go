@@ -203,76 +203,50 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 
 // report dumps all aggregated stats into the reporter. Should be called automatically by the root scope periodically.
 func (s *scope) report(r StatsReporter) bool {
-	var numMetrics, i int
+	tracker := newMetricExpiryTracker()
 
-	s.cm.Lock()
+	s.cm.RLock()
 	for name, counters := range s.counters {
 		for _, counter := range counters {
-			if expired := counter.report(s.fullyQualifiedName(name), s.tags, r); !expired {
-				counters[i] = counter
-				i++
+			if counter.report(s.fullyQualifiedName(name), s.tags, r) {
+				tracker.expiredCounters[counter] = struct{}{}
 			}
 		}
-
-		if i == 0 {
-			delete(s.counters, name)
-		} else {
-			s.counters[name] = counters[:i]
-		}
-
-		i = 0
 	}
 
-	numMetrics += len(s.counters)
-	s.cm.Unlock()
+	tracker.numCounters = len(s.counters)
+	s.cm.RUnlock()
 
-	s.gm.Lock()
+	s.gm.RLock()
 	for name, gauges := range s.gauges {
 		for _, gauge := range gauges {
-			if expired := gauge.report(s.fullyQualifiedName(name), s.tags, r); !expired {
-				gauges[i] = gauge
-				i++
+			if gauge.report(s.fullyQualifiedName(name), s.tags, r) {
+				tracker.expiredGauges[gauge] = struct{}{}
 			}
 		}
-
-		if i == 0 {
-			delete(s.gauges, name)
-		} else {
-			s.gauges[name] = gauges[:i]
-		}
-
-		i = 0
 	}
 
-	numMetrics += len(s.gauges)
-	s.gm.Unlock()
+	tracker.numGauges = len(s.gauges)
+	s.gm.RUnlock()
 
 	// We do nothing for timers here because timers report directly to ths StatsReporter without buffering.
 	// If the scope is expired, new timers will be added to the fresh scope and refs to existing timers
 	// will continue to emit them directly to the reporters.
 
-	s.hm.Lock()
+	s.hm.RLock()
 	for name, histograms := range s.histograms {
 		for _, histogram := range histograms {
-			if expired := histogram.report(s.fullyQualifiedName(name), s.tags, r); !expired {
-				histograms[i] = histogram
-				i++
+			if histogram.report(s.fullyQualifiedName(name), s.tags, r) {
+				tracker.expiredHistograms[histogram] = struct{}{}
 			}
 		}
-
-		if i == 0 {
-			delete(s.histograms, name)
-		} else {
-			s.histograms[name] = histograms[:i]
-		}
-
-		i = 0
 	}
 
-	numMetrics += len(s.histograms)
-	s.hm.Unlock()
+	tracker.numHistograms = len(s.histograms)
+	s.hm.RUnlock()
 
-	if numMetrics == 0 && globalNow().Unix() > s.createdUnix+s.getExpirySeconds() {
+	s.clearExpiredMetrics(tracker)
+	if tracker.numMetrics() == 0 && globalNow().Unix() > s.createdUnix+s.getExpirySeconds() {
 		// All metrics for the scope have expired and it's been longer than the
 		// expiry period.
 		return true
@@ -283,76 +257,50 @@ func (s *scope) report(r StatsReporter) bool {
 }
 
 func (s *scope) cachedReport(c CachedStatsReporter) bool {
-	var numMetrics, i int
+	tracker := newMetricExpiryTracker()
 
-	s.cm.Lock()
-	for key, counters := range s.counters {
+	s.cm.RLock()
+	for _, counters := range s.counters {
 		for _, counter := range counters {
-			if expired := counter.cachedReport(); !expired {
-				counters[i] = counter
-				i++
+			if counter.cachedReport() {
+				tracker.expiredCounters[counter] = struct{}{}
 			}
 		}
-
-		if i == 0 {
-			delete(s.counters, key)
-		} else {
-			s.counters[key] = counters[:i]
-		}
-
-		i = 0
 	}
 
-	numMetrics += len(s.counters)
-	s.cm.Unlock()
+	tracker.numCounters = len(s.counters)
+	s.cm.RUnlock()
 
-	s.gm.Lock()
-	for key, gauges := range s.gauges {
+	s.gm.RLock()
+	for _, gauges := range s.gauges {
 		for _, gauge := range gauges {
-			if expired := gauge.cachedReport(); !expired {
-				gauges[i] = gauge
-				i++
+			if gauge.cachedReport() {
+				tracker.expiredGauges[gauge] = struct{}{}
 			}
 		}
-
-		if i == 0 {
-			delete(s.gauges, key)
-		} else {
-			s.gauges[key] = gauges[:i]
-		}
-
-		i = 0
 	}
 
-	numMetrics += len(s.gauges)
-	s.gm.Unlock()
+	tracker.numGauges = len(s.gauges)
+	s.gm.RUnlock()
 
 	// We do nothing for timers here because timers report directly to ths StatsReporter without buffering.
 	// If the scope is expired, new timers will be added to the fresh scope and refs to existing timers
 	// will continue to emit them directly to the reporters.
 
-	s.hm.Lock()
-	for key, histograms := range s.histograms {
+	s.hm.RLock()
+	for _, histograms := range s.histograms {
 		for _, histogram := range histograms {
-			if expired := histogram.cachedReport(); !expired {
-				histograms[i] = histogram
-				i++
+			if histogram.cachedReport() {
+				tracker.expiredHistograms[histogram] = struct{}{}
 			}
 		}
-
-		if i == 0 {
-			delete(s.histograms, key)
-		} else {
-			s.histograms[key] = histograms[:i]
-		}
-
-		i = 0
 	}
 
-	numMetrics += len(s.histograms)
-	s.hm.Unlock()
+	tracker.numHistograms = len(s.histograms)
+	s.hm.RUnlock()
 
-	if numMetrics == 0 && globalNow().Unix() > s.createdUnix+s.getExpirySeconds() {
+	s.clearExpiredMetrics(tracker)
+	if tracker.numMetrics() == 0 && globalNow().Unix() > s.createdUnix+s.getExpirySeconds() {
 		// All metrics for the scope have expired and it's been longer than the
 		// expiry period.
 		return true
@@ -360,6 +308,82 @@ func (s *scope) cachedReport(c CachedStatsReporter) bool {
 
 	c.Flush()
 	return false
+}
+
+func (s *scope) clearExpiredMetrics(tracker *metricExpiryTracker) {
+	var i int
+
+	if len(tracker.expiredCounters) > 0 {
+		s.cm.Lock()
+		for name, counters := range s.counters {
+			for _, counter := range counters {
+				if _, exists := tracker.expiredCounters[counter]; !exists ||
+					(exists && atomic.LoadUint32(&counter.expired) == 0) {
+					counters[i] = counter
+					i++
+				}
+			}
+
+			if i == 0 {
+				delete(s.counters, name)
+			} else {
+				s.counters[name] = counters[:i]
+			}
+
+			i = 0
+		}
+
+		tracker.numCounters = len(s.counters)
+		s.cm.Unlock()
+	}
+
+	if len(tracker.expiredGauges) > 0 {
+		s.gm.Lock()
+		for name, gauges := range s.gauges {
+			for _, gauge := range gauges {
+				if _, exists := tracker.expiredGauges[gauge]; !exists ||
+					(exists && atomic.LoadUint32(&gauge.expired) == 0) {
+					gauges[i] = gauge
+					i++
+				}
+			}
+
+			if i == 0 {
+				delete(s.gauges, name)
+			} else {
+				s.gauges[name] = gauges[:i]
+			}
+
+			i = 0
+		}
+
+		tracker.numGauges = len(s.gauges)
+		s.gm.Unlock()
+	}
+
+	if len(tracker.expiredHistograms) > 0 {
+		s.hm.Lock()
+		for name, histograms := range s.histograms {
+			for _, histogram := range histograms {
+				if _, exists := tracker.expiredHistograms[histogram]; !exists ||
+					(exists && atomic.LoadUint32(&histogram.expired) == 0) {
+					histograms[i] = histogram
+					i++
+				}
+			}
+
+			if i == 0 {
+				delete(s.histograms, name)
+			} else {
+				s.histograms[name] = histograms[:i]
+			}
+
+			i = 0
+		}
+
+		tracker.numHistograms = len(s.histograms)
+		s.hm.Unlock()
+	}
 }
 
 // reportLoop is used by the root scope for periodic reporting
@@ -393,23 +417,50 @@ func (s *scope) reportLoopRun() {
 
 // reports current registry with scope status lock held
 func (s *scope) reportRegistryWithLock() {
-	s.registry.Lock()
+	scopesToRemove := map[string]struct{}{}
+	s.registry.RLock()
 	if s.reporter != nil {
 		for name, ss := range s.registry.subscopes {
-			if expired := ss.report(s.reporter); expired {
-				delete(s.registry.subscopes, name)
+			if ss.report(s.reporter) {
 				atomic.StoreUint32(&ss.expired, 1)
+				scopesToRemove[name] = struct{}{}
 			}
 		}
 	} else if s.cachedReporter != nil {
 		for name, ss := range s.registry.subscopes {
-			if expired := ss.cachedReport(s.cachedReporter); expired {
-				delete(s.registry.subscopes, name)
+			if ss.cachedReport(s.cachedReporter) {
 				atomic.StoreUint32(&ss.expired, 1)
+				scopesToRemove[name] = struct{}{}
 			}
 		}
 	}
-	s.registry.Unlock()
+	s.registry.RUnlock()
+
+	if len(scopesToRemove) > 0 {
+		s.registry.Lock()
+		for name, ss := range s.registry.subscopes {
+			if _, exists := scopesToRemove[name]; exists && ss.hasExpired() {
+				// Confirm that no new metrics have been added in the meantime
+				mets := 0
+				ss.cm.RLock()
+				mets += len(ss.counters)
+				ss.cm.RUnlock()
+
+				ss.gm.RLock()
+				mets += len(ss.gauges)
+				ss.gm.RUnlock()
+
+				ss.hm.RLock()
+				mets += len(ss.histograms)
+				ss.hm.RUnlock()
+
+				if mets == 0 {
+					delete(s.registry.subscopes, name)
+				}
+			}
+		}
+		s.registry.Unlock()
+	}
 }
 
 // getExpirySeconds gets the expiry period of metrics for this scope
@@ -1019,4 +1070,26 @@ func (s *histogramSnapshot) Values() map[float64]int64 {
 
 func (s *histogramSnapshot) Durations() map[time.Duration]int64 {
 	return s.durations
+}
+
+type metricExpiryTracker struct {
+	expiredCounters   map[*counter]struct{}
+	expiredGauges     map[*gauge]struct{}
+	expiredHistograms map[*histogram]struct{}
+
+	numCounters   int
+	numGauges     int
+	numHistograms int
+}
+
+func newMetricExpiryTracker() *metricExpiryTracker {
+	return &metricExpiryTracker{
+		expiredCounters:   map[*counter]struct{}{},
+		expiredGauges:     map[*gauge]struct{}{},
+		expiredHistograms: map[*histogram]struct{}{},
+	}
+}
+
+func (m *metricExpiryTracker) numMetrics() int {
+	return m.numCounters + m.numGauges + m.numHistograms
 }

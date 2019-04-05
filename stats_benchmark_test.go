@@ -32,6 +32,12 @@ func BenchmarkSimpleCounterInc(b *testing.B) {
 	}
 }
 
+func BenchmarkSimpleCounterExpiredInc(b *testing.B) {
+	c := &testSimpleCounter{}
+	for n := 0; n < b.N; n++ {
+		c.IncWithExpiredCheck(1)
+	}
+}
 func BenchmarkAlwaysCheckCounterInc(b *testing.B) {
 	s := newRootScope(ScopeOptions{Reporter: newTestStatsReporter()}, 0)
 	c := newTestAlwaysCheckCounter("", s)
