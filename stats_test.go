@@ -185,7 +185,7 @@ func TestHistogramValueSamples(t *testing.T) {
 		h.RecordValue(offset + rand.Float64()*10)
 	}
 
-	h.report(h.name, h.tags, r)
+	h.report("h1", h.tags, r)
 
 	assert.Equal(t, 3, r.valueSamples[10.0])
 	assert.Equal(t, 5, r.valueSamples[60.0])
@@ -208,7 +208,7 @@ func TestHistogramDurationSamples(t *testing.T) {
 			time.Duration(rand.Float64()*float64(10*time.Millisecond)))
 	}
 
-	h.report(h.name, h.tags, r)
+	h.report("h1", h.tags, r)
 
 	assert.Equal(t, 3, r.durationSamples[10*time.Millisecond])
 	assert.Equal(t, 5, r.durationSamples[60*time.Millisecond])

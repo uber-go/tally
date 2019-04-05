@@ -57,46 +57,41 @@ func (c *capabilities) Tagging() bool {
 }
 
 type counter struct {
-	prev           int64
-	curr           int64
-	cachedCount    CachedCount
-	lastUpdateUnix int64
-	expired        uint32
-	scope          *scope
-	name           string
+	prev        int64
+	curr        int64
+	cachedCount CachedCount
+	tracker     *metricExpiryTracker
 }
 
 func newCounter(cachedCount CachedCount, name string, scope *scope) *counter {
 	return &counter{
-		cachedCount:    cachedCount,
-		scope:          scope,
-		name:           name,
-		lastUpdateUnix: globalNow().Unix(),
+		cachedCount: cachedCount,
+		tracker: &metricExpiryTracker{
+			scope:          scope,
+			name:           name,
+			lastUpdateUnix: globalNow().Unix(),
+		},
 	}
 }
 
 func (c *counter) Inc(v int64) {
 	atomic.AddInt64(&c.curr, v)
 
-	if atomic.LoadUint32(&c.expired) == 1 && c.scope != nil {
-		if !atomic.CompareAndSwapUint32(&c.expired, 1, 0) {
-			// Another routine got here first
-			return
-		}
+	if c.tracker.expiredAndUpdated() {
 		// Counter has expired, but direct ref was held and counter
 		// was incremented, therefore insert back into scope
-		scope := c.scope.getCurrentScope()
-
+		scope := c.tracker.scope.getCurrentScope()
 		scope.cm.Lock()
-		if _, ok := scope.counters[c.name]; !ok {
+		if _, ok := scope.counters[c.tracker.name]; !ok {
 			// No counters with the same name were created since expiry
-			scope.counters[c.name] = []*counter{c}
+			scope.counters[c.tracker.name] = []*counter{c}
 		} else {
 			// Another counter with the same name was created
 			// and this expired counter is not in the list so add to slice
-			scope.counters[c.name] = append(scope.counters[c.name], c)
+			scope.counters[c.tracker.name] = append(scope.counters[c.tracker.name], c)
 		}
 
+		c.tracker.resetUpdatedTime()
 		scope.cm.Unlock()
 	}
 }
@@ -116,82 +111,47 @@ func (c *counter) report(name string, tags map[string]string, r StatsReporter) b
 	delta := c.value()
 	if delta != 0 {
 		r.ReportCounter(name, tags, delta)
-		atomic.StoreInt64(&c.lastUpdateUnix, globalNow().Unix())
-
+		c.tracker.resetUpdatedTime()
 		return false
 	}
 
-	// Check if counter has expired
-	if c.scope != nil && globalNow().Unix() >
-		atomic.LoadInt64(&c.lastUpdateUnix)+c.scope.registry.expirePeriodSeconds {
-		atomic.StoreUint32(&c.expired, 1)
-		// Check once more for possible race where value updated between
-		// beginning of this call
-		delta = c.value()
-		if delta != 0 {
-			r.ReportCounter(name, tags, delta)
-			atomic.StoreInt64(&c.lastUpdateUnix, globalNow().Unix())
-			atomic.StoreUint32(&c.expired, 0)
-
-			return false
-		}
-
-		return true
-	}
-
-	return false
+	return c.tracker.checkExpiration()
 }
 
 func (c *counter) cachedReport() bool {
 	delta := c.value()
 	if delta != 0 {
 		c.cachedCount.ReportCount(delta)
-		atomic.StoreInt64(&c.lastUpdateUnix, globalNow().Unix())
+		c.tracker.resetUpdatedTime()
 		return false
 	}
 
-	// Check if counter has expired
-	if c.scope != nil && globalNow().Unix() >
-		atomic.LoadInt64(&c.lastUpdateUnix)+c.scope.registry.expirePeriodSeconds {
-		atomic.StoreUint32(&c.expired, 1)
-
-		// Check once more for possible race where value updated between
-		// beginning of this call
-		delta = c.value()
-		if delta != 0 {
-			c.cachedCount.ReportCount(delta)
-			atomic.StoreInt64(&c.lastUpdateUnix, globalNow().Unix())
-			atomic.StoreUint32(&c.expired, 0)
-
-			return false
-		}
-
-		return true
-	}
-
-	return false
+	return c.tracker.checkExpiration()
 }
 
 func (c *counter) snapshot() int64 {
 	return atomic.LoadInt64(&c.curr) - atomic.LoadInt64(&c.prev)
 }
 
+func (c *counter) expired() bool {
+	return atomic.LoadUint32(&c.tracker.expired) == 1
+}
+
 type gauge struct {
-	updated        uint64
-	curr           uint64
-	cachedGauge    CachedGauge
-	lastUpdateUnix int64
-	expired        uint32
-	scope          *scope
-	name           string
+	updated     uint64
+	curr        uint64
+	cachedGauge CachedGauge
+	tracker     *metricExpiryTracker
 }
 
 func newGauge(cachedGauge CachedGauge, name string, scope *scope) *gauge {
 	return &gauge{
-		cachedGauge:    cachedGauge,
-		scope:          scope,
-		lastUpdateUnix: globalNow().Unix(),
-		name:           name,
+		cachedGauge: cachedGauge,
+		tracker: &metricExpiryTracker{
+			scope:          scope,
+			lastUpdateUnix: globalNow().Unix(),
+			name:           name,
+		},
 	}
 }
 
@@ -199,25 +159,21 @@ func (g *gauge) Update(v float64) {
 	atomic.StoreUint64(&g.curr, math.Float64bits(v))
 	atomic.StoreUint64(&g.updated, 1)
 
-	if atomic.LoadUint32(&g.expired) == 1 && g.scope != nil {
-		if !atomic.CompareAndSwapUint32(&g.expired, 1, 0) {
-			// Another routine got here first
-			return
-		}
-
+	if g.tracker.expiredAndUpdated() {
 		// Gauge has expired, but direct ref was held and gauge
 		// was updated, therefore insert back into scope
-		scope := g.scope.getCurrentScope()
+		scope := g.tracker.scope.getCurrentScope()
 
 		scope.gm.Lock()
-		if _, ok := scope.gauges[g.name]; !ok {
-			scope.gauges[g.name] = []*gauge{g}
+		if _, ok := scope.gauges[g.tracker.name]; !ok {
+			scope.gauges[g.tracker.name] = []*gauge{g}
 		} else {
 			// Another gauge with the same name was created, so add this
 			// to slice
-			scope.gauges[g.name] = append(scope.gauges[g.name], g)
+			scope.gauges[g.tracker.name] = append(scope.gauges[g.tracker.name], g)
 		}
 
+		g.tracker.resetUpdatedTime()
 		scope.gm.Unlock()
 	}
 }
@@ -229,61 +185,29 @@ func (g *gauge) value() float64 {
 func (g *gauge) report(name string, tags map[string]string, r StatsReporter) bool {
 	if atomic.SwapUint64(&g.updated, 0) == 1 {
 		r.ReportGauge(name, tags, g.value())
-		atomic.StoreInt64(&g.lastUpdateUnix, globalNow().Unix())
+		g.tracker.resetUpdatedTime()
 		return false
 	}
 
-	// Check if gauge has expired
-	if g.scope != nil && globalNow().Unix() >
-		atomic.LoadInt64(&g.lastUpdateUnix)+g.scope.registry.expirePeriodSeconds {
-		atomic.StoreUint32(&g.expired, 1)
-
-		// Check once more for possible race where value updated between
-		// beginning of this call
-		if atomic.SwapUint64(&g.updated, 0) == 1 {
-			r.ReportGauge(name, tags, g.value())
-			atomic.StoreInt64(&g.lastUpdateUnix, globalNow().Unix())
-			atomic.StoreUint32(&g.expired, 0)
-
-			return false
-		}
-
-		return true
-	}
-
-	return false
+	return g.tracker.checkExpiration()
 }
 
 func (g *gauge) cachedReport() bool {
 	if atomic.SwapUint64(&g.updated, 0) == 1 {
 		g.cachedGauge.ReportGauge(g.value())
-		atomic.StoreInt64(&g.lastUpdateUnix, globalNow().Unix())
+		g.tracker.resetUpdatedTime()
 		return false
 	}
 
-	// Check if gauge has expired
-	if g.scope != nil && globalNow().Unix() >
-		atomic.LoadInt64(&g.lastUpdateUnix)+g.scope.registry.expirePeriodSeconds {
-		atomic.StoreUint32(&g.expired, 1)
-
-		// Check once more for possible race where value updated between
-		// beginning of this call
-		if atomic.SwapUint64(&g.updated, 0) == 1 {
-			g.cachedGauge.ReportGauge(g.value())
-			atomic.StoreInt64(&g.lastUpdateUnix, globalNow().Unix())
-			atomic.StoreUint32(&g.expired, 0)
-
-			return false
-		}
-
-		return true
-	}
-
-	return false
+	return g.tracker.checkExpiration()
 }
 
 func (g *gauge) snapshot() float64 {
 	return math.Float64frombits(atomic.LoadUint64(&g.curr))
+}
+
+func (g *gauge) expired() bool {
+	return atomic.LoadUint32(&g.tracker.expired) == 1
 }
 
 // NB(jra3): timers are a little special because they do no aggregate any data
@@ -411,10 +335,7 @@ type histogram struct {
 	buckets          []histogramBucket
 	lookupByValue    []float64
 	lookupByDuration []int
-	lastUpdateUnix   int64
-	expired          uint32
-	scope            *scope
-	name             string
+	tracker          *metricExpiryTracker
 }
 
 type histogramType int
@@ -447,9 +368,11 @@ func newHistogram(
 		buckets:          make([]histogramBucket, 0, len(pairs)),
 		lookupByValue:    make([]float64, 0, len(pairs)),
 		lookupByDuration: make([]int, 0, len(pairs)),
-		scope:            scope,
-		name:             name,
-		lastUpdateUnix:   globalNow().Unix(),
+		tracker: &metricExpiryTracker{
+			scope:          scope,
+			name:           name,
+			lastUpdateUnix: globalNow().Unix(),
+		},
 	}
 
 	for _, pair := range pairs {
@@ -494,28 +417,11 @@ func (h *histogram) reportValues(name string, tags map[string]string, r StatsRep
 
 func (h *histogram) report(name string, tags map[string]string, r StatsReporter) bool {
 	if h.reportValues(name, tags, r) {
-		atomic.StoreInt64(&h.lastUpdateUnix, globalNow().Unix())
+		h.tracker.resetUpdatedTime()
 		return false
 	}
 
-	// Check if histogram has expired
-	if h.scope != nil && globalNow().Unix() >
-		atomic.LoadInt64(&h.lastUpdateUnix)+h.scope.registry.expirePeriodSeconds {
-		atomic.StoreUint32(&h.expired, 1)
-
-		// Check once more for possible race where values updated between
-		// beginning of this call
-		if h.reportValues(name, tags, r) {
-			atomic.StoreInt64(&h.lastUpdateUnix, globalNow().Unix())
-			atomic.StoreUint32(&h.expired, 0)
-
-			return false
-		}
-
-		return true
-	}
-
-	return false
+	return h.tracker.checkExpiration()
 }
 
 func (h *histogram) cachedReportValues() bool {
@@ -540,28 +446,11 @@ func (h *histogram) cachedReportValues() bool {
 
 func (h *histogram) cachedReport() bool {
 	if h.cachedReportValues() {
-		atomic.StoreInt64(&h.lastUpdateUnix, globalNow().Unix())
+		h.tracker.resetUpdatedTime()
 		return false
 	}
 
-	// Check if histogram has expired
-	if h.scope != nil && globalNow().Unix() >
-		atomic.LoadInt64(&h.lastUpdateUnix)+h.scope.registry.expirePeriodSeconds {
-		atomic.StoreUint32(&h.expired, 1)
-
-		// Check once more for possible race where values updated between
-		// beginning of this call
-		if h.cachedReportValues() {
-			atomic.StoreInt64(&h.lastUpdateUnix, globalNow().Unix())
-			atomic.StoreUint32(&h.expired, 0)
-
-			return false
-		}
-
-		return true
-	}
-
-	return false
+	return h.tracker.checkExpiration()
 }
 
 func (h *histogram) RecordValue(value float64) {
@@ -571,24 +460,22 @@ func (h *histogram) RecordValue(value float64) {
 	// we always have a math.MaxFloat64 bucket.
 	idx := sort.SearchFloat64s(h.lookupByValue, value)
 	h.buckets[idx].samples.Inc(1)
+	h.checkExpiryAndUpdate()
+}
 
-	if atomic.LoadUint32(&h.expired) == 1 && h.scope != nil {
-		if !atomic.CompareAndSwapUint32(&h.expired, 1, 0) {
-			// Another routine got here first
-			return
-		}
-
+func (h *histogram) checkExpiryAndUpdate() {
+	if h.tracker.expiredAndUpdated() {
 		// Histogram has expired, but direct ref was held and histogram
 		// was updated, therefore insert back into scope
-		scope := h.scope.getCurrentScope()
+		scope := h.tracker.scope.getCurrentScope()
 
 		scope.hm.Lock()
-		if _, ok := scope.histograms[h.name]; !ok {
-			scope.histograms[h.name] = []*histogram{h}
+		if _, ok := scope.histograms[h.tracker.name]; !ok {
+			scope.histograms[h.tracker.name] = []*histogram{h}
 		} else {
 			// Another histogram with the same name was created
 			// so add this to slice
-			scope.histograms[h.name] = append(scope.histograms[h.name], h)
+			scope.histograms[h.tracker.name] = append(scope.histograms[h.tracker.name], h)
 		}
 
 		scope.hm.Unlock()
@@ -602,35 +489,7 @@ func (h *histogram) RecordDuration(value time.Duration) {
 	// we always have a math.MaxInt64 bucket.
 	idx := sort.SearchInts(h.lookupByDuration, int(value))
 	h.buckets[idx].samples.Inc(1)
-
-	if atomic.LoadUint32(&h.expired) == 1 && h.scope != nil {
-		// Histogram has expired, but direct ref was held and histogram
-		// was updated, therefore insert back into scope
-		scope := h.scope.getCurrentScope()
-
-		scope.hm.Lock()
-		if histograms, ok := scope.histograms[h.name]; !ok {
-			scope.histograms[h.name] = []*histogram{h}
-		} else {
-			exists := false
-			for _, histogram := range histograms {
-				if histogram == h {
-					exists = true
-					// Another routine has already inserted this histogram
-					break
-				}
-			}
-
-			if !exists {
-				// Another histogram with the same name was created
-				// so add this to slice
-				scope.histograms[h.name] = append(scope.histograms[h.name], h)
-			}
-		}
-		scope.hm.Unlock()
-
-		atomic.StoreUint32(&h.expired, 0)
-	}
+	h.checkExpiryAndUpdate()
 }
 
 func (h *histogram) Start() Stopwatch {
@@ -668,6 +527,10 @@ func (h *histogram) snapshotDurations() map[time.Duration]int64 {
 	return durations
 }
 
+func (h *histogram) expired() bool {
+	return atomic.LoadUint32(&h.tracker.expired) == 1
+}
+
 type histogramBucket struct {
 	h                    *histogram
 	samples              *counter
@@ -703,6 +566,44 @@ func newHistogramBucket(
 		)
 	}
 	return bucket
+}
+
+type metricExpiryTracker struct {
+	lastUpdateUnix int64
+	expired        uint32
+	scope          *scope
+	name           string
+}
+
+// expiredAndUpdated checks the metric is expired and if so
+// will return true only for the first routine that updates
+// an expired metric, signalling to insert the metric back
+// into the parent scope.
+func (m *metricExpiryTracker) expiredAndUpdated() bool {
+	// We perform a LoadUint32 first for performance reasons
+	if atomic.LoadUint32(&m.expired) == 1 && m.scope != nil &&
+		atomic.CompareAndSwapUint32(&m.expired, 1, 0) {
+		return true
+	}
+
+	return false
+}
+
+func (m *metricExpiryTracker) resetUpdatedTime() {
+	atomic.StoreInt64(&m.lastUpdateUnix, globalNow().Unix())
+}
+
+// checkExpiration returns whether the metric has expired and sets the expired
+// bit to one if true
+func (m *metricExpiryTracker) checkExpiration() bool {
+	if m.scope != nil && globalNow().Unix() >
+		atomic.LoadInt64(&m.lastUpdateUnix)+m.scope.registry.expirePeriodSeconds {
+		atomic.StoreUint32(&m.expired, 1)
+
+		return true
+	}
+
+	return false
 }
 
 // NullStatsReporter is an implementation of StatsReporter than simply does nothing.

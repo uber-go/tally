@@ -203,7 +203,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 
 // report dumps all aggregated stats into the reporter. Should be called automatically by the root scope periodically.
 func (s *scope) report(r StatsReporter) bool {
-	tracker := newMetricExpiryTracker()
+	tracker := newScopeExpiryTracker()
 
 	s.cm.RLock()
 	for name, counters := range s.counters {
@@ -257,7 +257,7 @@ func (s *scope) report(r StatsReporter) bool {
 }
 
 func (s *scope) cachedReport(c CachedStatsReporter) bool {
-	tracker := newMetricExpiryTracker()
+	tracker := newScopeExpiryTracker()
 
 	s.cm.RLock()
 	for _, counters := range s.counters {
@@ -310,7 +310,7 @@ func (s *scope) cachedReport(c CachedStatsReporter) bool {
 	return false
 }
 
-func (s *scope) clearExpiredMetrics(tracker *metricExpiryTracker) {
+func (s *scope) clearExpiredMetrics(tracker *scopeExpiryTracker) {
 	var i int
 
 	if len(tracker.expiredCounters) > 0 {
@@ -318,7 +318,7 @@ func (s *scope) clearExpiredMetrics(tracker *metricExpiryTracker) {
 		for name, counters := range s.counters {
 			for _, counter := range counters {
 				if _, exists := tracker.expiredCounters[counter]; !exists ||
-					(exists && atomic.LoadUint32(&counter.expired) == 0) {
+					(exists && !counter.expired()) {
 					counters[i] = counter
 					i++
 				}
@@ -342,7 +342,7 @@ func (s *scope) clearExpiredMetrics(tracker *metricExpiryTracker) {
 		for name, gauges := range s.gauges {
 			for _, gauge := range gauges {
 				if _, exists := tracker.expiredGauges[gauge]; !exists ||
-					(exists && atomic.LoadUint32(&gauge.expired) == 0) {
+					(exists && !gauge.expired()) {
 					gauges[i] = gauge
 					i++
 				}
@@ -366,7 +366,7 @@ func (s *scope) clearExpiredMetrics(tracker *metricExpiryTracker) {
 		for name, histograms := range s.histograms {
 			for _, histogram := range histograms {
 				if _, exists := tracker.expiredHistograms[histogram]; !exists ||
-					(exists && atomic.LoadUint32(&histogram.expired) == 0) {
+					(exists && !histogram.expired()) {
 					histograms[i] = histogram
 					i++
 				}
@@ -1072,7 +1072,7 @@ func (s *histogramSnapshot) Durations() map[time.Duration]int64 {
 	return s.durations
 }
 
-type metricExpiryTracker struct {
+type scopeExpiryTracker struct {
 	expiredCounters   map[*counter]struct{}
 	expiredGauges     map[*gauge]struct{}
 	expiredHistograms map[*histogram]struct{}
@@ -1082,14 +1082,14 @@ type metricExpiryTracker struct {
 	numHistograms int
 }
 
-func newMetricExpiryTracker() *metricExpiryTracker {
-	return &metricExpiryTracker{
+func newScopeExpiryTracker() *scopeExpiryTracker {
+	return &scopeExpiryTracker{
 		expiredCounters:   map[*counter]struct{}{},
 		expiredGauges:     map[*gauge]struct{}{},
 		expiredHistograms: map[*histogram]struct{}{},
 	}
 }
 
-func (m *metricExpiryTracker) numMetrics() int {
-	return m.numCounters + m.numGauges + m.numHistograms
+func (s *scopeExpiryTracker) numMetrics() int {
+	return s.numCounters + s.numGauges + s.numHistograms
 }
