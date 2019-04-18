@@ -75,7 +75,7 @@ func newScope() (tally.Scope, io.Closer) {
 	scope, closer := tally.NewRootScope(tally.ScopeOptions{
 		Prefix:   "my-service",
 		Tags:     map[string]string{},
-		Reporter: r,
+		Reporter: reporter,
 	}, time.Second)
 
 	return scope, closer
