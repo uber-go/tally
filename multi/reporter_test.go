@@ -21,6 +21,7 @@
 package multi
 
 import (
+	"io"
 	"testing"
 	"time"
 
@@ -95,6 +96,13 @@ func TestMultiReporter(t *testing.T) {
 	r.Flush()
 	for _, r := range all {
 		assert.Equal(t, 1, r.flush)
+	}
+
+	closer, ok := r.(io.Closer)
+	assert.True(t, ok)
+	closer.Close()
+	for _, r := range all {
+		assert.Equal(t, 1, r.close)
 	}
 }
 
@@ -172,6 +180,13 @@ func TestMultiCachedReporter(t *testing.T) {
 	for _, r := range all {
 		assert.Equal(t, 1, r.flush)
 	}
+
+	closer, ok := r.(io.Closer)
+	assert.True(t, ok)
+	closer.Close()
+	for _, r := range all {
+		assert.Equal(t, 1, r.close)
+	}
 }
 
 type capturingStatsReporter struct {
@@ -182,6 +197,7 @@ type capturingStatsReporter struct {
 	histogramDurationSamples []capturedHistogramDurationSamples
 	capabilities             int
 	flush                    int
+	close                    int
 }
 
 type capturedCount struct {
@@ -335,6 +351,11 @@ func (r *capturingStatsReporter) Tagging() bool {
 
 func (r *capturingStatsReporter) Flush() {
 	r.flush++
+}
+
+func (r *capturingStatsReporter) Close() error {
+	r.close++
+	return nil
 }
 
 type cachedCount struct {
