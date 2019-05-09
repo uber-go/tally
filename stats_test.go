@@ -134,15 +134,15 @@ func TestCounter(t *testing.T) {
 	r := newStatsTestReporter()
 
 	counter.Inc(1)
-	counter.report("", nil, r)
+	counter.report("", nil, r, 0)
 	assert.Equal(t, int64(1), r.last)
 
 	counter.Inc(1)
-	counter.report("", nil, r)
+	counter.report("", nil, r, 0)
 	assert.Equal(t, int64(1), r.last)
 
 	counter.Inc(1)
-	counter.report("", nil, r)
+	counter.report("", nil, r, 0)
 	assert.Equal(t, int64(1), r.last)
 }
 
@@ -151,12 +151,12 @@ func TestGauge(t *testing.T) {
 	r := newStatsTestReporter()
 
 	gauge.Update(42)
-	gauge.report("", nil, r)
+	gauge.report("", nil, r, 0)
 	assert.Equal(t, float64(42), r.last)
 
 	gauge.Update(1234)
 	gauge.Update(5678)
-	gauge.report("", nil, r)
+	gauge.report("", nil, r, 0)
 	assert.Equal(t, float64(5678), r.last)
 }
 
@@ -185,7 +185,7 @@ func TestHistogramValueSamples(t *testing.T) {
 		h.RecordValue(offset + rand.Float64()*10)
 	}
 
-	h.report("h1", h.tags, r)
+	h.report("h1", h.tags, r, 0)
 
 	assert.Equal(t, 3, r.valueSamples[10.0])
 	assert.Equal(t, 5, r.valueSamples[60.0])
@@ -208,7 +208,7 @@ func TestHistogramDurationSamples(t *testing.T) {
 			time.Duration(rand.Float64()*float64(10*time.Millisecond)))
 	}
 
-	h.report("h1", h.tags, r)
+	h.report("h1", h.tags, r, 0)
 
 	assert.Equal(t, 3, r.durationSamples[10*time.Millisecond])
 	assert.Equal(t, 5, r.durationSamples[60*time.Millisecond])

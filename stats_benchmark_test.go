@@ -57,7 +57,7 @@ func BenchmarkCounterInc(b *testing.B) {
 func BenchmarkReportCounterNoData(b *testing.B) {
 	c := &counter{}
 	for n := 0; n < b.N; n++ {
-		c.report("foo", nil, NullStatsReporter)
+		c.report("foo", nil, NullStatsReporter, 0)
 	}
 }
 
@@ -65,7 +65,7 @@ func BenchmarkReportCounterWithData(b *testing.B) {
 	c := &counter{}
 	for n := 0; n < b.N; n++ {
 		c.Inc(1)
-		c.report("foo", nil, NullStatsReporter)
+		c.report("foo", nil, NullStatsReporter, 0)
 	}
 }
 
@@ -79,7 +79,7 @@ func BenchmarkGaugeSet(b *testing.B) {
 func BenchmarkReportGaugeNoData(b *testing.B) {
 	g := &gauge{}
 	for n := 0; n < b.N; n++ {
-		g.report("bar", nil, NullStatsReporter)
+		g.report("bar", nil, NullStatsReporter, 0)
 	}
 }
 
@@ -87,7 +87,7 @@ func BenchmarkReportGaugeWithData(b *testing.B) {
 	g := &gauge{}
 	for n := 0; n < b.N; n++ {
 		g.Update(73)
-		g.report("bar", nil, NullStatsReporter)
+		g.report("bar", nil, NullStatsReporter, 0)
 	}
 }
 

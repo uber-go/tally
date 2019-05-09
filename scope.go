@@ -204,11 +204,12 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 // report dumps all aggregated stats into the reporter. Should be called automatically by the root scope periodically.
 func (s *scope) report(r StatsReporter) bool {
 	tracker := newScopeExpiryTracker()
+	nowUnix := globalNow().Unix()
 
 	s.cm.RLock()
 	for name, counters := range s.counters {
 		for _, counter := range counters {
-			if counter.report(s.fullyQualifiedName(name), s.tags, r) {
+			if counter.report(s.fullyQualifiedName(name), s.tags, r, nowUnix) {
 				tracker.expiredCounters[counter] = struct{}{}
 			}
 		}
@@ -220,7 +221,7 @@ func (s *scope) report(r StatsReporter) bool {
 	s.gm.RLock()
 	for name, gauges := range s.gauges {
 		for _, gauge := range gauges {
-			if gauge.report(s.fullyQualifiedName(name), s.tags, r) {
+			if gauge.report(s.fullyQualifiedName(name), s.tags, r, nowUnix) {
 				tracker.expiredGauges[gauge] = struct{}{}
 			}
 		}
@@ -236,7 +237,7 @@ func (s *scope) report(r StatsReporter) bool {
 	s.hm.RLock()
 	for name, histograms := range s.histograms {
 		for _, histogram := range histograms {
-			if histogram.report(s.fullyQualifiedName(name), s.tags, r) {
+			if histogram.report(s.fullyQualifiedName(name), s.tags, r, nowUnix) {
 				tracker.expiredHistograms[histogram] = struct{}{}
 			}
 		}
@@ -258,11 +259,12 @@ func (s *scope) report(r StatsReporter) bool {
 
 func (s *scope) cachedReport(c CachedStatsReporter) bool {
 	tracker := newScopeExpiryTracker()
+	nowUnix := globalNow().Unix()
 
 	s.cm.RLock()
 	for _, counters := range s.counters {
 		for _, counter := range counters {
-			if counter.cachedReport() {
+			if counter.cachedReport(nowUnix) {
 				tracker.expiredCounters[counter] = struct{}{}
 			}
 		}
@@ -274,7 +276,7 @@ func (s *scope) cachedReport(c CachedStatsReporter) bool {
 	s.gm.RLock()
 	for _, gauges := range s.gauges {
 		for _, gauge := range gauges {
-			if gauge.cachedReport() {
+			if gauge.cachedReport(nowUnix) {
 				tracker.expiredGauges[gauge] = struct{}{}
 			}
 		}
@@ -290,7 +292,7 @@ func (s *scope) cachedReport(c CachedStatsReporter) bool {
 	s.hm.RLock()
 	for _, histograms := range s.histograms {
 		for _, histogram := range histograms {
-			if histogram.cachedReport() {
+			if histogram.cachedReport(nowUnix) {
 				tracker.expiredHistograms[histogram] = struct{}{}
 			}
 		}
