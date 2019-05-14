@@ -51,11 +51,11 @@ type Configuration struct {
 	// objectives to be used by the reporter.
 	DefaultSummaryObjectives []SummaryObjective `yaml:"defaultSummaryObjectives"`
 
-	// DisableProcessReporter disables the process reporter.
-	DisableProcessReporter bool `yaml:"disableProcessReporter"`
+	// DisableProcessCollector disables the process reporter.
+	DisableProcessCollector bool `yaml:"disableProcessCollector"`
 
-	// DisableGoReporter disables the go reporter.
-	DisableGoReporter bool `yaml:"disableGoReporter"`
+	// DisableGoCollector disables the go reporter.
+	DisableGoCollector bool `yaml:"disableGoCollector"`
 
 	// OnError specifies what to do when an error either with listening
 	// on the specified listen address or registering a metric with the
@@ -131,12 +131,12 @@ func (c Configuration) NewReporter(
 	}
 
 	registerer := prom.NewRegistry()
-	if !c.DisableGoReporter {
+	if !c.DisableGoCollector {
 		if err := registerer.Register(prom.NewGoCollector()); err != nil {
 			return nil, err
 		}
 	}
-	if !c.DisableProcessReporter {
+	if !c.DisableProcessCollector {
 		if err := registerer.Register(prom.NewProcessCollector(os.Getpid(), "")); err != nil {
 			return nil, err
 		}
