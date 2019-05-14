@@ -26,6 +26,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	prom "github.com/m3db/prometheus_client_golang/prometheus"
 )
 
 // Configuration is a configuration for a Prometheus reporter.
@@ -48,6 +50,12 @@ type Configuration struct {
 	// DefaultSummaryObjectives if specified will set the default summary
 	// objectives to be used by the reporter.
 	DefaultSummaryObjectives []SummaryObjective `yaml:"defaultSummaryObjectives"`
+
+	// DisableProcessReporter disables the process reporter.
+	DisableProcessReporter bool `yaml:"disableProcessReporter"`
+
+	// DisableGoReporter disables the go reporter.
+	DisableGoReporter bool `yaml:"disableGoReporter"`
 
 	// OnError specifies what to do when an error either with listening
 	// on the specified listen address or registering a metric with the
@@ -121,6 +129,19 @@ func (c Configuration) NewReporter(
 		}
 		opts.DefaultSummaryObjectives = values
 	}
+
+	registerer := prom.NewRegistry()
+	if !c.DisableGoReporter {
+		if err := registerer.Register(prom.NewGoCollector()); err != nil {
+			return nil, err
+		}
+	}
+	if !c.DisableProcessReporter {
+		if err := registerer.Register(prom.NewProcessCollector(os.Getpid(), "")); err != nil {
+			return nil, err
+		}
+	}
+	opts.Registerer = registerer
 
 	reporter := NewReporter(opts)
 
