@@ -26,6 +26,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	prom "github.com/m3db/prometheus_client_golang/prometheus"
 )
 
 // Configuration is a configuration for a Prometheus reporter.
@@ -53,6 +55,31 @@ type Configuration struct {
 	// on the specified listen address or registering a metric with the
 	// Prometheus. By default the registerer will panic.
 	OnError string `yaml:"onError"`
+
+	// Registry specifies what registry to use and with which default
+	// collectors to use, by default the default Prometheus registry is used
+	// with whichever collectors have already been registered with the
+	// registry.
+	Registry *RegistryConfiguration `yaml:"registry"`
+}
+
+// RegistryConfiguration specifies what registry to use and with which default
+// collectors to use, by default the default Prometheus registry is used
+// with whichever collectors have already been registered with the
+// registry.
+type RegistryConfiguration struct {
+	Default          bool `yaml:"default"`
+	GoCollector      bool `yaml:"goCollector"`
+	ProcessCollector bool `yaml:"processCollector"`
+}
+
+// DefaultRegistryConfiguration returns the default registry configuration.
+// By default the default Prometheus registry is used and no collectors
+// are registered.
+func DefaultRegistryConfiguration() RegistryConfiguration {
+	return RegistryConfiguration{
+		Default: true,
+	}
 }
 
 // HistogramObjective is a Prometheus histogram bucket.
@@ -122,6 +149,22 @@ func (c Configuration) NewReporter(
 		opts.DefaultSummaryObjectives = values
 	}
 
+	registryCfg := c.RegistryConfig()
+	if !registryCfg.Default {
+		registerer := prom.NewRegistry()
+		if registryCfg.GoCollector {
+			if err := registerer.Register(prom.NewGoCollector()); err != nil {
+				return nil, err
+			}
+		}
+		if registryCfg.ProcessCollector {
+			if err := registerer.Register(prom.NewProcessCollector(os.Getpid(), "")); err != nil {
+				return nil, err
+			}
+		}
+		opts.Registerer = registerer
+	}
+
 	reporter := NewReporter(opts)
 
 	path := "/metrics"
@@ -142,4 +185,13 @@ func (c Configuration) NewReporter(
 	}
 
 	return reporter, nil
+}
+
+// RegistryConfig returns either a specified registry configuration or
+// the default registry configuration.
+func (c Configuration) RegistryConfig() RegistryConfiguration {
+	if c.Registry != nil {
+		return *c.Registry
+	}
+	return DefaultRegistryConfiguration()
 }
