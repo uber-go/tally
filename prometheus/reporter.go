@@ -273,6 +273,12 @@ type Options struct {
 func NewReporter(opts Options) Reporter {
 	if opts.Registerer == nil {
 		opts.Registerer = prom.DefaultRegisterer
+	} else {
+		// A specific registerer was set, check if it's a registry and if
+		// no gatherer was set, then use that as the gatherer
+		if reg, ok := opts.Registerer.(*prom.Registry); ok && opts.Gatherer == nil {
+			opts.Gatherer = reg
+		}
 	}
 	if opts.Gatherer == nil {
 		opts.Gatherer = prom.DefaultGatherer

@@ -26,6 +26,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	prom "github.com/m3db/prometheus_client_golang/prometheus"
 )
 
 // Configuration is a configuration for a Prometheus reporter.
@@ -68,8 +70,14 @@ type SummaryObjective struct {
 	AllowedError float64 `yaml:"allowedError"`
 }
 
-// ConfigurationOptions allows some error callbacks to be registered.
+// ConfigurationOptions allows some programatic options, such as using a
+// specific registry and what error callback to register.
 type ConfigurationOptions struct {
+	// Registry if not nil will specify the specific registry to use
+	// for registering metrics.
+	Registry *prom.Registry
+	// OnError allows for customization of what to do when a metric
+	// registration error fails, the default is to panic.
 	OnError func(e error)
 }
 
@@ -77,27 +85,32 @@ type ConfigurationOptions struct {
 func (c Configuration) NewReporter(
 	configOpts ConfigurationOptions,
 ) (Reporter, error) {
-	if configOpts.OnError == nil {
+	var opts Options
+
+	if configOpts.Registry != nil {
+		opts.Registerer = configOpts.Registry
+	}
+
+	if configOpts.OnError != nil {
+		opts.OnRegisterError = configOpts.OnError
+	} else {
 		switch c.OnError {
 		case "stderr":
-			configOpts.OnError = func(err error) {
+			opts.OnRegisterError = func(err error) {
 				fmt.Fprintf(os.Stderr, "tally prometheus reporter error: %v\n", err)
 			}
 		case "log":
-			configOpts.OnError = func(err error) {
+			opts.OnRegisterError = func(err error) {
 				log.Printf("tally prometheus reporter error: %v\n", err)
 			}
 		case "none":
-			configOpts.OnError = func(err error) {}
+			opts.OnRegisterError = func(err error) {}
 		default:
-			configOpts.OnError = func(err error) {
+			opts.OnRegisterError = func(err error) {
 				panic(err)
 			}
 		}
 	}
-
-	var opts Options
-	opts.OnRegisterError = configOpts.OnError
 
 	switch c.TimerType {
 	case "summary":
