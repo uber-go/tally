@@ -55,31 +55,6 @@ type Configuration struct {
 	// on the specified listen address or registering a metric with the
 	// Prometheus. By default the registerer will panic.
 	OnError string `yaml:"onError"`
-
-	// Registry specifies what registry to use and with which default
-	// collectors to use, by default the default Prometheus registry is used
-	// with whichever collectors have already been registered with the
-	// registry.
-	Registry *RegistryConfiguration `yaml:"registry"`
-}
-
-// RegistryConfiguration specifies what registry to use and with which default
-// collectors to use, by default the default Prometheus registry is used
-// with whichever collectors have already been registered with the
-// registry.
-type RegistryConfiguration struct {
-	Default          bool `yaml:"default"`
-	GoCollector      bool `yaml:"goCollector"`
-	ProcessCollector bool `yaml:"processCollector"`
-}
-
-// DefaultRegistryConfiguration returns the default registry configuration.
-// By default the default Prometheus registry already has several collectors
-// registered, such as the Go collector and the Process collector.
-func DefaultRegistryConfiguration() RegistryConfiguration {
-	return RegistryConfiguration{
-		Default: true,
-	}
 }
 
 // HistogramObjective is a Prometheus histogram bucket.
@@ -95,8 +70,14 @@ type SummaryObjective struct {
 	AllowedError float64 `yaml:"allowedError"`
 }
 
-// ConfigurationOptions allows some error callbacks to be registered.
+// ConfigurationOptions allows some programatic options, such as using a
+// specific registry and what error callback to register.
 type ConfigurationOptions struct {
+	// Registry if not nil will specify the specific registry to use
+	// for registering metrics.
+	Registry *prom.Registry
+	// OnError allows for customization of what to do when a metric
+	// registration error fails, the default is to panic.
 	OnError func(e error)
 }
 
@@ -104,27 +85,32 @@ type ConfigurationOptions struct {
 func (c Configuration) NewReporter(
 	configOpts ConfigurationOptions,
 ) (Reporter, error) {
-	if configOpts.OnError == nil {
+	var opts Options
+
+	if configOpts.Registry != nil {
+		opts.Registerer = configOpts.Registry
+	}
+
+	if configOpts.OnError != nil {
+		opts.OnRegisterError = configOpts.OnError
+	} else {
 		switch c.OnError {
 		case "stderr":
-			configOpts.OnError = func(err error) {
+			opts.OnRegisterError = func(err error) {
 				fmt.Fprintf(os.Stderr, "tally prometheus reporter error: %v\n", err)
 			}
 		case "log":
-			configOpts.OnError = func(err error) {
+			opts.OnRegisterError = func(err error) {
 				log.Printf("tally prometheus reporter error: %v\n", err)
 			}
 		case "none":
-			configOpts.OnError = func(err error) {}
+			opts.OnRegisterError = func(err error) {}
 		default:
-			configOpts.OnError = func(err error) {
+			opts.OnRegisterError = func(err error) {
 				panic(err)
 			}
 		}
 	}
-
-	var opts Options
-	opts.OnRegisterError = configOpts.OnError
 
 	switch c.TimerType {
 	case "summary":
@@ -149,22 +135,6 @@ func (c Configuration) NewReporter(
 		opts.DefaultSummaryObjectives = values
 	}
 
-	registryCfg := c.RegistryConfig()
-	if !registryCfg.Default {
-		registerer := prom.NewRegistry()
-		if registryCfg.GoCollector {
-			if err := registerer.Register(prom.NewGoCollector()); err != nil {
-				return nil, err
-			}
-		}
-		if registryCfg.ProcessCollector {
-			if err := registerer.Register(prom.NewProcessCollector(os.Getpid(), "")); err != nil {
-				return nil, err
-			}
-		}
-		opts.Registerer = registerer
-	}
-
 	reporter := NewReporter(opts)
 
 	path := "/metrics"
@@ -185,13 +155,4 @@ func (c Configuration) NewReporter(
 	}
 
 	return reporter, nil
-}
-
-// RegistryConfig returns either a specified registry configuration or
-// the default registry configuration.
-func (c Configuration) RegistryConfig() RegistryConfiguration {
-	if c.Registry != nil {
-		return *c.Registry
-	}
-	return DefaultRegistryConfiguration()
 }
