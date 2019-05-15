@@ -6,15 +6,15 @@ import:
   subpackages:
   - statsd
 - package: github.com/m3db/prometheus_client_golang
-  version: 8ae269d24972b8695572fa6b2e3718b5ea82d6b4
+  version: ^0.8.1
   subpackages:
   - prometheus
 - package: github.com/m3db/prometheus_client_model
-  version: 8b2299a4bf7d7fc10835527021716d4b4a6e8700
+  version: ^0.1.0
 - package: github.com/m3db/prometheus_common
-  version: 25aaa3dff79bb48116615ebe1dea6a494b74ce77
+  version: ^0.1.0
 - package: github.com/m3db/prometheus_procfs
-  version: 1878d9fbb537119d24b21ca07effd591627cd160
+  version: ^0.8.1
 - package: github.com/apache/thrift
   version: '>=0.9.3, <0.11.0'
   subpackages:
