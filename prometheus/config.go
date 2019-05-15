@@ -74,8 +74,8 @@ type RegistryConfiguration struct {
 }
 
 // DefaultRegistryConfiguration returns the default registry configuration.
-// By default the default Prometheus registry is used and no collectors
-// are registered.
+// By default the default Prometheus registry already has several collectors
+// registered, such as the Go collector and the Process collector.
 func DefaultRegistryConfiguration() RegistryConfiguration {
 	return RegistryConfiguration{
 		Default: true,
