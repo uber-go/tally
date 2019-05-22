@@ -313,11 +313,11 @@ func (s *scope) cachedReport(c CachedStatsReporter) bool {
 }
 
 func (s *scope) clearExpiredMetrics(tracker *scopeExpiryTracker) {
-	var i int
-
 	if len(tracker.expiredCounters) > 0 {
 		s.cm.Lock()
 		for name, counters := range s.counters {
+			var i int
+
 			for _, counter := range counters {
 				if _, exists := tracker.expiredCounters[counter]; !exists ||
 					(exists && !counter.expired()) {
@@ -331,8 +331,6 @@ func (s *scope) clearExpiredMetrics(tracker *scopeExpiryTracker) {
 			} else {
 				s.counters[name] = counters[:i]
 			}
-
-			i = 0
 		}
 
 		tracker.numCounters = len(s.counters)
@@ -342,6 +340,8 @@ func (s *scope) clearExpiredMetrics(tracker *scopeExpiryTracker) {
 	if len(tracker.expiredGauges) > 0 {
 		s.gm.Lock()
 		for name, gauges := range s.gauges {
+			var i int
+
 			for _, gauge := range gauges {
 				if _, exists := tracker.expiredGauges[gauge]; !exists ||
 					(exists && !gauge.expired()) {
@@ -355,8 +355,6 @@ func (s *scope) clearExpiredMetrics(tracker *scopeExpiryTracker) {
 			} else {
 				s.gauges[name] = gauges[:i]
 			}
-
-			i = 0
 		}
 
 		tracker.numGauges = len(s.gauges)
@@ -366,6 +364,8 @@ func (s *scope) clearExpiredMetrics(tracker *scopeExpiryTracker) {
 	if len(tracker.expiredHistograms) > 0 {
 		s.hm.Lock()
 		for name, histograms := range s.histograms {
+			var i int
+
 			for _, histogram := range histograms {
 				if _, exists := tracker.expiredHistograms[histogram]; !exists ||
 					(exists && !histogram.expired()) {
@@ -379,8 +379,6 @@ func (s *scope) clearExpiredMetrics(tracker *scopeExpiryTracker) {
 			} else {
 				s.histograms[name] = histograms[:i]
 			}
-
-			i = 0
 		}
 
 		tracker.numHistograms = len(s.histograms)
@@ -458,6 +456,8 @@ func (s *scope) reportRegistryWithLock() {
 
 				if mets == 0 {
 					delete(s.registry.subscopes, name)
+				} else {
+					atomic.StoreUint32(&ss.expired, 0)
 				}
 			}
 		}
@@ -792,7 +792,7 @@ func (s *scope) Snapshot() Snapshot {
 							values[k] = 0
 						}
 
-						values[k] = values[k] + v
+						values[k] += v
 					}
 
 					for k, v := range histograms[i].snapshotDurations() {
@@ -800,7 +800,7 @@ func (s *scope) Snapshot() Snapshot {
 							durations[k] = 0
 						}
 
-						durations[k] = durations[k] + v
+						durations[k] += v
 					}
 				}
 
