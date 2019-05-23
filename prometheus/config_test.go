@@ -34,6 +34,8 @@ func TestListenErrorCallsOnRegisterError(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
+	defer func() { _ = listener.Close() }()
+
 	assert.NotPanics(t, func() {
 		cfg := Configuration{
 			ListenAddress: listener.Addr().String(),
