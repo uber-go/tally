@@ -149,7 +149,7 @@ func (c Configuration) NewReporter(
 		mux.Handle(path, reporter.HTTPHandler())
 		go func() {
 			if err := http.ListenAndServe(addr, mux); err != nil {
-				configOpts.OnError(err)
+				opts.OnRegisterError(err)
 			}
 		}()
 	}
