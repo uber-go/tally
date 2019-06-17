@@ -29,8 +29,7 @@ import (
 	"github.com/uber-go/tally/m3"
 	customtransport "github.com/uber-go/tally/m3/customtransports"
 	m3thrift "github.com/uber-go/tally/m3/thrift"
-
-	"github.com/apache/thrift/lib/go/thrift"
+	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
 )
 
 type batchCallback func(batch *m3thrift.MetricBatch)

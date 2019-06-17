@@ -22,10 +22,9 @@ package m3
 
 import (
 	"github.com/uber-go/tally"
-	"github.com/uber-go/tally/m3/customtransports"
+	customtransport "github.com/uber-go/tally/m3/customtransports"
 	m3thrift "github.com/uber-go/tally/m3/thrift"
-
-	"github.com/apache/thrift/lib/go/thrift"
+	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
 )
 
 const (

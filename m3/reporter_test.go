@@ -32,11 +32,11 @@ import (
 	"time"
 
 	"github.com/uber-go/tally"
-	"github.com/uber-go/tally/m3/customtransports"
+	customtransport "github.com/uber-go/tally/m3/customtransports"
 	m3thrift "github.com/uber-go/tally/m3/thrift"
 	"github.com/uber-go/tally/m3/thriftudp"
+	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
 
-	"github.com/apache/thrift/lib/go/thrift"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -23,7 +23,7 @@ package customtransport
 import (
 	"bytes"
 
-	"github.com/apache/thrift/lib/go/thrift"
+	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
 )
 
 // TBufferedReadTransport is a thrift.TTransport that reads from a buffer

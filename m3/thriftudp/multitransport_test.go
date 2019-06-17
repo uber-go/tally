@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/apache/thrift/lib/go/thrift"
+	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
 
 	"github.com/stretchr/testify/assert"
 )
