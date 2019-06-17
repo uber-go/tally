@@ -3,8 +3,8 @@ export GO15VENDOREXPERIMENT=1
 BENCH_FLAGS ?= -cpuprofile=cpu.pprof -memprofile=mem.pprof -benchmem
 PKGS ?= $(shell glide novendor)
 PKG_FILES ?= *.go example/*.go m3
-LINT_IGNORE = m3/thrift\|vendored
-LICENSE_IGNORE = vendored
+LINT_IGNORE = m3/thrift\|thirdparty
+LICENSE_IGNORE = thirdparty
 
 .PHONY: all
 all: lint test
@@ -32,7 +32,7 @@ lint:
 	@echo "Checking for unresolved FIXMEs..."
 	@git grep -i fixme | grep -v -e vendor -e Makefile | grep -v '$(LINT_IGNORE)' | tee -a lint.log
 	@echo "Checking for license headers..."
-	@./check_license.sh | grep -v $(LICENSE_IGNORE) | tee -a lint.log
+	@./check_license.sh | grep -v '$(LICENSE_IGNORE)' | tee -a lint.log
 	@[ ! -s lint.log ]
 
 .PHONY: test
