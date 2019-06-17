@@ -25,8 +25,8 @@ import (
 
 	m3thrift "github.com/uber-go/tally/m3/thrift"
 
-	"github.com/uber-go/tally/vendored/github.com/apache/thrift/lib/go/thrift"
 	"github.com/stretchr/testify/require"
+	"github.com/uber-go/tally/vendored/github.com/apache/thrift/lib/go/thrift"
 )
 
 func TestM3ResourcePoolMetric(t *testing.T) {
