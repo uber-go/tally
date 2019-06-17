@@ -24,7 +24,7 @@ import (
 	"bytes"
 	"net"
 
-	"github.com/apache/thrift/lib/go/thrift"
+	"github.com/uber-go/tally/vendored/github.com/apache/thrift/lib/go/thrift"
 	"go.uber.org/atomic"
 )
 
