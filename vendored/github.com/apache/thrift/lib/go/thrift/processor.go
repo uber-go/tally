@@ -1,5 +1,3 @@
-// +build !go1.7
-
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements. See the NOTICE file
@@ -21,14 +19,12 @@
 
 package thrift
 
-import "golang.org/x/net/context"
-
 // A processor is a generic object which operates upon an input stream and
 // writes to some output stream.
 type TProcessor interface {
-	Process(ctx context.Context, in, out TProtocol) (bool, TException)
+	Process(in, out TProtocol) (bool, TException)
 }
 
 type TProcessorFunction interface {
-	Process(ctx context.Context, seqId int32, in, out TProtocol) (bool, TException)
+	Process(seqId int32, in, out TProtocol) (bool, TException)
 }

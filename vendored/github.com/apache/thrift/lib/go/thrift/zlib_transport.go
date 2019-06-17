@@ -27,8 +27,7 @@ import (
 
 // TZlibTransportFactory is a factory for TZlibTransport instances
 type TZlibTransportFactory struct {
-	level   int
-	factory TTransportFactory
+	level int
 }
 
 // TZlibTransport is a TTransport implementation that makes use of zlib compression.
@@ -39,27 +38,14 @@ type TZlibTransport struct {
 }
 
 // GetTransport constructs a new instance of NewTZlibTransport
-func (p *TZlibTransportFactory) GetTransport(trans TTransport) (TTransport, error) {
-	if p.factory != nil {
-		// wrap other factory
-		var err error
-		trans, err = p.factory.GetTransport(trans)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return NewTZlibTransport(trans, p.level)
+func (p *TZlibTransportFactory) GetTransport(trans TTransport) TTransport {
+	t, _ := NewTZlibTransport(trans, p.level)
+	return t
 }
 
 // NewTZlibTransportFactory constructs a new instance of NewTZlibTransportFactory
 func NewTZlibTransportFactory(level int) *TZlibTransportFactory {
-	return &TZlibTransportFactory{level: level, factory: nil}
-}
-
-// NewTZlibTransportFactory constructs a new instance of TZlibTransportFactory
-// as a wrapper over existing transport factory
-func NewTZlibTransportFactoryWithFactory(level int, factory TTransportFactory) *TZlibTransportFactory {
-	return &TZlibTransportFactory{level: level, factory: factory}
+	return &TZlibTransportFactory{level: level}
 }
 
 // NewTZlibTransport constructs a new instance of TZlibTransport

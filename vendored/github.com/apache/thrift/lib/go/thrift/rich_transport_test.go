@@ -37,11 +37,7 @@ func TestEnsureTransportsAreRich(t *testing.T) {
 		NewTHttpPostClientTransportFactory("http://127.0.0.1"),
 	}
 	for _, tf := range transports {
-		trans, err := tf.GetTransport(nil)
-		if err != nil {
-			t.Error(err)
-			continue
-		}
+		trans := tf.GetTransport(nil)
 		_, ok := trans.(TRichTransport)
 		if !ok {
 			t.Errorf("Transport %s does not implement TRichTransport interface", reflect.ValueOf(trans))
