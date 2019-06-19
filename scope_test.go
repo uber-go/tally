@@ -30,6 +30,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+const testFullyQualifiedName = "test.fully.qualified.name"
+
 var (
 	// alphanumericSanitizerOpts is the options to create a sanitizer which uses
 	// the alphanumeric SanitizeFn.
@@ -49,6 +51,17 @@ var (
 		ReplacementCharacter: DefaultReplacementCharacter,
 	}
 )
+
+type testNamedCounter struct {
+	prev        int64
+	curr        int64
+	cachedCount CachedCount
+	name        string
+}
+
+func (c *testNamedCounter) Inc(v int64) {
+	atomic.AddInt64(&c.curr, v)
+}
 
 type testIntValue struct {
 	val      int64
@@ -812,4 +825,364 @@ func TestScopeFlushOnClose(t *testing.T) {
 	assert.EqualValues(t, 1, r.counters["foo"].val)
 
 	assert.NoError(t, closer.Close())
+}
+
+func TestScopeExpiryOptions(t *testing.T) {
+	r := newTestStatsReporter()
+
+	scope := newRootScope(ScopeOptions{Reporter: r, ExpiryPeriod: time.Second}, time.Hour)
+	assert.Equal(t, int64(1), scope.registry.expirePeriodSeconds)
+
+	scope = newRootScope(ScopeOptions{Reporter: r, ExpiryPeriod: time.Millisecond}, time.Hour)
+	assert.Equal(t, int64(defaultExpiry.Seconds()), scope.registry.expirePeriodSeconds)
+
+	scope = newRootScope(ScopeOptions{Reporter: r}, time.Hour)
+	assert.Equal(t, int64(defaultExpiry.Seconds()), scope.registry.expirePeriodSeconds)
+
+	scope = newRootScope(ScopeOptions{Reporter: r, ExpiryPeriod: 10 * time.Second}, time.Hour)
+	assert.Equal(t, int64(10), scope.registry.expirePeriodSeconds)
+}
+
+func TestRootScopeExpiry(t *testing.T) {
+	r := newTestStatsReporter()
+	scope := newRootScope(ScopeOptions{Reporter: r, ExpiryPeriod: time.Second}, time.Hour)
+	testRootScopeExpiry(t, scope, r)
+}
+
+func TestRootScopeExpiryCached(t *testing.T) {
+	r := newTestStatsReporter()
+	scope := newRootScope(ScopeOptions{CachedReporter: r, ExpiryPeriod: time.Second}, time.Hour)
+	testRootScopeExpiry(t, scope, r)
+}
+
+func testRootScopeExpiry(t *testing.T, scope *scope, r *testStatsReporter) {
+	for scope.hasExpired() == false {
+		scope.reportLoopRun()
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	assert.Equal(t, 0, len(scope.registry.subscopes))
+	ss := scope.subscope("test", nil)
+	assert.True(t, scope.hasExpired())
+	assert.Equal(t, 1, len(scope.registry.subscopes))
+	key := scopeRegistryKey("test", nil)
+	assert.Equal(t, scope.registry.subscopes[key], ss)
+
+	c := scope.Counter("testCount")
+	c.Inc(1)
+	assert.False(t, scope.hasExpired())
+	assert.Equal(t, 2, len(scope.registry.subscopes))
+	key = scopeRegistryKey("", nil)
+	assert.Equal(t, scope.registry.subscopes[key], scope)
+
+	r.cg.Add(1)
+	scope.reportLoopRun()
+	assert.EqualValues(t, 1, r.counters["testCount"].val)
+}
+
+func TestScopeAndMetricExpiry(t *testing.T) {
+	r := newTestStatsReporter()
+	scope := newRootScope(ScopeOptions{Reporter: r, ExpiryPeriod: time.Second}, time.Hour)
+	testScopeAndMetricExpiry(t, scope, r)
+}
+
+func TestScopeAndMetricExpiryCached(t *testing.T) {
+	r := newTestStatsReporter()
+	scope := newRootScope(ScopeOptions{CachedReporter: r, ExpiryPeriod: time.Second}, time.Hour)
+	testScopeAndMetricExpiry(t, scope, r)
+}
+
+func testScopeAndMetricExpiry(t *testing.T, scope *scope, r *testStatsReporter) {
+	scope.subscope("test", nil)
+	key := scopeRegistryKey("test", nil)
+	subScope := scope.registry.subscopes[key]
+	assert.NotNil(t, subScope)
+
+	r.cg.Add(1)
+	counter := subScope.Counter("count")
+	counter.Inc(1)
+
+	r.gg.Add(1)
+	gauge := subScope.Gauge("gauge")
+	gauge.Update(2)
+
+	r.tg.Add(1)
+	timer := subScope.Timer("timer")
+	timer.Record(time.Second)
+
+	r.hg.Add(1)
+	histogram := subScope.Histogram("hist", MustMakeLinearValueBuckets(0, 10, 10))
+	histogram.RecordValue(42.42)
+
+	assert.Equal(t, 1, len(subScope.counters))
+	assert.Equal(t, 1, len(subScope.gauges))
+	assert.Equal(t, 1, len(subScope.timers))
+	assert.Equal(t, 1, len(subScope.histograms))
+
+	scope.reportLoopRun()
+	r.WaitAll()
+	assert.EqualValues(t, 1, r.counters["test.count"].val)
+	assert.EqualValues(t, 2, r.gauges["test.gauge"].val)
+	assert.EqualValues(t, time.Second, r.timers["test.timer"].val)
+	assert.EqualValues(t, 1, r.histograms["test.hist"].valueSamples[50.0])
+
+	for scope.hasExpired() == false {
+		scope.reportLoopRun()
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	assert.Equal(t, 0, len(subScope.counters))
+	assert.Equal(t, 0, len(subScope.gauges))
+	assert.Equal(t, 1, len(subScope.timers))
+	assert.Equal(t, 0, len(subScope.histograms))
+
+	// All metrics have expired now, time to use the refs
+	// to put them back into the scope
+	r.cg.Add(1)
+	counter.Inc(2)
+
+	r.gg.Add(1)
+	gauge.Update(3)
+
+	r.tg.Add(1)
+	timer.Record(2 * time.Second)
+
+	r.hg.Add(1)
+	histogram.RecordValue(52.42)
+
+	scope.reportLoopRun()
+	r.WaitAll()
+	assert.EqualValues(t, 2, r.counters["test.count"].val)
+	assert.EqualValues(t, 3, r.gauges["test.gauge"].val)
+	assert.EqualValues(t, 2*time.Second, r.timers["test.timer"].val)
+	assert.EqualValues(t, 1, r.histograms["test.hist"].valueSamples[60.0])
+
+	assert.Equal(t, 1, len(subScope.counters))
+	assert.Equal(t, 1, len(subScope.gauges))
+	assert.Equal(t, 1, len(subScope.timers))
+	assert.Equal(t, 1, len(subScope.histograms))
+}
+
+func TestScopeExpiryNewMetrics(t *testing.T) {
+	r := newTestStatsReporter()
+	scope := newRootScope(ScopeOptions{Reporter: r, ExpiryPeriod: time.Second}, time.Hour)
+	testScopeExpiryNewMetrics(t, scope, r)
+}
+
+func TestScopeExpiryNewMetricsCached(t *testing.T) {
+	r := newTestStatsReporter()
+	scope := newRootScope(ScopeOptions{CachedReporter: r, ExpiryPeriod: time.Second}, time.Hour)
+	testScopeExpiryNewMetrics(t, scope, r)
+}
+
+func testScopeExpiryNewMetrics(t *testing.T, scope *scope, r *testStatsReporter) {
+	scope.subscope("test", nil)
+	key := scopeRegistryKey("test", nil)
+	expiredScope := scope.registry.subscopes[key]
+	assert.NotNil(t, expiredScope)
+
+	for expiredScope.hasExpired() == false {
+		scope.reportLoopRun()
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	scope.subscope("test", nil)
+	newScope := scope.registry.subscopes[key]
+	assert.NotEqual(t, newScope, expiredScope)
+
+	counter := newScope.Counter("count")
+	gauge := newScope.Gauge("gauge")
+	timer := newScope.Timer("timer")
+	histogram := newScope.Histogram("hist", MustMakeLinearValueBuckets(0, 10, 10))
+
+	assert.Equal(t, 1, len(newScope.counters))
+	assert.Equal(t, 1, len(newScope.gauges))
+	assert.Equal(t, 1, len(newScope.timers))
+	assert.Equal(t, 1, len(newScope.histograms))
+	assert.Equal(t, 1, len(newScope.counters["count"]))
+	assert.Equal(t, 1, len(newScope.gauges["gauge"]))
+	assert.Equal(t, 1, len(newScope.timers["timer"]))
+	assert.Equal(t, 1, len(newScope.histograms["hist"]))
+
+	// New metrics off the expired scope should just be the ones from
+	// the new scope
+	assert.True(t, counter == expiredScope.Counter("count"))
+	assert.True(t, gauge == expiredScope.Gauge("gauge"))
+	assert.True(t, timer == expiredScope.Timer("timer"))
+	assert.True(t, histogram == expiredScope.Histogram("hist", MustMakeLinearValueBuckets(0, 10, 10)))
+
+	assert.Equal(t, 0, len(expiredScope.counters))
+	assert.Equal(t, 0, len(expiredScope.gauges))
+	assert.Equal(t, 0, len(expiredScope.timers))
+	assert.Equal(t, 0, len(expiredScope.histograms))
+
+	assert.Equal(t, 1, len(newScope.counters))
+	assert.Equal(t, 1, len(newScope.gauges))
+	assert.Equal(t, 1, len(newScope.timers))
+	assert.Equal(t, 1, len(newScope.histograms))
+	assert.Equal(t, 1, len(newScope.counters["count"]))
+	assert.Equal(t, 1, len(newScope.gauges["gauge"]))
+	assert.Equal(t, 1, len(newScope.timers["timer"]))
+	assert.Equal(t, 1, len(newScope.histograms["hist"]))
+}
+
+func TestScopeExpiredMetrics(t *testing.T) {
+	r := newTestStatsReporter()
+	scope := newRootScope(ScopeOptions{Reporter: r, ExpiryPeriod: time.Second}, time.Hour)
+	testScopeExpiredMetrics(t, scope, r)
+}
+
+func TestScopeExpiredMetricsCached(t *testing.T) {
+	r := newTestStatsReporter()
+	scope := newRootScope(ScopeOptions{Reporter: r, ExpiryPeriod: time.Second}, time.Hour)
+	testScopeExpiredMetrics(t, scope, r)
+}
+
+func testScopeExpiredMetrics(t *testing.T, scope *scope, r *testStatsReporter) {
+	scope.subscope("test", nil)
+	key := scopeRegistryKey("test", nil)
+	expiredScope := scope.registry.subscopes[key]
+	assert.NotNil(t, expiredScope)
+
+	expiredCounter := expiredScope.Counter("count")
+	expiredGauge := expiredScope.Gauge("gauge")
+	expiredTimer := expiredScope.Timer("timer")
+	expiredHistogram := expiredScope.Histogram("hist", MustMakeLinearValueBuckets(0, 10, 10))
+
+	for expiredScope.hasExpired() == false {
+		scope.reportLoopRun()
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	scope.subscope("test", nil)
+	newScope := scope.registry.subscopes[key]
+	assert.NotEqual(t, newScope, expiredScope)
+
+	newCounter := newScope.Counter("count")
+	newGauge := newScope.Gauge("gauge")
+	newTimer := newScope.Timer("timer")
+	newHistogram := expiredScope.Histogram("hist", MustMakeLinearValueBuckets(0, 10, 10))
+
+	assert.False(t, expiredCounter == newCounter)
+	assert.False(t, expiredGauge == newGauge)
+	assert.False(t, expiredHistogram == newHistogram)
+	assert.False(t, expiredTimer == newTimer)
+
+	assert.Equal(t, 0, len(expiredScope.counters))
+	assert.Equal(t, 0, len(expiredScope.gauges))
+	assert.Equal(t, 1, len(expiredScope.timers)) // Timers don't expire since they emit directly
+	assert.Equal(t, 0, len(expiredScope.histograms))
+
+	assert.Equal(t, 1, len(newScope.counters))
+	assert.Equal(t, 1, len(newScope.gauges))
+	assert.Equal(t, 1, len(newScope.timers))
+	assert.Equal(t, 1, len(newScope.histograms))
+
+	assert.Equal(t, 1, len(newScope.counters["count"]))
+	assert.Equal(t, 1, len(newScope.gauges["gauge"]))
+	assert.Equal(t, 1, len(newScope.timers["timer"]))
+	assert.Equal(t, 1, len(newScope.histograms["hist"]))
+
+	r.cg.Add(1)
+	expiredCounter.Inc(1)
+	r.gg.Add(1)
+	expiredGauge.Update(1)
+	r.tg.Add(1)
+	expiredTimer.Record(time.Second)
+	r.hg.Add(1)
+	expiredHistogram.RecordValue(52.42)
+
+	assert.Equal(t, 0, len(expiredScope.counters))
+	assert.Equal(t, 0, len(expiredScope.gauges))
+	assert.Equal(t, 1, len(expiredScope.timers))
+	assert.Equal(t, 0, len(expiredScope.histograms))
+
+	assert.Equal(t, 1, len(newScope.counters))
+	assert.Equal(t, 1, len(newScope.gauges))
+	assert.Equal(t, 1, len(newScope.timers))
+	assert.Equal(t, 1, len(newScope.histograms))
+
+	assert.Equal(t, 2, len(newScope.counters["count"]))
+	assert.Equal(t, 2, len(newScope.gauges["gauge"]))
+	assert.Equal(t, 1, len(newScope.timers["timer"]))
+	assert.Equal(t, 2, len(newScope.histograms["hist"]))
+}
+
+func TestScopeSnapshotMultiMetric(t *testing.T) {
+	r := newTestStatsReporter()
+	scope := newRootScope(ScopeOptions{Reporter: r, ExpiryPeriod: time.Second}, time.Hour)
+	scope.subscope("test", nil)
+	key := scopeRegistryKey("test", nil)
+	expiredScope := scope.registry.subscopes[key]
+	assert.NotNil(t, expiredScope)
+
+	expiredCounter := expiredScope.Counter("count")
+	expiredGauge := expiredScope.Gauge("gauge")
+	expiredTimer := expiredScope.Timer("timer")
+	b, err := LinearDurationBuckets(time.Second, time.Second, 10)
+	assert.NoError(t, err)
+	expiredHistogram := expiredScope.Histogram("hist", b)
+	expiredHistogram2 := expiredScope.Histogram("hist2", MustMakeLinearValueBuckets(0, 10, 10))
+
+	for expiredScope.hasExpired() == false {
+		scope.reportLoopRun()
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	scope.subscope("test", nil)
+	newScope := scope.registry.subscopes[key]
+	assert.NotEqual(t, newScope, expiredScope)
+
+	newCounter := newScope.Counter("count")
+	newGauge := newScope.Gauge("gauge")
+	newTimer := newScope.Timer("timer")
+	newHistogram := newScope.Histogram("hist", b)
+	newHistogram2 := newScope.Histogram("hist2", MustMakeLinearValueBuckets(0, 10, 10))
+
+	r.cg.Add(2)
+	expiredCounter.Inc(1)
+	newCounter.Inc(1)
+	r.gg.Add(2)
+	expiredGauge.Update(1)
+	newGauge.Update(3)
+	r.tg.Add(3)
+	expiredTimer.Record(time.Second)
+	newTimer.Record(2 * time.Second)
+	newTimer.Record(3 * time.Second)
+	r.hg.Add(4)
+	expiredHistogram.RecordDuration(5 * time.Second)
+	sw := newHistogram.Start()
+	sw.Stop()
+	expiredHistogram2.RecordValue(42.5)
+	newHistogram2.RecordValue(52.5)
+
+	assert.Equal(t, 2, len(newScope.counters["count"]))
+	assert.Equal(t, 2, len(newScope.gauges["gauge"]))
+	assert.Equal(t, 1, len(newScope.timers["timer"]))
+	assert.Equal(t, 2, len(newScope.histograms["hist"]))
+	assert.Equal(t, 2, len(newScope.histograms["hist2"]))
+
+	snapshot := newScope.Snapshot()
+	counters := snapshot.Counters()
+	gauges := snapshot.Gauges()
+	timers := snapshot.Timers()
+	histograms := snapshot.Histograms()
+
+	assert.Equal(t, 1, len(counters))
+	assert.Equal(t, 1, len(gauges))
+	assert.Equal(t, 1, len(timers))
+	assert.Equal(t, 2, len(histograms))
+
+	assert.Equal(t, "test.count", counters["test.count+"].Name())
+	assert.Equal(t, "test.gauge", gauges["test.gauge+"].Name())
+	assert.Equal(t, "test.timer", timers["test.timer+"].Name())
+	assert.Equal(t, "test.hist", histograms["test.hist+"].Name())
+	assert.Equal(t, "test.hist2", histograms["test.hist2+"].Name())
+
+	assert.Equal(t, int64(2), counters["test.count+"].Value())
+	assert.Equal(t, float64(3), gauges["test.gauge+"].Value())
+	assert.Equal(t, int64(1), histograms["test.hist+"].Durations()[5*time.Second])
+	assert.Equal(t, int64(1), histograms["test.hist+"].Durations()[time.Second])
+	assert.Equal(t, int64(1), histograms["test.hist2+"].Values()[50.0])
+	assert.Equal(t, int64(1), histograms["test.hist2+"].Values()[60.0])
 }

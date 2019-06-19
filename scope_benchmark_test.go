@@ -22,6 +22,7 @@ package tally
 
 import (
 	"fmt"
+	"math/rand"
 	"strconv"
 	"testing"
 )
@@ -52,6 +53,18 @@ func BenchmarkCounterAllocation(b *testing.B) {
 
 	for n := 0; n < b.N; n++ {
 		s.Counter(ids[n])
+	}
+}
+
+func BenchmarkMetricLookup(b *testing.B) {
+	root, _ := NewRootScope(ScopeOptions{
+		Prefix:   "funkytown",
+		Reporter: NullStatsReporter,
+	}, 0)
+
+	for i := 0; i < b.N; i++ {
+		root.SubScope("myScope").Tagged(
+			map[string]string{"testTag": "testValue", "testTag2": "testValue"}).Counter("test").Inc(1)
 	}
 }
 
@@ -119,5 +132,58 @@ func BenchmarkHistogramExisting(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		root.Histogram("foo", DefaultBuckets)
+	}
+}
+
+func Benchmark1MapMetric(b *testing.B) {
+	benchMapMetrics(1, b)
+}
+
+func Benchmark1SliceMetric(b *testing.B) {
+	benchSliceMetrics(1, b)
+}
+
+func Benchmark10MapMetric(b *testing.B) {
+	benchMapMetrics(10, b)
+}
+
+func Benchmark10SliceMetric(b *testing.B) {
+	benchSliceMetrics(10, b)
+}
+
+func Benchmark100MapMetric(b *testing.B) {
+	benchMapMetrics(100, b)
+}
+
+func Benchmark100SliceMetric(b *testing.B) {
+	benchSliceMetrics(100, b)
+}
+
+func benchMapMetrics(n int, b *testing.B) {
+	mets := make(map[string]*counter, n)
+	for i := 0; i < n; i++ {
+		mets[testFullyQualifiedName+strconv.Itoa(i)] = &counter{}
+	}
+
+	for i := 0; i < b.N; i++ {
+		name := testFullyQualifiedName + strconv.Itoa(rand.Int()%n)
+		mets[name].Inc(1)
+	}
+}
+
+func benchSliceMetrics(n int, b *testing.B) {
+	mets := make([]*testNamedCounter, 0, n)
+	for i := 0; i < n; i++ {
+		mets = append(mets, &testNamedCounter{name: testFullyQualifiedName + strconv.Itoa(i)})
+	}
+
+	for i := 0; i < b.N; i++ {
+		name := testFullyQualifiedName + strconv.Itoa(rand.Int()%n)
+		for _, met := range mets {
+			if met.name == name {
+				met.Inc(1)
+				break
+			}
+		}
 	}
 }

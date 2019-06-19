@@ -25,8 +25,30 @@ import (
 	"time"
 )
 
+func BenchmarkSimpleCounterInc(b *testing.B) {
+	c := &testSimpleCounter{}
+	for n := 0; n < b.N; n++ {
+		c.Inc(1)
+	}
+}
+
+func BenchmarkSimpleCounterExpiredInc(b *testing.B) {
+	c := &testSimpleCounter{}
+	for n := 0; n < b.N; n++ {
+		c.IncWithExpiredCheck(1)
+	}
+}
+func BenchmarkAlwaysCheckCounterInc(b *testing.B) {
+	s := newRootScope(ScopeOptions{Reporter: newTestStatsReporter()}, 0)
+	c := newTestAlwaysCheckCounter("", s)
+	for n := 0; n < b.N; n++ {
+		c.Inc(1)
+	}
+}
+
 func BenchmarkCounterInc(b *testing.B) {
-	c := &counter{}
+	scope := NewTestScope("", nil)
+	c := scope.Counter("test")
 	for n := 0; n < b.N; n++ {
 		c.Inc(1)
 	}
@@ -35,7 +57,7 @@ func BenchmarkCounterInc(b *testing.B) {
 func BenchmarkReportCounterNoData(b *testing.B) {
 	c := &counter{}
 	for n := 0; n < b.N; n++ {
-		c.report("foo", nil, NullStatsReporter)
+		c.report("foo", nil, NullStatsReporter, 0)
 	}
 }
 
@@ -43,7 +65,7 @@ func BenchmarkReportCounterWithData(b *testing.B) {
 	c := &counter{}
 	for n := 0; n < b.N; n++ {
 		c.Inc(1)
-		c.report("foo", nil, NullStatsReporter)
+		c.report("foo", nil, NullStatsReporter, 0)
 	}
 }
 
@@ -57,7 +79,7 @@ func BenchmarkGaugeSet(b *testing.B) {
 func BenchmarkReportGaugeNoData(b *testing.B) {
 	g := &gauge{}
 	for n := 0; n < b.N; n++ {
-		g.report("bar", nil, NullStatsReporter)
+		g.report("bar", nil, NullStatsReporter, 0)
 	}
 }
 
@@ -65,7 +87,7 @@ func BenchmarkReportGaugeWithData(b *testing.B) {
 	g := &gauge{}
 	for n := 0; n < b.N; n++ {
 		g.Update(73)
-		g.report("bar", nil, NullStatsReporter)
+		g.report("bar", nil, NullStatsReporter, 0)
 	}
 }
 

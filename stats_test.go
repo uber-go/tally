@@ -22,11 +22,57 @@ package tally
 
 import (
 	"math/rand"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 )
+
+type testSimpleCounter struct {
+	prev    int64
+	curr    int64
+	expired uint32
+}
+
+func (c *testSimpleCounter) Inc(v int64) {
+	atomic.AddInt64(&c.curr, v)
+}
+
+func (c *testSimpleCounter) IncWithExpiredCheck(v int64) {
+	atomic.AddInt64(&c.curr, v)
+	if atomic.CompareAndSwapUint32(&c.expired, 1, 0) {
+		c.prev = 1
+	}
+}
+
+type testAlwaysCheckCounter struct {
+	prev           int64
+	curr           int64
+	lastUpdateUnix int64
+	scope          *scope
+	name           string
+}
+
+func newTestAlwaysCheckCounter(name string, scope *scope) *testAlwaysCheckCounter {
+	return &testAlwaysCheckCounter{
+		scope:          scope,
+		name:           name,
+		lastUpdateUnix: globalNow().Unix(),
+	}
+}
+
+func (c *testAlwaysCheckCounter) Inc(v int64) {
+	atomic.AddInt64(&c.curr, v)
+
+	now := globalNow().Unix()
+	if c.scope != nil && (now-atomic.SwapInt64(&c.lastUpdateUnix, now)) > c.scope.registry.expirePeriodSeconds {
+		// This would be expired logic that's never triggered
+		scope := c.scope.getCurrentScope()
+		scope.cm.Lock()
+		scope.cm.Unlock()
+	}
+}
 
 type statsTestReporter struct {
 	last            interface{}
@@ -84,33 +130,33 @@ func (r *statsTestReporter) Capabilities() Capabilities {
 func (r *statsTestReporter) Flush() {}
 
 func TestCounter(t *testing.T) {
-	counter := newCounter(nil)
+	counter := newCounter(nil, "", nil)
 	r := newStatsTestReporter()
 
 	counter.Inc(1)
-	counter.report("", nil, r)
+	counter.report("", nil, r, 0)
 	assert.Equal(t, int64(1), r.last)
 
 	counter.Inc(1)
-	counter.report("", nil, r)
+	counter.report("", nil, r, 0)
 	assert.Equal(t, int64(1), r.last)
 
 	counter.Inc(1)
-	counter.report("", nil, r)
+	counter.report("", nil, r, 0)
 	assert.Equal(t, int64(1), r.last)
 }
 
 func TestGauge(t *testing.T) {
-	gauge := newGauge(nil)
+	gauge := newGauge(nil, "", nil)
 	r := newStatsTestReporter()
 
 	gauge.Update(42)
-	gauge.report("", nil, r)
+	gauge.report("", nil, r, 0)
 	assert.Equal(t, float64(42), r.last)
 
 	gauge.Update(1234)
 	gauge.Update(5678)
-	gauge.report("", nil, r)
+	gauge.report("", nil, r, 0)
 	assert.Equal(t, float64(5678), r.last)
 }
 
@@ -128,7 +174,7 @@ func TestTimer(t *testing.T) {
 func TestHistogramValueSamples(t *testing.T) {
 	r := newStatsTestReporter()
 	buckets := MustMakeLinearValueBuckets(0, 10, 10)
-	h := newHistogram("h1", nil, r, buckets, nil)
+	h := newHistogram(nil, r, buckets, nil, nil, "h1")
 
 	var offset float64
 	for i := 0; i < 3; i++ {
@@ -139,7 +185,7 @@ func TestHistogramValueSamples(t *testing.T) {
 		h.RecordValue(offset + rand.Float64()*10)
 	}
 
-	h.report(h.name, h.tags, r)
+	h.report("h1", h.tags, r, 0)
 
 	assert.Equal(t, 3, r.valueSamples[10.0])
 	assert.Equal(t, 5, r.valueSamples[60.0])
@@ -149,7 +195,7 @@ func TestHistogramValueSamples(t *testing.T) {
 func TestHistogramDurationSamples(t *testing.T) {
 	r := newStatsTestReporter()
 	buckets := MustMakeLinearDurationBuckets(0, 10*time.Millisecond, 10)
-	h := newHistogram("h1", nil, r, buckets, nil)
+	h := newHistogram(nil, r, buckets, nil, nil, "h1")
 
 	var offset time.Duration
 	for i := 0; i < 3; i++ {
@@ -162,7 +208,7 @@ func TestHistogramDurationSamples(t *testing.T) {
 			time.Duration(rand.Float64()*float64(10*time.Millisecond)))
 	}
 
-	h.report(h.name, h.tags, r)
+	h.report("h1", h.tags, r, 0)
 
 	assert.Equal(t, 3, r.durationSamples[10*time.Millisecond])
 	assert.Equal(t, 5, r.durationSamples[60*time.Millisecond])
