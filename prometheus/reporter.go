@@ -272,7 +272,7 @@ type Options struct {
 // https://godoc.org/github.com/prometheus/client_golang/prometheus#SummaryOpts for more details.
 func NewReporter(opts Options) Reporter {
 	if opts.Registerer == nil {
-		opts.Registerer = prom.DefaultRegisterer
+		opts.Registerer = prom.NewRegistry()
 	} else {
 		// A specific registerer was set, check if it's a registry and if
 		// no gatherer was set, then use that as the gatherer
