@@ -69,6 +69,12 @@ type Counter interface {
 type Gauge interface {
 	// Update sets the gauges absolute value.
 	Update(value float64)
+
+	// Add updates gauges absolute value by adding 'value' to current value
+	Add(value float64)
+
+	// Sub updates gauges absolute value by subtracting 'value' from current value
+	Sub(value float64)
 }
 
 // Timer is the interface for emitting timer metrics.
