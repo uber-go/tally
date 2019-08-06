@@ -327,8 +327,44 @@ func TestCachedReportLoop(t *testing.T) {
 	r.hg.Add(1)
 	s.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
 		RecordValue(42.42)
-
 	r.WaitAll()
+}
+
+func testReportLoopFlushOnce(t *testing.T, r *testStatsReporter, s Scope) {
+	r.cg.Add(2)
+	s.Counter("foobar").Inc(1)
+	s.SubScope("baz").Counter("bar").Inc(1)
+	r.gg.Add(2)
+	s.Gauge("zed").Update(1)
+	s.SubScope("baz").Gauge("zed").Update(1)
+	r.tg.Add(2)
+	s.Timer("ticky").Record(time.Millisecond * 175)
+	s.SubScope("woof").Timer("sod").Record(time.Millisecond * 175)
+	r.hg.Add(2)
+	s.SubScope("woofers").Histogram("boo", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
+	s.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
+	r.WaitAll()
+
+	v := atomic.LoadInt32(&r.flushes)
+	assert.Equal(t, int32(1), v)
+}
+
+func TestCachedReporterFlushOnce(t *testing.T) {
+	r := newTestStatsReporter()
+	s, closer := NewRootScope(ScopeOptions{CachedReporter: r}, 10*time.Millisecond)
+	defer closer.Close()
+
+	testReportLoopFlushOnce(t, r, s)
+}
+
+func TestReporterFlushOnce(t *testing.T) {
+	r := newTestStatsReporter()
+	s, closer := NewRootScope(ScopeOptions{Reporter: r}, 10*time.Millisecond)
+	defer closer.Close()
+
+	testReportLoopFlushOnce(t, r, s)
 }
 
 func TestWriteOnce(t *testing.T) {
@@ -431,7 +467,7 @@ func TestCachedReporter(t *testing.T) {
 	s.Histogram("qux", MustMakeLinearDurationBuckets(0, 10*time.Millisecond, 10)).
 		RecordDuration(42 * time.Millisecond)
 
-	s.cachedReport(r)
+	s.cachedReport()
 	r.WaitAll()
 
 	assert.EqualValues(t, 1, r.counters["bar"].val)
