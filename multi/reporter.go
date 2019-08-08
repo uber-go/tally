@@ -21,7 +21,10 @@
 package multi
 
 import (
+	"io"
 	"time"
+
+	"go.uber.org/multierr"
 
 	"github.com/uber-go/tally"
 )
@@ -111,6 +114,10 @@ func (r *multi) Flush() {
 	r.multiBaseReporters.Flush()
 }
 
+func (r *multi) Close() error {
+	return r.multiBaseReporters.Close()
+}
+
 type multiCached struct {
 	multiBaseReporters multiBaseReporters
 	reporters          []tally.CachedStatsReporter
@@ -181,6 +188,10 @@ func (r *multiCached) Capabilities() tally.Capabilities {
 
 func (r *multiCached) Flush() {
 	r.multiBaseReporters.Flush()
+}
+
+func (r *multiCached) Close() error {
+	return r.multiBaseReporters.Close()
 }
 
 type multiMetric struct {
@@ -255,6 +266,18 @@ func (r multiBaseReporters) Flush() {
 	for _, r := range r {
 		r.Flush()
 	}
+}
+
+func (r multiBaseReporters) Close() error {
+	errs := []error{}
+	for _, r := range r {
+		if closer, ok := r.(io.Closer); ok {
+			if err := closer.Close(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return multierr.Combine(errs...)
 }
 
 type capabilities struct {
