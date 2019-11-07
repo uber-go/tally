@@ -245,19 +245,20 @@ func (s *scope) reportLoopRun() {
 	// Need to hold a status lock to ensure not to report
 	// and flush after a close
 	s.status.RLock()
+	defer s.status.RUnlock()
+
 	if s.status.closed {
-		s.status.RUnlock()
 		return
 	}
 
 	s.reportRegistryWithLock()
-
-	s.status.RUnlock()
 }
 
 // reports current registry with scope status lock held
 func (s *scope) reportRegistryWithLock() {
 	s.registry.RLock()
+	defer s.registry.RUnlock()
+
 	if s.reporter != nil {
 		for _, ss := range s.registry.subscopes {
 			ss.report(s.reporter)
@@ -269,108 +270,151 @@ func (s *scope) reportRegistryWithLock() {
 		}
 		s.cachedReporter.Flush()
 	}
-	s.registry.RUnlock()
 }
 
 func (s *scope) Counter(name string) Counter {
 	name = s.sanitizer.Name(name)
-	s.cm.RLock()
-	val, ok := s.counters[name]
-	s.cm.RUnlock()
-	if !ok {
-		s.cm.Lock()
-		val, ok = s.counters[name]
-		if !ok {
-			var cachedCounter CachedCount
-			if s.cachedReporter != nil {
-				cachedCounter = s.cachedReporter.AllocateCounter(
-					s.fullyQualifiedName(name), s.tags,
-				)
-			}
-			val = newCounter(cachedCounter)
-			s.counters[name] = val
-		}
-		s.cm.Unlock()
+	if c, ok := s.counter(name); ok {
+		return c
 	}
-	return val
+
+	s.cm.Lock()
+	defer s.cm.Unlock()
+
+	if c, ok := s.counters[name]; ok {
+		return c
+	}
+
+	var cachedCounter CachedCount
+	if s.cachedReporter != nil {
+		cachedCounter = s.cachedReporter.AllocateCounter(
+			s.fullyQualifiedName(name),
+			s.tags,
+		)
+	}
+
+	c := newCounter(cachedCounter)
+	s.counters[name] = c
+
+	return c
+}
+
+func (s *scope) counter(sanitizedName string) (Counter, bool) {
+	s.cm.RLock()
+	defer s.cm.RUnlock()
+
+	c, ok := s.counters[sanitizedName]
+	return c, ok
 }
 
 func (s *scope) Gauge(name string) Gauge {
 	name = s.sanitizer.Name(name)
-	s.gm.RLock()
-	val, ok := s.gauges[name]
-	s.gm.RUnlock()
-	if !ok {
-		s.gm.Lock()
-		val, ok = s.gauges[name]
-		if !ok {
-			var cachedGauge CachedGauge
-			if s.cachedReporter != nil {
-				cachedGauge = s.cachedReporter.AllocateGauge(
-					s.fullyQualifiedName(name), s.tags,
-				)
-			}
-			val = newGauge(cachedGauge)
-			s.gauges[name] = val
-		}
-		s.gm.Unlock()
+	if g, ok := s.gauge(name); ok {
+		return g
 	}
-	return val
+
+	s.gm.Lock()
+	defer s.gm.Unlock()
+
+	if g, ok := s.gauges[name]; ok {
+		return g
+	}
+
+	var cachedGauge CachedGauge
+	if s.cachedReporter != nil {
+		cachedGauge = s.cachedReporter.AllocateGauge(
+			s.fullyQualifiedName(name), s.tags,
+		)
+	}
+
+	g := newGauge(cachedGauge)
+	s.gauges[name] = g
+
+	return g
+}
+
+func (s *scope) gauge(name string) (Gauge, bool) {
+	s.gm.RLock()
+	defer s.gm.RUnlock()
+
+	g, ok := s.gauges[name]
+	return g, ok
 }
 
 func (s *scope) Timer(name string) Timer {
 	name = s.sanitizer.Name(name)
-	s.tm.RLock()
-	val, ok := s.timers[name]
-	s.tm.RUnlock()
-	if !ok {
-		s.tm.Lock()
-		val, ok = s.timers[name]
-		if !ok {
-			var cachedTimer CachedTimer
-			if s.cachedReporter != nil {
-				cachedTimer = s.cachedReporter.AllocateTimer(
-					s.fullyQualifiedName(name), s.tags,
-				)
-			}
-			val = newTimer(
-				s.fullyQualifiedName(name), s.tags, s.reporter, cachedTimer,
-			)
-			s.timers[name] = val
-		}
-		s.tm.Unlock()
+	if t, ok := s.timer(name); ok {
+		return t
 	}
-	return val
+
+	s.tm.Lock()
+	defer s.tm.Unlock()
+
+	if t, ok := s.timers[name]; ok {
+		return t
+	}
+
+	var cachedTimer CachedTimer
+	if s.cachedReporter != nil {
+		cachedTimer = s.cachedReporter.AllocateTimer(
+			s.fullyQualifiedName(name), s.tags,
+		)
+	}
+
+	t := newTimer(
+		s.fullyQualifiedName(name), s.tags, s.reporter, cachedTimer,
+	)
+	s.timers[name] = t
+
+	return t
+}
+
+func (s *scope) timer(sanitizedName string) (Timer, bool) {
+	s.tm.RLock()
+	defer s.tm.RUnlock()
+
+	t, ok := s.timers[sanitizedName]
+	return t, ok
 }
 
 func (s *scope) Histogram(name string, b Buckets) Histogram {
 	name = s.sanitizer.Name(name)
+	if h, ok := s.histogram(name); ok {
+		return h
+	}
 
 	if b == nil {
 		b = s.defaultBuckets
 	}
 
-	s.hm.RLock()
-	val, ok := s.histograms[name]
-	s.hm.RUnlock()
-	if !ok {
-		s.hm.Lock()
-		val, ok = s.histograms[name]
-		if !ok {
-			var cachedHistogram CachedHistogram
-			if s.cachedReporter != nil {
-				cachedHistogram = s.cachedReporter.AllocateHistogram(
-					s.fullyQualifiedName(name), s.tags, b,
-				)
-			}
-			val = newHistogram(
-				s.fullyQualifiedName(name), s.tags, s.reporter, b, cachedHistogram,
-			)
-			s.histograms[name] = val
-		}
-		s.hm.Unlock()
+	s.hm.Lock()
+	defer s.hm.Unlock()
+
+	if h, ok := s.histograms[name]; ok {
+		return h
 	}
-	return val
+
+	var cachedHistogram CachedHistogram
+	if s.cachedReporter != nil {
+		cachedHistogram = s.cachedReporter.AllocateHistogram(
+			s.fullyQualifiedName(name), s.tags, b,
+		)
+	}
+
+	h := newHistogram(
+		s.fullyQualifiedName(name), s.tags, s.reporter, b, cachedHistogram,
+	)
+	s.histograms[name] = h
+
+	return h
+}
+
+func (s *scope) histogram(sanitizedName string) (Histogram, bool) {
+	s.hm.RLock()
+	defer s.hm.RUnlock()
+
+	h, ok := s.histograms[sanitizedName]
+	return h, ok
 }
 
 func (s *scope) Tagged(tags map[string]string) Scope {
@@ -383,24 +427,27 @@ func (s *scope) SubScope(prefix string) Scope {
 	return s.subscope(s.fullyQualifiedName(prefix), nil)
 }
 
+func (s *scope) cachedSubscope(key string) (*scope, bool) {
+	s.registry.RLock()
+	defer s.registry.RUnlock()
+
+	ss, ok := s.registry.subscopes[key]
+	return ss, ok
+}
+
 func (s *scope) subscope(prefix string, immutableTags map[string]string) Scope {
 	immutableTags = mergeRightTags(s.tags, immutableTags)
 	key := scopeRegistryKey(prefix, immutableTags)
 
-	s.registry.RLock()
-	existing, ok := s.registry.subscopes[key]
-	if ok {
-		s.registry.RUnlock()
-		return existing
+	if ss, ok := s.cachedSubscope(key); ok {
+		return ss
 	}
-	s.registry.RUnlock()
 
 	s.registry.Lock()
 	defer s.registry.Unlock()
 
-	existing, ok = s.registry.subscopes[key]
-	if ok {
-		return existing
+	if ss, ok := s.registry.subscopes[key]; ok {
+		return ss
 	}
 
 	subscope := &scope{
@@ -437,6 +484,8 @@ func (s *scope) Snapshot() Snapshot {
 	snap := newSnapshot()
 
 	s.registry.RLock()
+	defer s.registry.RUnlock()
+
 	for _, ss := range s.registry.subscopes {
 		// NB(r): tags are immutable, no lock required to read.
 		tags := make(map[string]string, len(s.tags))
@@ -490,26 +539,23 @@ func (s *scope) Snapshot() Snapshot {
 		}
 		ss.hm.RUnlock()
 	}
-	s.registry.RUnlock()
 
 	return snap
 }
 
 func (s *scope) Close() error {
 	s.status.Lock()
+	defer s.status.Unlock()
 
 	// don't wait to close more than once (panic on double close of
 	// s.status.quit)
 	if s.status.closed {
-		s.status.Unlock()
 		return nil
 	}
 
 	s.status.closed = true
 	close(s.status.quit)
 	s.reportRegistryWithLock()
-
-	s.status.Unlock()
 
 	if closer, ok := s.baseReporter.(io.Closer); ok {
 		return closer.Close()
