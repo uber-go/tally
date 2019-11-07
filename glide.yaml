@@ -1,5 +1,4 @@
 package: github.com/uber-go/tally
-version: 1.0.0
 import:
 - package: github.com/cactus/go-statsd-client
   version: ~3.1.0
@@ -17,6 +16,8 @@ import:
   version: ^0.8.1
 - package: go.uber.org/atomic
   version: ^1
+- package: github.com/pkg/errors
+  version: ^0.8.1
 testImport:
 - package: github.com/axw/gocov
   version: 54b98cfcac0c63fb3f9bd8e7ad241b724d4e985b
@@ -41,4 +42,3 @@ testImport:
   - require
 - package: gopkg.in/validator.v2
 - package: gopkg.in/yaml.v2
-
