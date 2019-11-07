@@ -358,6 +358,65 @@ func TestOnRegisterError(t *testing.T) {
 	assert.Equal(t, 2, len(captured))
 }
 
+func TestAlreadyRegisteredCounter(t *testing.T) {
+	var captured []error
+
+	registry := prom.NewRegistry()
+	r := NewReporter(Options{
+		Registerer: registry,
+		OnRegisterError: func(err error) {
+			captured = append(captured, err)
+		},
+	})
+
+	// n.b. Prometheus metrics are different from M3 metrics in that they are
+	//      uniquely identified as "metric_name+label_name+label_name+...";
+	//      additionally, given that Prometheus ingestion is pull-based, there
+	//      is only ever one reporter used regardless of tally.Scope hierarchy.
+	//
+	//      Because of this, for a given metric "foo", only the first-registered
+	//      permutation of metric and label names will succeed because the same
+	//      registry is being used, and because Prometheus asserts that a
+	//      registered metric name has the same corresponding label names.
+	//      Subsequent registrations - such as adding or removing tags - will
+	//      return an error.
+	//
+	//      This is a problem because Tally's API does not apply semantics or
+	//      restrictions to the combinatorics (or descendant mutations of)
+	//      metric tags. As such, we must assert that Tally's Prometheus
+	//      reporter does the right thing and indicates an error when this
+	//      happens.
+	//
+	// The first allocation call will succeed. This establishes the required
+	// label names (["foo"]) for metric "foo".
+	r.AllocateCounter("foo", map[string]string{"foo": "bar"})
+
+	// The second allocation call is okay, as it has the same label names (["foo"]).
+	r.AllocateCounter("foo", map[string]string{"foo": "baz"})
+
+	// The third allocation call fails, because it has different label names
+	// (["bar"], vs previously ["foo"]) for the same metric name "foo".
+	r.AllocateCounter("foo", map[string]string{"bar": "qux"})
+
+	// The fourth allocation call fails, because while it has one of the same
+	// label names ("foo") as was previously registered for metric "foo", it
+	// also has an additional label name (["foo", "zork"] != ["foo"]).
+	r.AllocateCounter("foo", map[string]string{
+		"foo":  "bar",
+		"zork": "derp",
+	})
+
+	// The fifth allocation call fails, because it has no label names for the
+	// metric "foo", which expects the label names it was originally registered
+	// with (["foo"]).
+	r.AllocateCounter("foo", nil)
+
+	require.Equal(t, 3, len(captured))
+	for _, err := range captured {
+		require.Contains(t, err.Error(), "same fully-qualified name")
+	}
+}
+
 func gather(t *testing.T, r prom.Gatherer) []*dto.MetricFamily {
 	metrics, err := r.Gather()
 	require.NoError(t, err)

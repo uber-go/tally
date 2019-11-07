@@ -28,6 +28,11 @@ import (
 
 // Scope is a namespace wrapper around a stats reporter, ensuring that
 // all emitted values have a given prefix or set of tags.
+//
+// IMPORTANT: When using Prometheus reporters, users must take care to
+//            not create metrics from both parent scopes and subscopes
+//            that have the same metric name but different tag keys,
+//            as metric allocation will panic.
 type Scope interface {
 	// Counter returns the Counter object corresponding to the name.
 	Counter(name string) Counter

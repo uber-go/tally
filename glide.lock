@@ -1,5 +1,5 @@
-hash: 20082900e43a2e140264cd95d5d7be6a88c14256890a7db43b237353d09dbc63
-updated: 2018-07-17T16:33:25.073511-07:00
+hash: 6c5a37d4f995175d7ab310d09b5866057c683536b0ae3d8f478f87943aa03be4
+updated: 2019-11-07T15:02:21.080076-05:00
 imports:
 - name: github.com/beorn7/perks
   version: 3a771d992973f24aa725d07868b467d1ddfceafb
@@ -19,11 +19,11 @@ imports:
   - prometheus
   - prometheus/promhttp
 - name: github.com/m3db/prometheus_client_model
-  version: 8b2299a4bf7d7fc10835527021716d4b4a6e8700
+  version: d3fff8420252ef63bffb96f689d1a85096c97321
   subpackages:
   - go
 - name: github.com/m3db/prometheus_common
-  version: 25aaa3dff79bb48116615ebe1dea6a494b74ce77
+  version: d550673fc477123acb69017380567e8fafc765fc
   subpackages:
   - expfmt
   - internal/bitbucket.org/ww/goautoneg
@@ -34,8 +34,10 @@ imports:
   version: c12348ce28de40eed0136aa2b644d0ee0650e56c
   subpackages:
   - pbutil
+- name: github.com/pkg/errors
+  version: ba968bfe8b2f7e042a574c888954fccecfa385b4
 - name: go.uber.org/atomic
-  version: 1ea20fb1cbb1cc08cbd0d913a96dead89aa18289
+  version: 9dc4df04d0d1c39369750a9f6c32c39560672089
 - name: gopkg.in/validator.v2
   version: 135c24b11c19e52befcae2ec3fca5d9b78c4e98e
 - name: gopkg.in/yaml.v2
