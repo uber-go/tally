@@ -48,6 +48,20 @@ func (p *TCalcTransport) Write(buf []byte) (int, error) {
 	return len(buf), nil
 }
 
+// WriteByte adds 1 to the count
+// Required to maintain thrift.TRichTransport interface
+func (p *TCalcTransport) WriteByte(byte) error {
+	atomic.AddInt32(&p.count, 1)
+	return nil
+}
+
+// WriteString adds the length of the string to the count
+// Required to maintain thrift.TRichTransport interface
+func (p *TCalcTransport) WriteString(s string) (int, error) {
+	atomic.AddInt32(&p.count, int32(len(s)))
+	return len(s), nil
+}
+
 // IsOpen does nothing as transport is not maintaining a connection
 // Required to maintain thrift.TTransport interface
 func (p *TCalcTransport) IsOpen() bool {
@@ -69,6 +83,12 @@ func (p *TCalcTransport) Close() error {
 // Read does nothing as it's not required for calculations
 // Required to maintain thrift.TTransport interface
 func (p *TCalcTransport) Read(buf []byte) (int, error) {
+	return 0, nil
+}
+
+// ReadByte does nothing as it's not required for calculations
+// Required to maintain thrift.TRichTransport interface
+func (p *TCalcTransport) ReadByte() (byte, error) {
 	return 0, nil
 }
 

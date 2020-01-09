@@ -24,7 +24,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
 )
+
+// Make sure that TCalcTransport implements TRichTransport.
+// We use TRichTransport instead of TTransport to avoid unnecessary allocations
+// when writing string fields. See tests in
+var _ thrift.TRichTransport = (*TCalcTransport)(nil)
 
 func TestTCalcTransport(t *testing.T) {
 	trans := &TCalcTransport{}
@@ -43,9 +49,24 @@ func TestTCalcTransport(t *testing.T) {
 	require.Nil(t, err)
 	require.EqualValues(t, len(testString1)+len(testString2), trans.GetCount())
 
+	trans.ResetCount()
+	n, err = trans.WriteString(testString1)
+	require.EqualValues(t, len(testString1), n)
+	require.Nil(t, err)
+	require.EqualValues(t, len(testString1), trans.GetCount())
+
+	err = trans.WriteByte('a')
+	require.Nil(t, err)
+	require.EqualValues(t, len(testString1)+1, trans.GetCount())
+
 	n, err = trans.Read([]byte(testString1))
 	require.Nil(t, err)
 	require.EqualValues(t, 0, n)
+
+	b, err := trans.ReadByte()
+	require.Nil(t, err)
+	require.Equal(t, byte(0), b)
+
 	require.Equal(t, ^uint64(0), trans.RemainingBytes())
 
 	trans.ResetCount()
