@@ -60,7 +60,7 @@ func BenchmarkCalulateSize(b *testing.B) {
 	benchReporter := r.(*reporter)
 
 	val := int64(123456)
-	met := benchReporter.newMetric("foo", nil, counterType)
+	met := benchReporter.newMetric("foo", map[string]string{"domain": "foo"}, counterType)
 	met.MetricValue.Count.I64Value = &val
 
 	b.ResetTimer()
