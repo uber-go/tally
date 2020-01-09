@@ -45,10 +45,6 @@ type Configuration struct {
 
 	// IncludeHost is whether or not to include host tag.
 	IncludeHost bool `yaml:"includeHost"`
-
-	// HistogramBucketTagPrecision is precision to use when formatting the metric tag
-	// with the histogram bucket bound values.
-	HistogramBucketTagPrecision uint `yaml:"histogramBucketTagPrecision"`
 }
 
 // NewReporter creates a new M3 reporter from this configuration.
@@ -58,13 +54,12 @@ func (c Configuration) NewReporter() (Reporter, error) {
 		hostPorts = []string{c.HostPort}
 	}
 	return NewReporter(Options{
-		HostPorts:                   hostPorts,
-		Service:                     c.Service,
-		Env:                         c.Env,
-		CommonTags:                  c.CommonTags,
-		MaxQueueSize:                c.Queue,
-		MaxPacketSizeBytes:          c.PacketSize,
-		IncludeHost:                 c.IncludeHost,
-		HistogramBucketTagPrecision: c.HistogramBucketTagPrecision,
+		HostPorts:          hostPorts,
+		Service:            c.Service,
+		Env:                c.Env,
+		CommonTags:         c.CommonTags,
+		MaxQueueSize:       c.Queue,
+		MaxPacketSizeBytes: c.PacketSize,
+		IncludeHost:        c.IncludeHost,
 	})
 }
