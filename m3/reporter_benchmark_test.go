@@ -21,8 +21,11 @@
 package m3
 
 import (
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/uber-go/tally"
 )
 
 const (
@@ -47,6 +50,30 @@ func BenchmarkNewMetric(b *testing.B) {
 
 	for n := 0; n < b.N; n++ {
 		benchReporter.newMetric("foo", nil, counterType)
+	}
+}
+
+func BenchmarkEmitMetrics(b *testing.B) {
+	r, _ := NewReporter(Options{
+		HostPorts:  []string{"127.0.0.1:9052"},
+		Service:    "test-service",
+		CommonTags: defaultCommonTags,
+	})
+	defer r.Close()
+
+	benchReporter := r.(*reporter)
+
+	counters := make([]tally.CachedCount, 100)
+	for i := range counters {
+		counters[i] = r.AllocateCounter(fmt.Sprintf("foo-%v", i), nil /* tags */)
+	}
+
+	for n := 0; n < b.N; n++ {
+		for _, c := range counters {
+			c.ReportCount(1)
+		}
+
+		benchReporter.Flush()
 	}
 }
 

@@ -34,10 +34,11 @@ const MaxLength = 65000
 
 // TUDPTransport does UDP as a thrift.TTransport
 type TUDPTransport struct {
-	conn     *net.UDPConn
-	addr     net.Addr
-	writeBuf bytes.Buffer
-	closed   atomic.Bool
+	conn        *net.UDPConn
+	addr        net.Addr
+	writeBuf    bytes.Buffer
+	readByteBuf []byte
+	closed      atomic.Bool
 }
 
 // NewTUDPClientTransport creates a net.UDPConn-backed TTransport for Thrift clients
@@ -64,7 +65,11 @@ func NewTUDPClientTransport(destHostPort string, locHostPort string) (*TUDPTrans
 		return nil, thrift.NewTTransportException(thrift.NOT_OPEN, err.Error())
 	}
 
-	return &TUDPTransport{addr: destAddr, conn: conn}, nil
+	return &TUDPTransport{
+		addr:        destAddr,
+		conn:        conn,
+		readByteBuf: make([]byte, 1),
+	}, nil
 }
 
 // NewTUDPServerTransport creates a net.UDPConn-backed TTransport for Thrift servers
@@ -80,7 +85,11 @@ func NewTUDPServerTransport(hostPort string) (*TUDPTransport, error) {
 	if err != nil {
 		return nil, thrift.NewTTransportException(thrift.NOT_OPEN, err.Error())
 	}
-	return &TUDPTransport{addr: conn.LocalAddr(), conn: conn}, nil
+	return &TUDPTransport{
+		addr:        conn.LocalAddr(),
+		conn:        conn,
+		readByteBuf: make([]byte, 1),
+	}, nil
 }
 
 // Open does nothing as connection is opened on creation
@@ -122,6 +131,20 @@ func (p *TUDPTransport) Read(buf []byte) (int, error) {
 	return n, thrift.NewTTransportExceptionFromError(err)
 }
 
+// ReadByte reads a single byte and returns it
+func (p *TUDPTransport) ReadByte() (byte, error) {
+	n, err := p.Read(p.readByteBuf)
+	if n == 0 {
+		if err != nil {
+			return 0, err
+		}
+
+		return 0, thrift.NewTTransportException(thrift.PROTOCOL_ERROR, "Received empty packet")
+	}
+
+	return p.readByteBuf[0], err
+}
+
 // RemainingBytes returns the max number of bytes (same as Thrift's StreamTransport) as we
 // do not know how many bytes we have left.
 func (p *TUDPTransport) RemainingBytes() uint64 {
@@ -134,10 +157,36 @@ func (p *TUDPTransport) Write(buf []byte) (int, error) {
 	if !p.IsOpen() {
 		return 0, thrift.NewTTransportException(thrift.NOT_OPEN, "Connection not open")
 	}
-	if len(p.writeBuf.Bytes())+len(buf) > MaxLength {
+	if p.writeBuf.Len()+len(buf) > MaxLength {
 		return 0, thrift.NewTTransportException(thrift.INVALID_DATA, "Data does not fit within one UDP packet")
 	}
 	n, err := p.writeBuf.Write(buf)
+	return n, thrift.NewTTransportExceptionFromError(err)
+}
+
+// WriteByte writes a single byte to the write buffer
+func (p *TUDPTransport) WriteByte(b byte) error {
+	if !p.IsOpen() {
+		return thrift.NewTTransportException(thrift.NOT_OPEN, "Connection not open")
+	}
+	if p.writeBuf.Len()+1 > MaxLength {
+		return thrift.NewTTransportException(thrift.INVALID_DATA, "Data does not fit within one UDP packet")
+	}
+
+	err := p.writeBuf.WriteByte(b)
+	return thrift.NewTTransportExceptionFromError(err)
+}
+
+// WriteString writes the specified string to the write buffer
+func (p *TUDPTransport) WriteString(s string) (int, error) {
+	if !p.IsOpen() {
+		return 0, thrift.NewTTransportException(thrift.NOT_OPEN, "Connection not open")
+	}
+	if p.writeBuf.Len()+len(s) > MaxLength {
+		return 0, thrift.NewTTransportException(thrift.INVALID_DATA, "Data does not fit within one UDP packet")
+	}
+
+	n, err := p.writeBuf.WriteString(s)
 	return n, thrift.NewTTransportExceptionFromError(err)
 }
 
