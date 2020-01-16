@@ -21,7 +21,7 @@
 package customtransport
 
 // TCalcTransport is a thrift TTransport that is used to calculate how many
-// bytes are used when writing a thrift element. It is thread-safe
+// bytes are used when writing a thrift element.
 type TCalcTransport struct {
 	count int32
 }
