@@ -29,8 +29,12 @@ import (
 	"go.uber.org/atomic"
 )
 
-//MaxLength of UDP packet
+// MaxLength of UDP packet
 const MaxLength = 65000
+
+// Ensure TUDPTransport implements TRichTransport which avoids allocations
+// when writing strings.
+var _ thrift.TRichTransport = (*TUDPTransport)(nil)
 
 // TUDPTransport does UDP as a thrift.TTransport
 type TUDPTransport struct {
@@ -134,15 +138,15 @@ func (p *TUDPTransport) Read(buf []byte) (int, error) {
 // ReadByte reads a single byte and returns it
 func (p *TUDPTransport) ReadByte() (byte, error) {
 	n, err := p.Read(p.readByteBuf)
-	if n == 0 {
-		if err != nil {
-			return 0, err
-		}
+	if err != nil {
+		return 0, err
+	}
 
+	if n == 0 {
 		return 0, thrift.NewTTransportException(thrift.PROTOCOL_ERROR, "Received empty packet")
 	}
 
-	return p.readByteBuf[0], err
+	return p.readByteBuf[0], nil
 }
 
 // RemainingBytes returns the max number of bytes (same as Thrift's StreamTransport) as we

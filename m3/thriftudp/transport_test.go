@@ -29,14 +29,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
 )
 
 var localListenAddr = &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)}
-
-// Ensure TUDPTransport implements TRichTransport which avoids allocations
-// when writing strings.
-var _ thrift.TRichTransport = (*TUDPTransport)(nil)
 
 func TestNewTUDPClientTransport(t *testing.T) {
 	_, err := NewTUDPClientTransport("fakeAddressAndPort", "")
