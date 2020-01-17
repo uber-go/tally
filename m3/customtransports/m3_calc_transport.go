@@ -20,12 +20,8 @@
 
 package customtransport
 
-import (
-	"sync/atomic"
-)
-
 // TCalcTransport is a thrift TTransport that is used to calculate how many
-// bytes are used when writing a thrift element. It is thread-safe
+// bytes are used when writing a thrift element.
 type TCalcTransport struct {
 	count int32
 }
@@ -33,32 +29,32 @@ type TCalcTransport struct {
 // GetCount returns the number of bytes that would be written
 // Required to maintain thrift.TTransport interface
 func (p *TCalcTransport) GetCount() int32 {
-	return atomic.LoadInt32(&p.count)
+	return p.count
 }
 
 // ResetCount resets the number of bytes written to 0
 func (p *TCalcTransport) ResetCount() {
-	atomic.StoreInt32(&p.count, 0)
+	p.count = 0
 }
 
 // Write adds the number of bytes written to the count
 // Required to maintain thrift.TTransport interface
 func (p *TCalcTransport) Write(buf []byte) (int, error) {
-	atomic.AddInt32(&p.count, int32(len(buf)))
+	p.count += int32(len(buf))
 	return len(buf), nil
 }
 
 // WriteByte adds 1 to the count
 // Required to maintain thrift.TRichTransport interface
 func (p *TCalcTransport) WriteByte(byte) error {
-	atomic.AddInt32(&p.count, 1)
+	p.count++
 	return nil
 }
 
 // WriteString adds the length of the string to the count
 // Required to maintain thrift.TRichTransport interface
 func (p *TCalcTransport) WriteString(s string) (int, error) {
-	atomic.AddInt32(&p.count, int32(len(s)))
+	p.count += int32(len(s))
 	return len(s), nil
 }
 
