@@ -123,7 +123,7 @@ func TestWriteRead(t *testing.T) {
 	n, err := client.Write([]byte("test"))
 	require.Nil(t, err)
 	require.Equal(t, 4, n)
-	n, err = client.Write([]byte("string"))
+	n, err = client.WriteString("string")
 	require.Nil(t, err)
 	require.Equal(t, 6, n)
 	err = client.Flush()
@@ -135,6 +135,47 @@ func TestWriteRead(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, len(expected), n)
 	require.Equal(t, expected, readBuf[0:n])
+}
+
+func TestWriteByteReadByte(t *testing.T) {
+	server, err := NewTUDPServerTransport(localListenAddr.String())
+	require.Nil(t, err)
+	defer server.Close()
+
+	client, err := NewTUDPClientTransport(server.Addr().String(), "")
+	require.Nil(t, err)
+	defer client.Close()
+
+	for _, b := range []byte("test") {
+		err := client.WriteByte(b)
+		require.Nil(t, err)
+
+		err = client.Flush()
+		require.Nil(t, err)
+	}
+
+	want := []byte("test")
+	for i := range want {
+		b, err := server.ReadByte()
+		require.Nil(t, err)
+		assert.Equal(t, want[i], b, "byte %v mismatch", i)
+	}
+}
+
+func TestReadByteEmptyPacket(t *testing.T) {
+	server, err := NewTUDPServerTransport(localListenAddr.String())
+	require.Nil(t, err)
+	defer server.Close()
+
+	client, err := NewTUDPClientTransport(server.Addr().String(), "")
+	require.Nil(t, err)
+	defer client.Close()
+
+	err = client.Flush()
+	require.Nil(t, err)
+
+	_, err = server.ReadByte()
+	require.NotNil(t, err)
 }
 
 func TestIndirectCloseError(t *testing.T) {
@@ -177,7 +218,15 @@ func TestConnClosedReadWrite(t *testing.T) {
 
 	_, err = trans.Read(make([]byte, 1))
 	require.NotNil(t, err)
+
+	_, err = trans.ReadByte()
+	require.NotNil(t, err)
+
 	_, err = trans.Write([]byte("test"))
+	require.NotNil(t, err)
+	_, err = trans.WriteString("test")
+	require.NotNil(t, err)
+	err = trans.WriteByte('t')
 	require.NotNil(t, err)
 }
 
@@ -192,6 +241,24 @@ func TestHugeWrite(t *testing.T) {
 
 		//expect buffer to exceed max
 		_, err = trans.Write(hugeMessage)
+		require.NotNil(t, err)
+
+		_, err = trans.WriteString(string(hugeMessage))
+		require.NotNil(t, err)
+	})
+}
+
+func TestWriteByteLimit(t *testing.T) {
+	withLocalServer(t, func(addr string) {
+		trans, err := NewTUDPClientTransport(addr, "")
+		require.Nil(t, err)
+
+		hugeMessage := make([]byte, MaxLength)
+		_, err = trans.Write(hugeMessage)
+		require.Nil(t, err)
+
+		//expect buffer to exceed max
+		err = trans.WriteByte('a')
 		require.NotNil(t, err)
 	})
 }
