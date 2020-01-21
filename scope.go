@@ -21,7 +21,6 @@
 package tally
 
 import (
-	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -575,7 +574,7 @@ func (s *scope) fullyQualifiedName(name string) string {
 	// output we're creating is a concatenation of the sanitized inputs.
 	// If we change the concatenation to involve other inputs or characters,
 	// we'll need to sanitize them too.
-	return fmt.Sprintf("%s%s%s", s.prefix, s.separator, name)
+	return s.prefix + s.separator + name
 }
 
 func (s *scope) copyAndSanitizeMap(tags map[string]string) map[string]string {
