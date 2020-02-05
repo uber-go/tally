@@ -190,11 +190,11 @@ This stuff needs to be fast. With that in mind, we avoid locks and unnecessary m
 ```
 BenchmarkCounterInc-8               	200000000	         7.68 ns/op
 BenchmarkReportCounterNoData-8      	300000000	         4.88 ns/op
-BenchmarkReportCounterWithData-8    	100000000	        21.6 ns/op
-BenchmarkGaugeSet-8                 	100000000	        16.0 ns/op
-BenchmarkReportGaugeNoData-8        	100000000	        10.4 ns/op
-BenchmarkReportGaugeWithData-8      	50000000	        27.6 ns/op
-BenchmarkTimerInterval-8            	50000000	        37.7 ns/op
+BenchmarkReportCounterWithData-8    	100000000	         21.6 ns/op
+BenchmarkGaugeSet-8                 	100000000	         16.0 ns/op
+BenchmarkReportGaugeNoData-8        	100000000	         10.4 ns/op
+BenchmarkReportGaugeWithData-8      	50000000	         27.6 ns/op
+BenchmarkTimerInterval-8            	50000000	         37.7 ns/op
 BenchmarkTimerReport-8              	300000000	         5.69 ns/op
 ```
 
@@ -208,5 +208,3 @@ Released under the [MIT License](LICENSE).
 [ci]: https://travis-ci.org/uber-go/tally
 [cov-img]: https://coveralls.io/repos/github/uber-go/tally/badge.svg?branch=master
 [cov]: https://coveralls.io/github/uber-go/tally?branch=master
-[glide.lock]: https://github.com/uber-go/tally/blob/master/glide.lock
-[v1]: https://github.com/uber-go/tally/milestones
