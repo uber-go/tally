@@ -145,7 +145,7 @@ func benchmarkScopeReportingN(b *testing.B, numElems int) {
 }
 
 func BenchmarkScopeReporting(b *testing.B) {
-	for i := 1; i <= 10000000; i *= 10 {
+	for i := 1; i <= 1000000; i *= 10 {
 		size := fmt.Sprintf("size%d", i)
 		b.Run(size, func(b *testing.B) {
 			benchmarkScopeReportingN(b, i)

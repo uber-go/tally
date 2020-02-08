@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	defaultInitialSliceSize = 16
+	_defaultInitialSliceSize = 16
 )
 
 var (
@@ -79,10 +79,11 @@ type scope struct {
 	countersSlice   []*counter
 	gauges          map[string]*gauge
 	gaugesSlice     []*gauge
-	timers          map[string]*timer
-	timersSlice     []*timer
 	histograms      map[string]*histogram
 	histogramsSlice []*histogram
+	timers          map[string]*timer
+	// nb: deliberately skipping timersSlice as we report timers immediately,
+	// no buffering is involved.
 }
 
 type scopeStatus struct {
@@ -169,13 +170,12 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		},
 
 		counters:        make(map[string]*counter),
-		countersSlice:   make([]*counter, 0, defaultInitialSliceSize),
+		countersSlice:   make([]*counter, 0, _defaultInitialSliceSize),
 		gauges:          make(map[string]*gauge),
-		gaugesSlice:     make([]*gauge, 0, defaultInitialSliceSize),
-		timers:          make(map[string]*timer),
-		timersSlice:     make([]*timer, 0, defaultInitialSliceSize),
+		gaugesSlice:     make([]*gauge, 0, _defaultInitialSliceSize),
 		histograms:      make(map[string]*histogram),
-		histogramsSlice: make([]*histogram, 0, defaultInitialSliceSize),
+		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
+		timers:          make(map[string]*timer),
 	}
 
 	// NB(r): Take a copy of the tags on creation
@@ -378,7 +378,6 @@ func (s *scope) Timer(name string) Timer {
 		s.fullyQualifiedName(name), s.tags, s.reporter, cachedTimer,
 	)
 	s.timers[name] = t
-	s.timersSlice = append(s.timersSlice, t)
 
 	return t
 }
@@ -479,13 +478,12 @@ func (s *scope) subscope(prefix string, immutableTags map[string]string) Scope {
 		registry:       s.registry,
 
 		counters:        make(map[string]*counter),
-		countersSlice:   make([]*counter, 0, defaultInitialSliceSize),
+		countersSlice:   make([]*counter, 0, _defaultInitialSliceSize),
 		gauges:          make(map[string]*gauge),
-		gaugesSlice:     make([]*gauge, 0, defaultInitialSliceSize),
-		timers:          make(map[string]*timer),
-		timersSlice:     make([]*timer, 0, defaultInitialSliceSize),
+		gaugesSlice:     make([]*gauge, 0, _defaultInitialSliceSize),
 		histograms:      make(map[string]*histogram),
-		histogramsSlice: make([]*histogram, 0, defaultInitialSliceSize),
+		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
+		timers:          make(map[string]*timer),
 	}
 
 	s.registry.subscopes[key] = subscope
