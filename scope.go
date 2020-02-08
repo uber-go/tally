@@ -26,6 +26,10 @@ import (
 	"time"
 )
 
+const (
+	_defaultInitialSliceSize = 16
+)
+
 var (
 	// NoopScope is a scope that does nothing
 	NoopScope, _ = NewRootScope(ScopeOptions{Reporter: NullStatsReporter}, 0)
@@ -71,10 +75,15 @@ type scope struct {
 	tm sync.RWMutex
 	hm sync.RWMutex
 
-	counters   map[string]*counter
-	gauges     map[string]*gauge
-	timers     map[string]*timer
-	histograms map[string]*histogram
+	counters        map[string]*counter
+	countersSlice   []*counter
+	gauges          map[string]*gauge
+	gaugesSlice     []*gauge
+	histograms      map[string]*histogram
+	histogramsSlice []*histogram
+	timers          map[string]*timer
+	// nb: deliberately skipping timersSlice as we report timers immediately,
+	// no buffering is involved.
 }
 
 type scopeStatus struct {
@@ -160,10 +169,13 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 			quit:   make(chan struct{}, 1),
 		},
 
-		counters:   make(map[string]*counter),
-		gauges:     make(map[string]*gauge),
-		timers:     make(map[string]*timer),
-		histograms: make(map[string]*histogram),
+		counters:        make(map[string]*counter),
+		countersSlice:   make([]*counter, 0, _defaultInitialSliceSize),
+		gauges:          make(map[string]*gauge),
+		gaugesSlice:     make([]*gauge, 0, _defaultInitialSliceSize),
+		histograms:      make(map[string]*histogram),
+		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
+		timers:          make(map[string]*timer),
 	}
 
 	// NB(r): Take a copy of the tags on creation
@@ -205,13 +217,13 @@ func (s *scope) report(r StatsReporter) {
 
 func (s *scope) cachedReport() {
 	s.cm.RLock()
-	for _, counter := range s.counters {
+	for _, counter := range s.countersSlice {
 		counter.cachedReport()
 	}
 	s.cm.RUnlock()
 
 	s.gm.RLock()
-	for _, gauge := range s.gauges {
+	for _, gauge := range s.gaugesSlice {
 		gauge.cachedReport()
 	}
 	s.gm.RUnlock()
@@ -219,7 +231,7 @@ func (s *scope) cachedReport() {
 	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
 
 	s.hm.RLock()
-	for _, histogram := range s.histograms {
+	for _, histogram := range s.histogramsSlice {
 		histogram.cachedReport()
 	}
 	s.hm.RUnlock()
@@ -294,6 +306,7 @@ func (s *scope) Counter(name string) Counter {
 
 	c := newCounter(cachedCounter)
 	s.counters[name] = c
+	s.countersSlice = append(s.countersSlice, c)
 
 	return c
 }
@@ -328,6 +341,7 @@ func (s *scope) Gauge(name string) Gauge {
 
 	g := newGauge(cachedGauge)
 	s.gauges[name] = g
+	s.gaugesSlice = append(s.gaugesSlice, g)
 
 	return g
 }
@@ -404,6 +418,7 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 		s.fullyQualifiedName(name), s.tags, s.reporter, b, cachedHistogram,
 	)
 	s.histograms[name] = h
+	s.histogramsSlice = append(s.histogramsSlice, h)
 
 	return h
 }
@@ -462,10 +477,13 @@ func (s *scope) subscope(prefix string, immutableTags map[string]string) Scope {
 		sanitizer:      s.sanitizer,
 		registry:       s.registry,
 
-		counters:   make(map[string]*counter),
-		gauges:     make(map[string]*gauge),
-		timers:     make(map[string]*timer),
-		histograms: make(map[string]*histogram),
+		counters:        make(map[string]*counter),
+		countersSlice:   make([]*counter, 0, _defaultInitialSliceSize),
+		gauges:          make(map[string]*gauge),
+		gaugesSlice:     make([]*gauge, 0, _defaultInitialSliceSize),
+		histograms:      make(map[string]*histogram),
+		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
+		timers:          make(map[string]*timer),
 	}
 
 	s.registry.subscopes[key] = subscope

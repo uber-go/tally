@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"strconv"
 	"testing"
+	"time"
 )
 
 func BenchmarkNameGeneration(b *testing.B) {
@@ -120,4 +121,83 @@ func BenchmarkHistogramExisting(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		root.Histogram("foo", DefaultBuckets)
 	}
+}
+
+func benchmarkScopeReportingN(b *testing.B, numElems int) {
+	root, _ := NewRootScope(ScopeOptions{
+		Prefix:          "funkytown",
+		CachedReporter:  noopCachedReporter{},
+		SanitizeOptions: &alphanumericSanitizerOpts,
+	}, 0)
+	s := root.(*scope)
+
+	ids := make([]string, 0, numElems)
+	for i := 0; i < numElems; i++ {
+		id := fmt.Sprintf("take.me.to.%d", i)
+		ids = append(ids, id)
+		s.Counter(id)
+	}
+	b.ResetTimer()
+
+	for n := 0; n < b.N; n++ {
+		s.cachedReport()
+	}
+}
+
+func BenchmarkScopeReporting(b *testing.B) {
+	for i := 1; i <= 1000000; i *= 10 {
+		size := fmt.Sprintf("size%d", i)
+		b.Run(size, func(b *testing.B) {
+			benchmarkScopeReportingN(b, i)
+		})
+	}
+}
+
+type noopStat struct{}
+
+func (s noopStat) ReportCount(value int64)            {}
+func (s noopStat) ReportGauge(value float64)          {}
+func (s noopStat) ReportTimer(interval time.Duration) {}
+func (s noopStat) ValueBucket(bucketLowerBound, bucketUpperBound float64) CachedHistogramBucket {
+	return s
+}
+func (s noopStat) DurationBucket(bucketLowerBound, bucketUpperBound time.Duration) CachedHistogramBucket {
+	return s
+}
+func (s noopStat) ReportSamples(value int64) {}
+
+type noopCachedReporter struct{}
+
+func (n noopCachedReporter) Capabilities() Capabilities {
+	return n
+}
+
+func (n noopCachedReporter) Reporting() bool { return true }
+func (n noopCachedReporter) Tagging() bool   { return true }
+func (n noopCachedReporter) Flush()          {}
+
+func (n noopCachedReporter) ReportCounter(name string, tags map[string]string, value int64) {}
+func (n noopCachedReporter) ReportGauge(name string, tags map[string]string, value float64) {}
+
+func (n noopCachedReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
+}
+
+func (n noopCachedReporter) ReportHistogramValueSamples(name string, tags map[string]string, buckets Buckets, bucketLowerBound float64, bucketUpperBound float64, samples int64) {
+}
+func (n noopCachedReporter) ReportHistogramDurationSamples(name string, tags map[string]string, buckets Buckets, bucketLowerBound time.Duration, bucketUpperBound time.Duration, samples int64) {
+}
+
+func (n noopCachedReporter) AllocateCounter(name string, tags map[string]string) CachedCount {
+	return noopStat{}
+}
+
+func (n noopCachedReporter) AllocateGauge(name string, tags map[string]string) CachedGauge {
+	return noopStat{}
+}
+
+func (n noopCachedReporter) AllocateTimer(name string, tags map[string]string) CachedTimer {
+	return noopStat{}
+}
+func (n noopCachedReporter) AllocateHistogram(name string, tags map[string]string, buckets Buckets) CachedHistogram {
+	return noopStat{}
 }
