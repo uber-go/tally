@@ -28,7 +28,11 @@ lint:
 	git grep -i fixme | grep -v -e vendor -e Makefile | egrep -v '$(LINT_IGNORE)' | tee -a lint.log
 	echo "Checking for license headers..."
 	./check_license.sh | grep -v '$(LICENSE_IGNORE)' | tee -a lint.log
-	[ ! -s lint.log ]
+	if [ -s lint.log ]; then \
+		echo lint or fmt failed! errors:  ;\
+		cat lint.log ;\
+		exit 1 ;\
+	fi
 
 .PHONY: test
 test:
