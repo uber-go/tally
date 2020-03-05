@@ -11,7 +11,7 @@ require (
 	github.com/m3db/prometheus_common v0.1.0 // indirect
 	github.com/m3db/prometheus_procfs v0.8.1 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
-	github.com/pkg/errors v0.8.1
+	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.3.0
 	go.uber.org/atomic v1.5.0
 	golang.org/x/lint v0.0.0-20200302205851-738671d3881b // indirect
