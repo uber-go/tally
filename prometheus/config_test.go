@@ -39,10 +39,9 @@ func TestListenErrorCallsOnRegisterError(t *testing.T) {
 	assert.NotPanics(t, func() {
 		cfg := Configuration{
 			ListenAddress: listener.Addr().String(),
-			OnError: "log",
+			OnError:       "log",
 		}
 		_, _ = cfg.NewReporter(ConfigurationOptions{})
 		time.Sleep(time.Second)
 	})
 }
-
