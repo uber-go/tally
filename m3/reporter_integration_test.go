@@ -94,6 +94,7 @@ func testProcessFlushOnExit(t *testing.T, i int) {
 	// build
 	cmd := exec.Command("go", "build", "-o", binary, mainFile)
 	cmd.Dir = dir
+	cmd.Env = os.Environ()
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, fmt.Sprintf("output:\n\n%s", output))
 
