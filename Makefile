@@ -1,7 +1,7 @@
 BENCH_FLAGS ?= -cpuprofile=cpu.pprof -memprofile=mem.pprof -benchmem
 PKGS ?= $(shell go list ./...)
-PKG_FILES ?= $(shell go list -f '{{ .GoFiles }}' ./...)
-LINT_IGNORE = m3/thrift\|thirdparty
+PKG_FILES ?= $(shell find . -type f -name '*.go' |egrep -v '^./(thirdparty/|vendor/)')
+LINT_IGNORE = (/m3/thrift/|/thirdparty/)
 LICENSE_IGNORE = thirdparty
 GO = GO111MODULE=on go
 
@@ -17,25 +17,27 @@ dependencies:
 	$(GO) get -u golang.org/x/lint/golint
 
 .PHONY: lint
+.SILENT: lint
 lint:
-	@rm -rf lint.log
-	@echo "Checking formatting..."
-	@gofmt -d -s $(PKG_FILES) 2>&1 | grep -v '$(LINT_IGNORE)' | tee lint.log
-	@echo "Installing test dependencies for vet..."
-	@go test -i $(PKGS)
-	@echo "Checking lint..."
-	@$(foreach dir,$(PKGS),golint $(dir) 2>&1 | grep -v '$(LINT_IGNORE)' | tee -a lint.log;)
-	@echo "Checking for unresolved FIXMEs..."
-	@git grep -i fixme | grep -v -e vendor -e Makefile | grep -v '$(LINT_IGNORE)' | tee -a lint.log
-	@echo "Checking for license headers..."
-	@./check_license.sh | grep -v '$(LICENSE_IGNORE)' | tee -a lint.log
-	@[ ! -s lint.log ]
+	rm -rf lint.log
+	echo "Checking formatting..."
+	gofmt -l -s $(PKG_FILES) 2>&1 | egrep -v '$(LINT_IGNORE)' | tee -a lint.log
+	echo "Installing test dependencies for vet..."
+	go test -i $(PKGS)
+	echo "Checking lint..."
+	$(foreach dir,$(PKGS),golint $(dir) 2>&1 | egrep -v '$(LINT_IGNORE)' | tee -a lint.log;)
+	echo "Checking for unresolved FIXMEs..."
+	git grep -i fixme | grep -v -e vendor -e Makefile | egrep -v '$(LINT_IGNORE)' | tee -a lint.log
+	echo "Checking for license headers..."
+	./check_license.sh | grep -v '$(LICENSE_IGNORE)' | tee -a lint.log
+	[ ! -s lint.log ]
 
 .PHONY: test
 test:
 	$(GO) test -race -v $(PKGS)
 
 .PHONY: examples
+.SILENT: examples
 examples:
 	mkdir -p ./bin
 	$(GO) build -o ./bin/print_example ./example/
