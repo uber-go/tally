@@ -22,8 +22,6 @@ lint:
 	rm -rf lint.log
 	echo "Checking formatting..."
 	gofmt -l -s $(PKG_FILES) 2>&1 | egrep -v '$(LINT_IGNORE)' | tee -a lint.log
-	echo "Installing test dependencies for vet..."
-	go test -i $(PKGS)
 	echo "Checking lint..."
 	$(foreach dir,$(PKGS),golint $(dir) 2>&1 | egrep -v '$(LINT_IGNORE)' | tee -a lint.log;)
 	echo "Checking for unresolved FIXMEs..."
@@ -34,7 +32,7 @@ lint:
 
 .PHONY: test
 test:
-	$(GO) test -race -v $(PKGS)
+	$(GO) test -timeout 1m -race -v ./...
 
 .PHONY: examples
 .SILENT: examples
@@ -47,13 +45,14 @@ examples:
 
 .PHONY: cover
 cover:
-	$(GO) test -cover -coverprofile cover.out -race -v $(PKGS)
+	$(GO) test -timeout 1m -cover -coverprofile cover.out -race -v ./...
 
 .PHONY: coveralls
 coveralls:
 	goveralls -service=travis-ci || echo "Coveralls failed"
 
 .PHONY: bench
+.SILENT: bench
 BENCH ?= .
 bench:
-	@$(foreach pkg,$(PKGS),go test -bench=$(BENCH) -run="^$$" $(BENCH_FLAGS) $(pkg);)
+	$(foreach pkg,$(PKGS),go test -bench=$(BENCH) -run="^$$" $(BENCH_FLAGS) $(pkg);)
