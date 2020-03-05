@@ -330,7 +330,16 @@ func TestCachedReportLoop(t *testing.T) {
 	r.WaitAll()
 }
 
-func testReportLoopFlushOnce(t *testing.T, r *testStatsReporter, s Scope) {
+func testReportLoopFlushOnce(t *testing.T, cached bool) {
+	r := newTestStatsReporter()
+
+	scopeOpts := ScopeOptions{CachedReporter: r}
+	if !cached {
+		scopeOpts = ScopeOptions{Reporter: r}
+	}
+
+	s, closer := NewRootScope(scopeOpts, 10*time.Minute)
+
 	r.cg.Add(2)
 	s.Counter("foobar").Inc(1)
 	s.SubScope("baz").Counter("bar").Inc(1)
@@ -345,6 +354,8 @@ func testReportLoopFlushOnce(t *testing.T, r *testStatsReporter, s Scope) {
 		RecordValue(42.42)
 	s.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
 		RecordValue(42.42)
+
+	closer.Close()
 	r.WaitAll()
 
 	v := atomic.LoadInt32(&r.flushes)
@@ -352,19 +363,11 @@ func testReportLoopFlushOnce(t *testing.T, r *testStatsReporter, s Scope) {
 }
 
 func TestCachedReporterFlushOnce(t *testing.T) {
-	r := newTestStatsReporter()
-	s, closer := NewRootScope(ScopeOptions{CachedReporter: r}, 10*time.Millisecond)
-	defer closer.Close()
-
-	testReportLoopFlushOnce(t, r, s)
+	testReportLoopFlushOnce(t, true)
 }
 
 func TestReporterFlushOnce(t *testing.T) {
-	r := newTestStatsReporter()
-	s, closer := NewRootScope(ScopeOptions{Reporter: r}, 10*time.Millisecond)
-	defer closer.Close()
-
-	testReportLoopFlushOnce(t, r, s)
+	testReportLoopFlushOnce(t, false)
 }
 
 func TestWriteOnce(t *testing.T) {
