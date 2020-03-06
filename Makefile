@@ -1,9 +1,9 @@
 BENCH_FLAGS ?= -cpuprofile=cpu.pprof -memprofile=mem.pprof -benchmem
 PKGS ?= $(shell go list ./...)
-PKG_FILES ?= $(shell find . -type f -name '*.go' |egrep -v '^./(thirdparty/|vendor/)')
-LINT_IGNORE = (/m3/thrift/|/thirdparty/)
-LICENSE_IGNORE = thirdparty
-GO = GO111MODULE=on go
+PKG_FILES := $(shell find . -type f -name '*.go' |egrep -v '^./(thirdparty/|vendor/)')
+LINT_IGNORE := (/m3/thrift/|/thirdparty/)
+LICENSE_IGNORE := thirdparty
+GO := GO111MODULE=on go
 
 .PHONY: all
 all: lint test
@@ -14,7 +14,7 @@ dependencies:
 	$(GO) get github.com/axw/gocov/gocov
 	$(GO) get github.com/mattn/goveralls
 	@echo "Installing golint..."
-	$(GO) get -u golang.org/x/lint/golint
+	$(GO) get golang.org/x/lint/golint
 
 .PHONY: lint
 .SILENT: lint
@@ -36,7 +36,7 @@ lint:
 
 .PHONY: test
 test:
-	$(GO) test -timeout 1m -race -v ./...
+	$(GO) test -timeout 1m -race -v $(PKGS)
 
 .PHONY: examples
 .SILENT: examples
@@ -49,7 +49,7 @@ examples:
 
 .PHONY: cover
 cover:
-	$(GO) test -timeout 1m -cover -coverprofile cover.out -race -v ./...
+	$(GO) test -timeout 1m -cover -coverprofile cover.out -race -v $(PKGS)
 
 .PHONY: coveralls
 coveralls:
