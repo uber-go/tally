@@ -1,61 +1,62 @@
-export GO15VENDOREXPERIMENT=1
-
 BENCH_FLAGS ?= -cpuprofile=cpu.pprof -memprofile=mem.pprof -benchmem
-PKGS ?= $(shell glide novendor)
-PKG_FILES ?= *.go example/*.go m3
-LINT_IGNORE = m3/thrift\|thirdparty
-LICENSE_IGNORE = thirdparty
+PKGS ?= $(shell go list ./...)
+PKG_FILES := $(shell find . -type f -name '*.go' |egrep -v '^./(thirdparty/|vendor/)')
+LINT_IGNORE := (/m3/thrift/|/thirdparty/)
+LICENSE_IGNORE := thirdparty
+GO := GO111MODULE=on go
 
 .PHONY: all
 all: lint test
 
 .PHONY: dependencies
 dependencies:
-	@echo "Installing Glide and locked dependencies..."
-	glide --version || go get -u -f github.com/Masterminds/glide
-	glide install
 	@echo "Installing test dependencies..."
-	go install ./vendor/github.com/axw/gocov/gocov
-	go install ./vendor/github.com/mattn/goveralls
+	$(GO) get github.com/axw/gocov/gocov
+	$(GO) get github.com/mattn/goveralls
 	@echo "Installing golint..."
-	go install ./vendor/github.com/golang/lint/golint
+	$(GO) get golang.org/x/lint/golint
 
 .PHONY: lint
+.SILENT: lint
 lint:
-	@rm -rf lint.log
-	@echo "Checking formatting..."
-	@gofmt -d -s $(PKG_FILES) 2>&1 | grep -v '$(LINT_IGNORE)' | tee lint.log
-	@echo "Installing test dependencies for vet..."
-	@go test -i $(PKGS)
-	@echo "Checking lint..."
-	@$(foreach dir,$(PKGS),golint $(dir) 2>&1 | grep -v '$(LINT_IGNORE)' | tee -a lint.log;)
-	@echo "Checking for unresolved FIXMEs..."
-	@git grep -i fixme | grep -v -e vendor -e Makefile | grep -v '$(LINT_IGNORE)' | tee -a lint.log
-	@echo "Checking for license headers..."
-	@./check_license.sh | grep -v '$(LICENSE_IGNORE)' | tee -a lint.log
-	@[ ! -s lint.log ]
+	rm -rf lint.log
+	echo "Checking formatting..."
+	gofmt -l -s $(PKG_FILES) 2>&1 | egrep -v '$(LINT_IGNORE)' | tee -a lint.log
+	echo "Checking lint..."
+	$(foreach dir,$(PKGS),golint $(dir) 2>&1 | egrep -v '$(LINT_IGNORE)' | tee -a lint.log;)
+	echo "Checking for unresolved FIXMEs..."
+	git grep -i fixme | grep -v -e vendor -e Makefile | egrep -v '$(LINT_IGNORE)' | tee -a lint.log
+	echo "Checking for license headers..."
+	./check_license.sh | grep -v '$(LICENSE_IGNORE)' | tee -a lint.log
+	if [ -s lint.log ]; then \
+		echo lint or fmt failed! errors:  ;\
+		cat lint.log ;\
+		exit 1 ;\
+	fi
 
 .PHONY: test
 test:
-	go test -race -v $(PKGS)
+	$(GO) test -timeout 1m -race -v $(PKGS)
 
 .PHONY: examples
+.SILENT: examples
 examples:
 	mkdir -p ./bin
-	go build -o ./bin/print_example ./example/
-	go build -o ./bin/m3_example ./m3/example/
-	go build -o ./bin/prometheus_example ./prometheus/example/
-	go build -o ./bin/statsd_example ./statsd/example/
+	$(GO) build -o ./bin/print_example ./example/
+	$(GO) build -o ./bin/m3_example ./m3/example/
+	$(GO) build -o ./bin/prometheus_example ./prometheus/example/
+	$(GO) build -o ./bin/statsd_example ./statsd/example/
 
 .PHONY: cover
 cover:
-	go test -cover -coverprofile cover.out -race -v $(PKGS)
+	$(GO) test -timeout 1m -cover -coverprofile cover.out -race -v $(PKGS)
 
 .PHONY: coveralls
 coveralls:
 	goveralls -service=travis-ci || echo "Coveralls failed"
 
 .PHONY: bench
+.SILENT: bench
 BENCH ?= .
 bench:
-	@$(foreach pkg,$(PKGS),go test -bench=$(BENCH) -run="^$$" $(BENCH_FLAGS) $(pkg);)
+	$(foreach pkg,$(PKGS),go test -bench=$(BENCH) -run="^$$" $(BENCH_FLAGS) $(pkg);)
