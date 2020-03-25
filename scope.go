@@ -215,28 +215,6 @@ func (s *scope) report(r StatsReporter) {
 	s.hm.RUnlock()
 }
 
-func (s *scope) cachedReport() {
-	s.cm.RLock()
-	for _, counter := range s.countersSlice {
-		counter.cachedReport()
-	}
-	s.cm.RUnlock()
-
-	s.gm.RLock()
-	for _, gauge := range s.gaugesSlice {
-		gauge.cachedReport()
-	}
-	s.gm.RUnlock()
-
-	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
-
-	s.hm.RLock()
-	for _, histogram := range s.histogramsSlice {
-		histogram.cachedReport()
-	}
-	s.hm.RUnlock()
-}
-
 // reportLoop is used by the root scope for periodic reporting
 func (s *scope) reportLoop(interval time.Duration) {
 	ticker := time.NewTicker(interval)
@@ -270,16 +248,11 @@ func (s *scope) reportRegistryWithLock() {
 	s.registry.RLock()
 	defer s.registry.RUnlock()
 
+	for _, ss := range s.registry.subscopes {
+		ss.report(s.reporter)
+	}
 	if s.reporter != nil {
-		for _, ss := range s.registry.subscopes {
-			ss.report(s.reporter)
-		}
 		s.reporter.Flush()
-	} else if s.cachedReporter != nil {
-		for _, ss := range s.registry.subscopes {
-			ss.cachedReport()
-		}
-		s.cachedReporter.Flush()
 	}
 }
 

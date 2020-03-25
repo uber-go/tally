@@ -86,17 +86,12 @@ func (c *counter) report(name string, tags map[string]string, r StatsReporter) {
 	if delta == 0 {
 		return
 	}
-
-	r.ReportCounter(name, tags, delta)
-}
-
-func (c *counter) cachedReport() {
-	delta := c.value()
-	if delta == 0 {
-		return
+	if r != nil {
+		r.ReportCounter(name, tags, delta)
 	}
-
-	c.cachedCount.ReportCount(delta)
+	if c.cachedCount != nil {
+		c.cachedCount.ReportCount(delta)
+	}
 }
 
 func (c *counter) snapshot() int64 {
@@ -124,13 +119,13 @@ func (g *gauge) value() float64 {
 
 func (g *gauge) report(name string, tags map[string]string, r StatsReporter) {
 	if atomic.SwapUint64(&g.updated, 0) == 1 {
-		r.ReportGauge(name, tags, g.value())
-	}
-}
-
-func (g *gauge) cachedReport() {
-	if atomic.SwapUint64(&g.updated, 0) == 1 {
-		g.cachedGauge.ReportGauge(g.value())
+		value := g.value()
+		if r != nil {
+			r.ReportGauge(name, tags, value)
+		}
+		if g.cachedGauge != nil {
+			g.cachedGauge.ReportGauge(value)
+		}
 	}
 }
 
@@ -175,9 +170,8 @@ func newTimer(
 func (t *timer) Record(interval time.Duration) {
 	if t.cachedTimer != nil {
 		t.cachedTimer.ReportTimer(interval)
-	} else {
-		t.reporter.ReportTimer(t.name, t.tags, interval)
 	}
+	t.reporter.ReportTimer(t.name, t.tags, interval)
 }
 
 func (t *timer) Start() Stopwatch {
@@ -322,28 +316,23 @@ func (h *histogram) report(name string, tags map[string]string, r StatsReporter)
 		}
 		switch h.htype {
 		case valueHistogramType:
-			r.ReportHistogramValueSamples(name, tags, h.specification,
-				h.buckets[i].valueLowerBound, h.buckets[i].valueUpperBound,
-				samples)
+			if r != nil {
+				r.ReportHistogramValueSamples(name, tags, h.specification,
+					h.buckets[i].valueLowerBound, h.buckets[i].valueUpperBound,
+					samples)
+			}
+			if h.buckets[i].cachedValueBucket != nil {
+				h.buckets[i].cachedValueBucket.ReportSamples(samples)
+			}
 		case durationHistogramType:
-			r.ReportHistogramDurationSamples(name, tags, h.specification,
-				h.buckets[i].durationLowerBound, h.buckets[i].durationUpperBound,
-				samples)
-		}
-	}
-}
-
-func (h *histogram) cachedReport() {
-	for i := range h.buckets {
-		samples := h.buckets[i].samples.value()
-		if samples == 0 {
-			continue
-		}
-		switch h.htype {
-		case valueHistogramType:
-			h.buckets[i].cachedValueBucket.ReportSamples(samples)
-		case durationHistogramType:
-			h.buckets[i].cachedDurationBucket.ReportSamples(samples)
+			if r != nil {
+				r.ReportHistogramDurationSamples(name, tags, h.specification,
+					h.buckets[i].durationLowerBound, h.buckets[i].durationUpperBound,
+					samples)
+			}
+			if h.buckets[i].cachedValueBucket != nil {
+				h.buckets[i].cachedDurationBucket.ReportSamples(samples)
+			}
 		}
 	}
 }

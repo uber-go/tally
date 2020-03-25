@@ -362,10 +362,6 @@ func testReportLoopFlushOnce(t *testing.T, cached bool) {
 	assert.Equal(t, int32(1), v)
 }
 
-func TestCachedReporterFlushOnce(t *testing.T) {
-	testReportLoopFlushOnce(t, true)
-}
-
 func TestReporterFlushOnce(t *testing.T) {
 	testReportLoopFlushOnce(t, false)
 }
@@ -458,26 +454,26 @@ func TestCachedReporter(t *testing.T) {
 
 	s := root.(*scope)
 
-	r.cg.Add(1)
+	r.cg.Add(2)
 	s.Counter("bar").Inc(1)
-	r.gg.Add(1)
+	r.gg.Add(2)
 	s.Gauge("zed").Update(1)
 	r.tg.Add(1)
 	s.Timer("ticky").Record(time.Millisecond * 175)
-	r.hg.Add(2)
+	r.hg.Add(4)
 	s.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
 		RecordValue(42.42)
 	s.Histogram("qux", MustMakeLinearDurationBuckets(0, 10*time.Millisecond, 10)).
-		RecordDuration(42 * time.Millisecond)
+		RecordDuration(42 * time.Nanosecond)
 
-	s.cachedReport()
+	s.report(r)
 	r.WaitAll()
 
 	assert.EqualValues(t, 1, r.counters["bar"].val)
 	assert.EqualValues(t, 1, r.gauges["zed"].val)
 	assert.EqualValues(t, time.Millisecond*175, r.timers["ticky"].val)
 	assert.EqualValues(t, 1, r.histograms["baz"].valueSamples[50.0])
-	assert.EqualValues(t, 1, r.histograms["qux"].durationSamples[50*time.Millisecond])
+	assert.EqualValues(t, 1, r.histograms["qux"].durationSamples[10*time.Millisecond])
 }
 
 func TestRootScopeWithoutPrefix(t *testing.T) {

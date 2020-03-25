@@ -140,7 +140,7 @@ func benchmarkScopeReportingN(b *testing.B, numElems int) {
 	b.ResetTimer()
 
 	for n := 0; n < b.N; n++ {
-		s.cachedReport()
+		s.report(NullStatsReporter)
 	}
 }
 
