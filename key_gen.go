@@ -54,11 +54,20 @@ func KeyForPrefixedStringMap(
 	prefix string,
 	stringMap map[string]string,
 ) string {
-	keys := keyGenPool.stringsPool.Get().([]string)
-	for k := range stringMap {
-		keys = append(keys, k)
-	}
+	return keyForPrefixedStringMaps(prefix, stringMap)
+}
 
+// keyForPrefixedStringMaps generates a unique key for a prefix and a series
+// of maps containing tags.
+//
+// If a key occurs in multiple maps, keys on the right take precedence.
+func keyForPrefixedStringMaps(prefix string, maps ...map[string]string) string {
+	keys := keyGenPool.stringsPool.Get().([]string)
+	for _, m := range maps {
+		for k := range m {
+			keys = append(keys, k)
+		}
+	}
 	sort.Strings(keys)
 
 	buf := keyGenPool.bufferPool.Get().(*bytes.Buffer)
@@ -68,13 +77,27 @@ func KeyForPrefixedStringMap(
 		buf.WriteByte(prefixSplitter)
 	}
 
-	sortedKeysLen := len(stringMap)
-	for i := 0; i < sortedKeysLen; i++ {
-		buf.WriteString(keys[i])
-		buf.WriteByte(keyNameSplitter)
-		buf.WriteString(stringMap[keys[i]])
-		if i != sortedKeysLen-1 {
+	var lastKey string // last key written to the buffer
+	for _, k := range keys {
+		if len(lastKey) > 0 {
+			if k == lastKey {
+				// Already wrote this key.
+				continue
+			}
 			buf.WriteByte(keyPairSplitter)
+		}
+		lastKey = k
+
+		buf.WriteString(k)
+		buf.WriteByte(keyNameSplitter)
+
+		// Find and write the value for this key. Rightmost map takes
+		// precedence.
+		for j := len(maps) - 1; j >= 0; j-- {
+			if v, ok := maps[j][k]; ok {
+				buf.WriteString(v)
+				break
+			}
 		}
 	}
 
