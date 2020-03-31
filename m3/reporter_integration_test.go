@@ -68,7 +68,6 @@ func main() {
 // TestIntegrationProcessFlushOnExit tests whether data is correctly flushed
 // when the scope is closed for shortly lived programs
 func TestIntegrationProcessFlushOnExit(t *testing.T) {
-	t.Skip("https://github.com/uber-go/tally/issues/130")
 	for i := 0; i < 5; i++ {
 		testProcessFlushOnExit(t, i)
 	}

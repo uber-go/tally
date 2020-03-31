@@ -17,7 +17,7 @@ import:
 - package: go.uber.org/atomic
   version: ^1
 - package: github.com/pkg/errors
-  version: ^0.9.1
+  version: ^0.8.1
 testImport:
 - package: github.com/axw/gocov
   version: 54b98cfcac0c63fb3f9bd8e7ad241b724d4e985b
