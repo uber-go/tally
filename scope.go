@@ -92,13 +92,6 @@ type scopeStatus struct {
 	quit   chan struct{}
 }
 
-type scopeRegistry struct {
-	sync.RWMutex
-	subscopes map[string]*scope
-}
-
-var scopeRegistryKey = KeyForPrefixedStringMap
-
 // ScopeOptions is a set of options to construct a scope.
 type ScopeOptions struct {
 	Tags            map[string]string
@@ -160,10 +153,6 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		baseReporter:   baseReporter,
 		defaultBuckets: opts.DefaultBuckets,
 		sanitizer:      sanitizer,
-
-		registry: &scopeRegistry{
-			subscopes: make(map[string]*scope),
-		},
 		status: scopeStatus{
 			closed: false,
 			quit:   make(chan struct{}, 1),
@@ -183,7 +172,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 	s.tags = s.copyAndSanitizeMap(opts.Tags)
 
 	// Register the root scope
-	s.registry.subscopes[scopeRegistryKey(s.prefix, s.tags)] = s
+	s.registry = newScopeRegistry(s)
 
 	if interval > 0 {
 		go s.reportLoop(interval)
@@ -267,18 +256,11 @@ func (s *scope) reportLoopRun() {
 
 // reports current registry with scope status lock held
 func (s *scope) reportRegistryWithLock() {
-	s.registry.RLock()
-	defer s.registry.RUnlock()
-
 	if s.reporter != nil {
-		for _, ss := range s.registry.subscopes {
-			ss.report(s.reporter)
-		}
+		s.registry.Report(s.reporter)
 		s.reporter.Flush()
 	} else if s.cachedReporter != nil {
-		for _, ss := range s.registry.subscopes {
-			ss.cachedReport()
-		}
+		s.registry.CachedReport()
 		s.cachedReporter.Flush()
 	}
 }
@@ -441,53 +423,8 @@ func (s *scope) SubScope(prefix string) Scope {
 	return s.subscope(s.fullyQualifiedName(prefix), nil)
 }
 
-func (s *scope) cachedSubscope(key string) (*scope, bool) {
-	s.registry.RLock()
-	defer s.registry.RUnlock()
-
-	ss, ok := s.registry.subscopes[key]
-	return ss, ok
-}
-
-func (s *scope) subscope(prefix string, immutableTags map[string]string) Scope {
-	immutableTags = mergeRightTags(s.tags, immutableTags)
-	key := scopeRegistryKey(prefix, immutableTags)
-
-	if ss, ok := s.cachedSubscope(key); ok {
-		return ss
-	}
-
-	s.registry.Lock()
-	defer s.registry.Unlock()
-
-	if ss, ok := s.registry.subscopes[key]; ok {
-		return ss
-	}
-
-	subscope := &scope{
-		separator: s.separator,
-		prefix:    prefix,
-		// NB(prateek): don't need to copy the tags here,
-		// we assume the map provided is immutable.
-		tags:           immutableTags,
-		reporter:       s.reporter,
-		cachedReporter: s.cachedReporter,
-		baseReporter:   s.baseReporter,
-		defaultBuckets: s.defaultBuckets,
-		sanitizer:      s.sanitizer,
-		registry:       s.registry,
-
-		counters:        make(map[string]*counter),
-		countersSlice:   make([]*counter, 0, _defaultInitialSliceSize),
-		gauges:          make(map[string]*gauge),
-		gaugesSlice:     make([]*gauge, 0, _defaultInitialSliceSize),
-		histograms:      make(map[string]*histogram),
-		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
-		timers:          make(map[string]*timer),
-	}
-
-	s.registry.subscopes[key] = subscope
-	return subscope
+func (s *scope) subscope(prefix string, tags map[string]string) Scope {
+	return s.registry.Subscope(s, prefix, tags)
 }
 
 func (s *scope) Capabilities() Capabilities {
@@ -500,10 +437,7 @@ func (s *scope) Capabilities() Capabilities {
 func (s *scope) Snapshot() Snapshot {
 	snap := newSnapshot()
 
-	s.registry.RLock()
-	defer s.registry.RUnlock()
-
-	for _, ss := range s.registry.subscopes {
+	s.registry.ForEachScope(func(ss *scope) {
 		// NB(r): tags are immutable, no lock required to read.
 		tags := make(map[string]string, len(s.tags))
 		for k, v := range ss.tags {
@@ -555,7 +489,7 @@ func (s *scope) Snapshot() Snapshot {
 			}
 		}
 		ss.hm.RUnlock()
-	}
+	})
 
 	return snap
 }

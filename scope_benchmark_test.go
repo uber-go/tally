@@ -91,6 +91,54 @@ func BenchmarkNameGenerationTagged(b *testing.B) {
 	}
 }
 
+func BenchmarkScopeTaggedCachedSubscopes(b *testing.B) {
+	root, _ := NewRootScope(ScopeOptions{
+		Prefix:   "funkytown",
+		Reporter: NullStatsReporter,
+		Tags: map[string]string{
+			"style":     "funky",
+			"hair":      "wavy",
+			"jefferson": "starship",
+		},
+	}, 0)
+	b.ResetTimer()
+
+	for n := 0; n < b.N; n++ {
+		root.Tagged(map[string]string{
+			"foo": "bar",
+			"baz": "qux",
+			"qux": "quux",
+		})
+	}
+}
+
+func BenchmarkScopeTaggedNoCachedSubscopes(b *testing.B) {
+	root, _ := NewRootScope(ScopeOptions{
+		Prefix:   "funkytown",
+		Reporter: NullStatsReporter,
+		Tags: map[string]string{
+			"style":     "funky",
+			"hair":      "wavy",
+			"jefferson": "starship",
+		},
+	}, 0)
+
+	values := make([]string, b.N)
+	for i := 0; i < b.N; i++ {
+		values[i] = strconv.Itoa(i)
+	}
+
+	b.ResetTimer()
+
+	for n := 0; n < b.N; n++ {
+		root.Tagged(map[string]string{
+			"foo": values[n],
+			"baz": values[n],
+			"qux": values[n],
+		})
+	}
+}
+
 func BenchmarkNameGenerationNoPrefix(b *testing.B) {
 	root, _ := NewRootScope(ScopeOptions{
 		Reporter: NullStatsReporter,
