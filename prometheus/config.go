@@ -23,7 +23,9 @@ package prometheus
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -148,7 +150,28 @@ func (c Configuration) NewReporter(
 		mux := http.NewServeMux()
 		mux.Handle(path, reporter.HTTPHandler())
 		go func() {
-			if err := http.ListenAndServe(addr, mux); err != nil {
+			u, err := url.Parse(addr)
+			if err != nil {
+				opts.OnRegisterError(err)
+				return
+			}
+
+			network := "tcp"
+			address := addr
+			if u.Scheme == "unix" {
+				network = "unix"
+				address = u.Path
+			}
+
+			lsn, err := net.Listen(network, address)
+			if err != nil {
+				opts.OnRegisterError(err)
+				return
+			}
+
+			defer lsn.Close()
+
+			if err := http.Serve(lsn, mux); err != nil {
 				opts.OnRegisterError(err)
 			}
 		}()
