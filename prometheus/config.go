@@ -25,7 +25,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 
@@ -37,6 +36,10 @@ type Configuration struct {
 	// HandlerPath if specified will be used instead of using the default
 	// HTTP handler path "/metrics".
 	HandlerPath string `yaml:"handlerPath"`
+
+	// ListenNetwork if specified will be used instead of using tcp network.
+	// Supported networks: tcp, tcp4, tcp6 and unix.
+	ListenNetwork string `yaml:"listenNetwork"`
 
 	// ListenAddress if specified will be used instead of just registering the
 	// handler on the default HTTP serve mux without listening.
@@ -150,20 +153,12 @@ func (c Configuration) NewReporter(
 		mux := http.NewServeMux()
 		mux.Handle(path, reporter.HTTPHandler())
 		go func() {
-			u, err := url.Parse(addr)
-			if err != nil {
-				opts.OnRegisterError(err)
-				return
+			nwk := c.ListenNetwork
+			if nwk == "" {
+				nwk = "tcp"
 			}
 
-			network := "tcp"
-			address := addr
-			if u.Scheme == "unix" {
-				network = "unix"
-				address = u.Path
-			}
-
-			lsn, err := net.Listen(network, address)
+			lsn, err := net.Listen(nwk, addr)
 			if err != nil {
 				opts.OnRegisterError(err)
 				return
@@ -171,7 +166,7 @@ func (c Configuration) NewReporter(
 
 			defer lsn.Close()
 
-			if err := http.Serve(lsn, mux); err != nil {
+			if err = http.Serve(lsn, mux); err != nil {
 				opts.OnRegisterError(err)
 			}
 		}()
