@@ -68,11 +68,8 @@ func TestUnixDomainSocketListener(t *testing.T) {
 func TestTcpListener(t *testing.T) {
 	cases := map[string]Configuration{
 		"127.0.0.1:0":        {ListenAddress: "127.0.0.1:0"},
-		"[::1]:0":            {ListenAddress: "[::1]:0"},
 		"tcp://127.0.0.1:0":  {ListenNetwork: "tcp", ListenAddress: "127.0.0.1:0"},
-		"tcp://[::1]:0":      {ListenNetwork: "tcp", ListenAddress: "[::1]:0"},
 		"tcp4://127.0.0.1:0": {ListenNetwork: "tcp4", ListenAddress: "127.0.0.1:0"},
-		"tcp6://[::1]:0":     {ListenNetwork: "tcp6", ListenAddress: "[::1]:0"},
 	}
 
 	for cn, cc := range cases {
