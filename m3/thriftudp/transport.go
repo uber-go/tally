@@ -78,10 +78,16 @@ func NewTUDPClientTransport(destHostPort string, locHostPort string) (*TUDPTrans
 
 // NewTUDPServerTransport creates a net.UDPConn-backed TTransport for Thrift servers
 // It will listen for incoming udp packets on the specified host/port
-// It also takes net.ListenConfig to customize socket options
 // Example:
 // 	trans, err := thriftudp.NewTUDPClientTransport("localhost:9001")
-func NewTUDPServerTransport(
+func NewTUDPServerTransport(hostPort string) (*TUDPTransport, error) {
+	return NewTUDPServerTransportWithListenConfig(hostPort, net.ListenConfig{})
+}
+
+// NewTUDPServerTransportWithListenConfig creates a net.UDPConn-backed TTransport for Thrift servers
+// It will listen for incoming udp packets on the specified host/port
+// It takes net.ListenConfig to customize socket options
+func NewTUDPServerTransportWithListenConfig(
 	hostPort string,
 	listenConfig net.ListenConfig,
 ) (*TUDPTransport, error) {
