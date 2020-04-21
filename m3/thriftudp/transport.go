@@ -22,10 +22,10 @@ package thriftudp
 
 import (
 	"bytes"
+	"context"
 	"net"
 
 	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
-
 	"go.uber.org/atomic"
 )
 
@@ -78,20 +78,26 @@ func NewTUDPClientTransport(destHostPort string, locHostPort string) (*TUDPTrans
 
 // NewTUDPServerTransport creates a net.UDPConn-backed TTransport for Thrift servers
 // It will listen for incoming udp packets on the specified host/port
+// It also takes net.ListenConfig to customize socket options
 // Example:
 // 	trans, err := thriftudp.NewTUDPClientTransport("localhost:9001")
-func NewTUDPServerTransport(hostPort string) (*TUDPTransport, error) {
-	addr, err := net.ResolveUDPAddr("udp", hostPort)
+func NewTUDPServerTransport(
+	hostPort string,
+	listenConfig net.ListenConfig,
+) (*TUDPTransport, error) {
+	conn, err := listenConfig.ListenPacket(context.Background(), "udp", hostPort)
 	if err != nil {
 		return nil, thrift.NewTTransportException(thrift.NOT_OPEN, err.Error())
 	}
-	conn, err := net.ListenUDP(addr.Network(), addr)
-	if err != nil {
-		return nil, thrift.NewTTransportException(thrift.NOT_OPEN, err.Error())
+
+	uconn, ok := conn.(*net.UDPConn)
+	if !ok {
+		return nil, thrift.NewTTransportException(thrift.NOT_OPEN, "not a udp connection")
 	}
+
 	return &TUDPTransport{
-		addr:        conn.LocalAddr(),
-		conn:        conn,
+		addr:        uconn.LocalAddr(),
+		conn:        uconn,
 		readByteBuf: make([]byte, 1),
 	}, nil
 }
