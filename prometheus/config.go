@@ -23,6 +23,7 @@ package prometheus
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -35,6 +36,10 @@ type Configuration struct {
 	// HandlerPath if specified will be used instead of using the default
 	// HTTP handler path "/metrics".
 	HandlerPath string `yaml:"handlerPath"`
+
+	// ListenNetwork if specified will be used instead of using tcp network.
+	// Supported networks: tcp, tcp4, tcp6 and unix.
+	ListenNetwork string `yaml:"listenNetwork"`
 
 	// ListenAddress if specified will be used instead of just registering the
 	// handler on the default HTTP serve mux without listening.
@@ -148,7 +153,20 @@ func (c Configuration) NewReporter(
 		mux := http.NewServeMux()
 		mux.Handle(path, reporter.HTTPHandler())
 		go func() {
-			if err := http.ListenAndServe(addr, mux); err != nil {
+			network := c.ListenNetwork
+			if network == "" {
+				network = "tcp"
+			}
+
+			listener, err := net.Listen(network, addr)
+			if err != nil {
+				opts.OnRegisterError(err)
+				return
+			}
+
+			defer listener.Close()
+
+			if err = http.Serve(listener, mux); err != nil {
 				opts.OnRegisterError(err)
 			}
 		}()

@@ -21,7 +21,10 @@
 package prometheus
 
 import (
+	"io/ioutil"
 	"net"
+	"os"
+	"path"
 	"testing"
 	"time"
 
@@ -44,4 +47,37 @@ func TestListenErrorCallsOnRegisterError(t *testing.T) {
 		_, _ = cfg.NewReporter(ConfigurationOptions{})
 		time.Sleep(time.Second)
 	})
+}
+
+func TestUnixDomainSocketListener(t *testing.T) {
+	dir, err := ioutil.TempDir("", "tally-test-prometheus")
+	require.NoError(t, err)
+
+	defer os.RemoveAll(dir)
+
+	uds := path.Join(dir, "test-metrics.sock")
+	cfg := Configuration{ListenNetwork: "unix", ListenAddress: uds}
+	_, _ = cfg.NewReporter(ConfigurationOptions{})
+
+	time.Sleep(time.Second)
+	_, err = os.Stat(uds)
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(uds))
+}
+
+func TestTcpListener(t *testing.T) {
+	cases := map[string]Configuration{
+		"127.0.0.1:0":        {ListenAddress: "127.0.0.1:0"},
+		"tcp://127.0.0.1:0":  {ListenNetwork: "tcp", ListenAddress: "127.0.0.1:0"},
+		"tcp4://127.0.0.1:0": {ListenNetwork: "tcp4", ListenAddress: "127.0.0.1:0"},
+	}
+
+	for cn, cc := range cases {
+		t.Run(cn, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				_, _ = cc.NewReporter(ConfigurationOptions{})
+				time.Sleep(time.Second)
+			})
+		})
+	}
 }
