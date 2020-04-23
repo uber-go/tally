@@ -153,20 +153,20 @@ func (c Configuration) NewReporter(
 		mux := http.NewServeMux()
 		mux.Handle(path, reporter.HTTPHandler())
 		go func() {
-			nwk := c.ListenNetwork
-			if nwk == "" {
-				nwk = "tcp"
+			network := c.ListenNetwork
+			if network == "" {
+				network = "tcp"
 			}
 
-			lsn, err := net.Listen(nwk, addr)
+			listener, err := net.Listen(network, addr)
 			if err != nil {
 				opts.OnRegisterError(err)
 				return
 			}
 
-			defer lsn.Close()
+			defer listener.Close()
 
-			if err = http.Serve(lsn, mux); err != nil {
+			if err = http.Serve(listener, mux); err != nil {
 				opts.OnRegisterError(err)
 			}
 		}()
