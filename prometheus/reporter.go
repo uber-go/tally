@@ -26,9 +26,11 @@ import (
 	"sync"
 	"time"
 
-	prom "github.com/m3db/prometheus_client_golang/prometheus"
-	"github.com/m3db/prometheus_client_golang/prometheus/promhttp"
 	"github.com/pkg/errors"
+
+	prom "github.com/prometheus/client_golang/prometheus"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/uber-go/tally"
 )
 
@@ -163,8 +165,8 @@ type cachedMetric struct {
 	counter     prom.Counter
 	gauge       prom.Gauge
 	reportTimer func(d time.Duration)
-	histogram   prom.Histogram
-	summary     prom.Summary
+	histogram   prom.Observer
+	summary     prom.Observer
 }
 
 func (m *cachedMetric) ReportCount(value int64) {

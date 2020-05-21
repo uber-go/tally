@@ -25,8 +25,8 @@ import (
 	"testing"
 	"time"
 
-	prom "github.com/m3db/prometheus_client_golang/prometheus"
-	dto "github.com/m3db/prometheus_client_model/go"
+	prom "github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/uber-go/tally"
 
 	"github.com/stretchr/testify/assert"
