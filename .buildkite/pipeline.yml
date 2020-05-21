@@ -1,18 +1,9 @@
 steps:
   - label: "build"
-    command: "go version; make dependencies;make"
+    command: ".buildkite/scripts/build.sh"
     plugins:
       - docker#v3.3.0:
           image: "golang:1.14.3-buster"
-          always-pull: true
-          propagate-environment: true
-          shell: ["/bin/bash", "-e", "-c"]
-
-  - label: ":lint-roller: Run Linting"
-    command: "echo 'lint'; ls -l "
-    plugins:
-      - docker#v3.3.0:
-          image: "ubuntu:18.04"
           always-pull: true
           propagate-environment: true
           shell: ["/bin/bash", "-e", "-c"]
