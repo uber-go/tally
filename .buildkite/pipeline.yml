@@ -1,6 +1,6 @@
 steps:
   - label: "build"
-    command: "go version; make"
+    command: "go version; make dependencies;make"
     plugins:
       - docker#v3.3.0:
           image: "golang:1.14.3-buster"
