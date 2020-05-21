@@ -1,7 +1,6 @@
 steps:
-  - label: ":hammer: Example Script"
-    command: "ls -l;go version"
-    timeout_in_minutes: 15
+  - label: "build"
+    command: "go version; make"
     plugins:
       - docker#v3.3.0:
           image: "golang:1.14.3-buster"
@@ -10,8 +9,7 @@ steps:
           shell: ["/bin/bash", "-e", "-c"]
 
   - label: ":lint-roller: Run Linting"
-    command: "ls -l;echo 'lint'"
-    timeout_in_minutes: 15
+    command: "echo 'lint'; ls -l "
     plugins:
       - docker#v3.3.0:
           image: "ubuntu:18.04"
@@ -19,12 +17,3 @@ steps:
           propagate-environment: true
           shell: ["/bin/bash", "-e", "-c"]
 
-  - label: ":lint-roller: Run Linting"
-    command: "ls -l;echo 'lint'"
-    timeout_in_minutes: 15
-    plugins:
-      - docker#v3.3.0:
-          image: "ubuntu:18.04"
-          always-pull: true
-          propagate-environment: true
-          shell: ["/bin/bash", "-e", "-c"]
