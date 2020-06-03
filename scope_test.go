@@ -21,6 +21,7 @@
 package tally
 
 import (
+	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -709,44 +710,49 @@ func TestSnapshot(t *testing.T) {
 	s.Histogram("buzz", DurationBuckets{time.Second * 2, time.Second * 4}).RecordDuration(time.Second)
 	child.Counter("boop").Inc(1)
 
-	snap := s.Snapshot()
-	counters, gauges, timers, histograms :=
-		snap.Counters(), snap.Gauges(), snap.Timers(), snap.Histograms()
+	// Should be able to call Snapshot any number of times and get same result.
+	for i := 0; i < 3; i++ {
+		t.Run(fmt.Sprintf("attempt %d", i), func(t *testing.T) {
+			snap := s.Snapshot()
+			counters, gauges, timers, histograms :=
+				snap.Counters(), snap.Gauges(), snap.Timers(), snap.Histograms()
 
-	assert.EqualValues(t, 1, counters["foo.beep+env=test"].Value())
-	assert.EqualValues(t, commonTags, counters["foo.beep+env=test"].Tags())
+			assert.EqualValues(t, 1, counters["foo.beep+env=test"].Value())
+			assert.EqualValues(t, commonTags, counters["foo.beep+env=test"].Tags())
 
-	assert.EqualValues(t, 2, gauges["foo.bzzt+env=test"].Value())
-	assert.EqualValues(t, commonTags, gauges["foo.bzzt+env=test"].Tags())
+			assert.EqualValues(t, 2, gauges["foo.bzzt+env=test"].Value())
+			assert.EqualValues(t, commonTags, gauges["foo.bzzt+env=test"].Tags())
 
-	assert.EqualValues(t, []time.Duration{
-		1 * time.Second,
-		2 * time.Second,
-	}, timers["foo.brrr+env=test"].Values())
-	assert.EqualValues(t, commonTags, timers["foo.brrr+env=test"].Tags())
+			assert.EqualValues(t, []time.Duration{
+				1 * time.Second,
+				2 * time.Second,
+			}, timers["foo.brrr+env=test"].Values())
+			assert.EqualValues(t, commonTags, timers["foo.brrr+env=test"].Tags())
 
-	assert.EqualValues(t, map[float64]int64{
-		0:               0,
-		2:               1,
-		4:               0,
-		math.MaxFloat64: 1,
-	}, histograms["foo.fizz+env=test"].Values())
-	assert.EqualValues(t, map[time.Duration]int64(nil), histograms["foo.fizz+env=test"].Durations())
-	assert.EqualValues(t, commonTags, histograms["foo.fizz+env=test"].Tags())
+			assert.EqualValues(t, map[float64]int64{
+				0:               0,
+				2:               1,
+				4:               0,
+				math.MaxFloat64: 1,
+			}, histograms["foo.fizz+env=test"].Values())
+			assert.EqualValues(t, map[time.Duration]int64(nil), histograms["foo.fizz+env=test"].Durations())
+			assert.EqualValues(t, commonTags, histograms["foo.fizz+env=test"].Tags())
 
-	assert.EqualValues(t, map[float64]int64(nil), histograms["foo.buzz+env=test"].Values())
-	assert.EqualValues(t, map[time.Duration]int64{
-		time.Second * 2: 1,
-		time.Second * 4: 0,
-		math.MaxInt64:   0,
-	}, histograms["foo.buzz+env=test"].Durations())
-	assert.EqualValues(t, commonTags, histograms["foo.buzz+env=test"].Tags())
+			assert.EqualValues(t, map[float64]int64(nil), histograms["foo.buzz+env=test"].Values())
+			assert.EqualValues(t, map[time.Duration]int64{
+				time.Second * 2: 1,
+				time.Second * 4: 0,
+				math.MaxInt64:   0,
+			}, histograms["foo.buzz+env=test"].Durations())
+			assert.EqualValues(t, commonTags, histograms["foo.buzz+env=test"].Tags())
 
-	assert.EqualValues(t, 1, counters["foo.boop+env=test,service=test"].Value())
-	assert.EqualValues(t, map[string]string{
-		"env":     "test",
-		"service": "test",
-	}, counters["foo.boop+env=test,service=test"].Tags())
+			assert.EqualValues(t, 1, counters["foo.boop+env=test,service=test"].Value())
+			assert.EqualValues(t, map[string]string{
+				"env":     "test",
+				"service": "test",
+			}, counters["foo.boop+env=test,service=test"].Tags())
+		})
+	}
 }
 
 func TestCapabilities(t *testing.T) {
