@@ -42,29 +42,29 @@ func TestTCalcTransport(t *testing.T) {
 	testString2 := "string"
 	n, err := trans.Write([]byte(testString1))
 	require.Equal(t, len(testString1), n)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.EqualValues(t, len(testString1), trans.GetCount())
 	n, err = trans.Write([]byte(testString2))
 	require.EqualValues(t, len(testString2), n)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.EqualValues(t, len(testString1)+len(testString2), trans.GetCount())
 
 	trans.ResetCount()
 	n, err = trans.WriteString(testString1)
 	require.EqualValues(t, len(testString1), n)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.EqualValues(t, len(testString1), trans.GetCount())
 
 	err = trans.WriteByte('a')
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.EqualValues(t, len(testString1)+1, trans.GetCount())
 
 	n, err = trans.Read([]byte(testString1))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.EqualValues(t, 0, n)
 
 	b, err := trans.ReadByte()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, byte(0), b)
 
 	require.Equal(t, ^uint64(0), trans.RemainingBytes())
@@ -73,6 +73,6 @@ func TestTCalcTransport(t *testing.T) {
 	require.EqualValues(t, 0, trans.GetCount())
 
 	err = trans.Flush()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Nil(t, trans.Close())
 }

@@ -568,7 +568,7 @@ func TestReporterHasReportingAndTaggingCapability(t *testing.T) {
 		Service:    "test-service",
 		CommonTags: defaultCommonTags,
 	})
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	assert.True(t, r.Capabilities().Reporting())
 	assert.True(t, r.Capabilities().Tagging())

@@ -35,14 +35,14 @@ var localListenAddr = &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)}
 
 func TestNewTUDPClientTransport(t *testing.T) {
 	_, err := NewTUDPClientTransport("fakeAddressAndPort", "")
-	require.NotNil(t, err)
+	require.Error(t, err)
 
 	_, err = NewTUDPClientTransport("localhost:9090", "fakeaddressandport")
-	require.NotNil(t, err)
+	require.Error(t, err)
 
 	withLocalServer(t, func(addr string) {
 		trans, err := NewTUDPClientTransport(addr, "")
-		require.Nil(t, err)
+		require.NoError(t, err)
 		require.True(t, trans.IsOpen())
 		require.NotNil(t, trans.Addr())
 
@@ -51,20 +51,20 @@ func TestNewTUDPClientTransport(t *testing.T) {
 		require.Equal(t, "udp", trans.Addr().Network())
 
 		err = trans.Open()
-		require.Nil(t, err)
+		require.NoError(t, err)
 
 		err = trans.Close()
-		require.Nil(t, err)
+		require.NoError(t, err)
 		require.False(t, trans.IsOpen())
 	})
 }
 
 func TestNewTUDPServerTransport(t *testing.T) {
 	_, err := NewTUDPServerTransport("fakeAddressAndPort")
-	require.NotNil(t, err)
+	require.Error(t, err)
 
 	trans, err := NewTUDPServerTransport(localListenAddr.String())
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.True(t, trans.IsOpen())
 	require.Equal(t, ^uint64(0), trans.RemainingBytes())
 
@@ -197,7 +197,7 @@ func TestIndirectCloseError(t *testing.T) {
 // It's questionable whether multiple calls to Close() should succeed or not.
 func TestDoubleCloseIsOK(t *testing.T) {
 	trans, err := NewTUDPServerTransport(localListenAddr.String())
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.True(t, trans.IsOpen())
 
 	conn := trans.Conn()
@@ -211,71 +211,71 @@ func TestDoubleCloseIsOK(t *testing.T) {
 
 func TestConnClosedReadWrite(t *testing.T) {
 	trans, err := NewTUDPServerTransport(localListenAddr.String())
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.True(t, trans.IsOpen())
 	trans.Close()
 	require.False(t, trans.IsOpen())
 
 	_, err = trans.Read(make([]byte, 1))
-	require.NotNil(t, err)
+	require.Error(t, err)
 
 	_, err = trans.ReadByte()
-	require.NotNil(t, err)
+	require.Error(t, err)
 
 	_, err = trans.Write([]byte("test"))
-	require.NotNil(t, err)
+	require.Error(t, err)
 	_, err = trans.WriteString("test")
-	require.NotNil(t, err)
+	require.Error(t, err)
 	err = trans.WriteByte('t')
-	require.NotNil(t, err)
+	require.Error(t, err)
 }
 
 func TestHugeWrite(t *testing.T) {
 	withLocalServer(t, func(addr string) {
 		trans, err := NewTUDPClientTransport(addr, "")
-		require.Nil(t, err)
+		require.NoError(t, err)
 
 		hugeMessage := make([]byte, 40000)
 		_, err = trans.Write(hugeMessage)
-		require.Nil(t, err)
+		require.NoError(t, err)
 
 		//expect buffer to exceed max
 		_, err = trans.Write(hugeMessage)
-		require.NotNil(t, err)
+		require.Error(t, err)
 
 		_, err = trans.WriteString(string(hugeMessage))
-		require.NotNil(t, err)
+		require.Error(t, err)
 	})
 }
 
 func TestWriteByteLimit(t *testing.T) {
 	withLocalServer(t, func(addr string) {
 		trans, err := NewTUDPClientTransport(addr, "")
-		require.Nil(t, err)
+		require.NoError(t, err)
 
 		hugeMessage := make([]byte, MaxLength)
 		_, err = trans.Write(hugeMessage)
-		require.Nil(t, err)
+		require.NoError(t, err)
 
 		//expect buffer to exceed max
 		err = trans.WriteByte('a')
-		require.NotNil(t, err)
+		require.Error(t, err)
 	})
 }
 
 func TestFlushErrors(t *testing.T) {
 	withLocalServer(t, func(addr string) {
 		trans, err := NewTUDPClientTransport(addr, "")
-		require.Nil(t, err)
+		require.NoError(t, err)
 
 		//flushing closed transport
 		trans.Close()
 		err = trans.Flush()
-		require.NotNil(t, err)
+		require.Error(t, err)
 
 		//error when trying to write in flush
 		trans, err = NewTUDPClientTransport(addr, "")
-		require.Nil(t, err)
+		require.NoError(t, err)
 		trans.conn.Close()
 
 		trans.Write([]byte{1, 2, 3, 4})
@@ -289,7 +289,7 @@ func TestResetInFlush(t *testing.T) {
 	require.NoError(t, err, "ListenUDP failed")
 
 	trans, err := NewTUDPClientTransport(conn.LocalAddr().String(), "")
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	trans.Write([]byte("some nonsense"))
 	trans.conn.Close() // close the transport's connection via back door
