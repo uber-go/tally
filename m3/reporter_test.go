@@ -42,7 +42,6 @@ import (
 )
 
 const (
-	numReaders    = 10
 	queueSize     = 1000
 	includeHost   = true
 	maxPacketSize = int32(1440)
@@ -628,7 +627,13 @@ func (f *fakeM3Server) Serve() {
 		} else {
 			proto = thrift.NewTBinaryProtocolTransport(trans)
 		}
-		f.processor.Process(proto, proto)
+
+		_, err = f.processor.Process(proto, proto)
+		if terr, ok := err.(thrift.TTransportException); ok {
+			require.Equal(f.t, thrift.END_OF_FILE, terr.TypeId())
+		} else {
+			require.NoError(f.t, err)
+		}
 	}
 }
 

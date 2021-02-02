@@ -1,8 +1,8 @@
 hash: 6c5a37d4f995175d7ab310d09b5866057c683536b0ae3d8f478f87943aa03be4
-updated: 2019-11-07T15:02:21.080076-05:00
+updated: 2021-02-05T09:45:14.308188-05:00
 imports:
 - name: github.com/beorn7/perks
-  version: 3a771d992973f24aa725d07868b467d1ddfceafb
+  version: 4c0e84591b9aa9e6dcfdf3e020114cd81f89d5f9
   subpackages:
   - quantile
 - name: github.com/cactus/go-statsd-client
@@ -10,7 +10,7 @@ imports:
   subpackages:
   - statsd
 - name: github.com/golang/protobuf
-  version: 14aad3d5ea4c323bcd7a2137e735da24a76e814c
+  version: 6c65a5562fc06764971b7c5d05c76c75e84bdbf7
   subpackages:
   - proto
 - name: github.com/m3db/prometheus_client_golang
@@ -35,13 +35,15 @@ imports:
   subpackages:
   - pbutil
 - name: github.com/pkg/errors
-  version: ba968bfe8b2f7e042a574c888954fccecfa385b4
+  version: 614d223910a179a466c1767a985424175c39b465
+- name: github.com/pkg/profile
+  version: 5b67d428864e92711fcbd2f8629456121a56d91f
 - name: go.uber.org/atomic
-  version: 9dc4df04d0d1c39369750a9f6c32c39560672089
+  version: 12f27ba2637fa0e13772a4f05fa46a5d18d53182
 - name: gopkg.in/validator.v2
-  version: 135c24b11c19e52befcae2ec3fca5d9b78c4e98e
+  version: 2b28d334fa054977b7c725c7639a1ca4efc18bad
 - name: gopkg.in/yaml.v2
-  version: 5420a8b6744d3b0345ab293f6fcba19c978f1183
+  version: 7649d4548cb53a614db133b2a8ac1f31859dda8c
 testImports:
 - name: github.com/axw/gocov
   version: 54b98cfcac0c63fb3f9bd8e7ad241b724d4e985b

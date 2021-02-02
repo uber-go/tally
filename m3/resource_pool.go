@@ -146,6 +146,7 @@ func (r *resourcePool) getProto() thrift.TProtocol {
 	return o.(thrift.TProtocol)
 }
 
+//nolint:unused
 func (r *resourcePool) releaseProto(proto thrift.TProtocol) {
 	calc := proto.Transport().(*customtransport.TCalcTransport)
 	calc.ResetCount()
@@ -180,6 +181,7 @@ func (r *resourcePool) releaseMetricValue(metVal *m3thrift.MetricValue) {
 	r.valuePool.Put(metVal)
 }
 
+//nolint:unused
 func (r *resourcePool) releaseMetrics(mets []*m3thrift.Metric) {
 	for _, m := range mets {
 		r.releaseMetric(m)

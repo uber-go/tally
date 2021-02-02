@@ -45,6 +45,7 @@ func TestTBufferedReadTransport(t *testing.T) {
 	secondRead := make([]byte, 7)
 	n, err = trans.Read(secondRead)
 	require.Equal(t, 6, n)
+	require.NoError(t, err)
 	require.Equal(t, []byte("String"), secondRead[0:6])
 	require.Equal(t, uint64(0), trans.RemainingBytes())
 }

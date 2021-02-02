@@ -21,15 +21,16 @@
 package m3
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"math"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/uber-go/tally"
 	customtransport "github.com/uber-go/tally/m3/customtransports"
 	m3thrift "github.com/uber-go/tally/m3/thrift"
@@ -207,7 +208,7 @@ func NewReporter(opts Options) (Reporter, error) {
 		if opts.CommonTags[HostTag] == "" {
 			hostname, err := os.Hostname()
 			if err != nil {
-				return nil, fmt.Errorf("error resolving host tag: %v", err)
+				return nil, errors.WithMessage(err, "error resolving host tag")
 			}
 			tags[createTag(resourcePool, HostTag, hostname)] = true
 		}
@@ -217,13 +218,22 @@ func NewReporter(opts Options) (Reporter, error) {
 	batch := resourcePool.getBatch()
 	batch.CommonTags = tags
 	batch.Metrics = []*m3thrift.Metric{}
+
 	proto := resourcePool.getProto()
-	batch.Write(proto)
-	calc := proto.Transport().(*customtransport.TCalcTransport)
-	numOverheadBytes := emitMetricBatchOverhead + calc.GetCount()
+	if err := batch.Write(proto); err != nil {
+		return nil, errors.WithMessage(
+			err,
+			"failed to write to proto for size calculation",
+		)
+	}
+
+	var (
+		calc             = proto.Transport().(*customtransport.TCalcTransport)
+		numOverheadBytes = emitMetricBatchOverhead + calc.GetCount()
+		freeBytes        = opts.MaxPacketSizeBytes - numOverheadBytes
+	)
 	calc.ResetCount()
 
-	freeBytes := opts.MaxPacketSizeBytes - numOverheadBytes
 	if freeBytes <= 0 {
 		return nil, errCommonTagSize
 	}
@@ -250,35 +260,60 @@ func NewReporter(opts Options) (Reporter, error) {
 
 // AllocateCounter implements tally.CachedStatsReporter.
 func (r *reporter) AllocateCounter(
-	name string, tags map[string]string,
+	name string,
+	tags map[string]string,
 ) tally.CachedCount {
 	return r.allocateCounter(name, tags)
 }
 
 func (r *reporter) allocateCounter(
-	name string, tags map[string]string,
+	name string,
+	tags map[string]string,
 ) cachedMetric {
-	counter := r.newMetric(name, tags, counterType)
-	size := r.calculateSize(counter)
-	return cachedMetric{counter, r, size}
+	var (
+		counter = r.newMetric(name, tags, counterType)
+		size    = r.calculateSize(counter)
+	)
+
+	return cachedMetric{
+		metric:   counter,
+		reporter: r,
+		size:     size,
+	}
 }
 
 // AllocateGauge implements tally.CachedStatsReporter.
 func (r *reporter) AllocateGauge(
-	name string, tags map[string]string,
+	name string,
+	tags map[string]string,
 ) tally.CachedGauge {
-	gauge := r.newMetric(name, tags, gaugeType)
-	size := r.calculateSize(gauge)
-	return cachedMetric{gauge, r, size}
+	var (
+		gauge = r.newMetric(name, tags, gaugeType)
+		size  = r.calculateSize(gauge)
+	)
+
+	return cachedMetric{
+		metric:   gauge,
+		reporter: r,
+		size:     size,
+	}
 }
 
 // AllocateTimer implements tally.CachedStatsReporter.
 func (r *reporter) AllocateTimer(
-	name string, tags map[string]string,
+	name string,
+	tags map[string]string,
 ) tally.CachedTimer {
-	timer := r.newMetric(name, tags, timerType)
-	size := r.calculateSize(timer)
-	return cachedMetric{timer, r, size}
+	var (
+		timer = r.newMetric(name, tags, timerType)
+		size  = r.calculateSize(timer)
+	)
+
+	return cachedMetric{
+		metric:   timer,
+		reporter: r,
+		size:     size,
+	}
 }
 
 // AllocateHistogram implements tally.CachedStatsReporter.
@@ -288,45 +323,57 @@ func (r *reporter) AllocateHistogram(
 	buckets tally.Buckets,
 ) tally.CachedHistogram {
 	var (
+		_, isDuration = buckets.(tally.DurationBuckets)
+		bucketIDLen   = int(math.Max(
+			float64(len(strconv.Itoa(buckets.Len()))),
+			float64(minMetricBucketIDTagLength),
+		))
+		bucketIDLenStr        = strconv.Itoa(bucketIDLen)
+		bucketIDFmt           = "%0" + bucketIDLenStr + "d"
 		cachedValueBuckets    []cachedHistogramBucket
 		cachedDurationBuckets []cachedHistogramBucket
 	)
-	bucketIDLen := len(strconv.Itoa(buckets.Len()))
-	bucketIDLen = int(math.Max(float64(bucketIDLen),
-		float64(minMetricBucketIDTagLength)))
-	bucketIDLenStr := strconv.Itoa(bucketIDLen)
-	bucketIDFmt := "%0" + bucketIDLenStr + "d"
+
 	for i, pair := range tally.BucketPairs(buckets) {
-		valueTags, durationTags :=
-			make(map[string]string), make(map[string]string)
+		var (
+			histTags   = make(map[string]string, len(tags))
+			idTagValue = fmt.Sprintf(bucketIDFmt, i)
+		)
 		for k, v := range tags {
-			valueTags[k], durationTags[k] = v, v
+			histTags[k] = v
 		}
+		histTags[r.bucketIDTagName] = idTagValue
 
-		idTagValue := fmt.Sprintf(bucketIDFmt, i)
+		if isDuration {
+			histTags[r.bucketTagName] =
+				r.durationBucketString(pair.LowerBoundDuration()) + "-" +
+					r.durationBucketString(pair.UpperBoundDuration())
 
-		valueTags[r.bucketIDTagName] = idTagValue
-		valueTags[r.bucketTagName] = fmt.Sprintf("%s-%s",
-			r.valueBucketString(pair.LowerBoundValue()),
-			r.valueBucketString(pair.UpperBoundValue()))
+			cachedDurationBuckets = append(cachedDurationBuckets, cachedHistogramBucket{
+				valueUpperBound:    pair.UpperBoundValue(),
+				durationUpperBound: pair.UpperBoundDuration(),
+				metric:             r.allocateCounter(name, histTags),
+			})
+		} else {
+			histTags[r.bucketTagName] =
+				r.valueBucketString(pair.LowerBoundValue()) + "-" +
+					r.valueBucketString(pair.UpperBoundValue())
 
-		cachedValueBuckets = append(cachedValueBuckets,
-			cachedHistogramBucket{pair.UpperBoundValue(),
-				pair.UpperBoundDuration(),
-				r.allocateCounter(name, valueTags)})
-
-		durationTags[r.bucketIDTagName] = idTagValue
-		durationTags[r.bucketTagName] = fmt.Sprintf("%s-%s",
-			r.durationBucketString(pair.LowerBoundDuration()),
-			r.durationBucketString(pair.UpperBoundDuration()))
-
-		cachedDurationBuckets = append(cachedDurationBuckets,
-			cachedHistogramBucket{pair.UpperBoundValue(),
-				pair.UpperBoundDuration(),
-				r.allocateCounter(name, durationTags)})
+			cachedValueBuckets = append(cachedValueBuckets, cachedHistogramBucket{
+				valueUpperBound:    pair.UpperBoundValue(),
+				durationUpperBound: pair.UpperBoundDuration(),
+				metric:             r.allocateCounter(name, histTags),
+			})
+		}
 	}
-	return cachedHistogram{r, name, tags, buckets,
-		cachedValueBuckets, cachedDurationBuckets}
+
+	return cachedHistogram{
+		r:                     r,
+		name:                  name,
+		tags:                  tags,
+		cachedValueBuckets:    cachedValueBuckets,
+		cachedDurationBuckets: cachedDurationBuckets,
+	}
 }
 
 func (r *reporter) valueBucketString(v float64) string {
@@ -398,7 +445,7 @@ func (r *reporter) newMetric(
 
 func (r *reporter) calculateSize(m *m3thrift.Metric) int32 {
 	r.calcLock.Lock()
-	m.Write(r.calcProto)
+	m.Write(r.calcProto) //nolint:errcheck
 	size := r.calc.GetCount()
 	r.calc.ResetCount()
 	r.calcLock.Unlock()
@@ -483,8 +530,10 @@ func (r *reporter) Tagging() bool {
 }
 
 func (r *reporter) process() {
-	mets := make([]*m3thrift.Metric, 0, (r.freeBytes / 10))
-	bytes := int32(0)
+	var (
+		mets  = make([]*m3thrift.Metric, 0, (r.freeBytes / 10))
+		bytes int32
+	)
 
 	for smet := range r.metCh {
 		if smet.m == nil {
@@ -518,7 +567,7 @@ func (r *reporter) flush(
 ) []*m3thrift.Metric {
 	r.curBatchLock.Lock()
 	r.curBatch.Metrics = mets
-	r.client.EmitMetricBatch(r.curBatch)
+	r.client.EmitMetricBatch(r.curBatch) //nolint:errcheck
 	r.curBatch.Metrics = nil
 	r.curBatchLock.Unlock()
 
@@ -585,7 +634,6 @@ type cachedHistogram struct {
 	r                     *reporter
 	name                  string
 	tags                  map[string]string
-	buckets               tally.Buckets
 	cachedValueBuckets    []cachedHistogramBucket
 	cachedDurationBuckets []cachedHistogramBucket
 }
@@ -597,25 +645,39 @@ type cachedHistogramBucket struct {
 }
 
 func (h cachedHistogram) ValueBucket(
-	bucketLowerBound, bucketUpperBound float64,
+	bucketLowerBound float64,
+	bucketUpperBound float64,
 ) tally.CachedHistogramBucket {
-	for _, b := range h.cachedValueBuckets {
-		if b.valueUpperBound >= bucketUpperBound {
-			return b.metric
-		}
+	var (
+		n   = len(h.cachedValueBuckets)
+		idx = sort.Search(n, func(i int) bool {
+			return h.cachedValueBuckets[i].valueUpperBound >= bucketUpperBound
+		})
+	)
+
+	if idx == n {
+		return noopMetric{}
 	}
-	return noopMetric{}
+
+	return h.cachedValueBuckets[idx].metric
 }
 
 func (h cachedHistogram) DurationBucket(
-	bucketLowerBound, bucketUpperBound time.Duration,
+	bucketLowerBound time.Duration,
+	bucketUpperBound time.Duration,
 ) tally.CachedHistogramBucket {
-	for _, b := range h.cachedDurationBuckets {
-		if b.durationUpperBound >= bucketUpperBound {
-			return b.metric
-		}
+	var (
+		n   = len(h.cachedDurationBuckets)
+		idx = sort.Search(n, func(i int) bool {
+			return h.cachedDurationBuckets[i].durationUpperBound >= bucketUpperBound
+		})
+	)
+
+	if idx == n {
+		return noopMetric{}
 	}
-	return noopMetric{}
+
+	return h.cachedDurationBuckets[idx].metric
 }
 
 type sizedMetric struct {
