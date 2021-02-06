@@ -20,7 +20,7 @@ By default it buffers counters, gauges and histograms at a specified interval bu
 	 - `github.com/uber-go/tally/m3`: Report m3 metrics, timers are not sampled and forwarded directly.
 	 - `github.com/uber-go/tally/multi`: Report to multiple reporters, you can multi-write metrics to other reporters simply.
 	 - `github.com/uber-go/tally/prometheus`: Report prometheus metrics, timers by default are made summaries with an option to make them histograms instead.
-	 - `github.com/uber-go/tally/statsd`: Report statsd metrics, no support for tags.
+	 - `github.com/uber-go/tally/statsd`: Report statsd metrics.
 
 ### Basics
 
@@ -58,7 +58,7 @@ Use the inbuilt statsd reporter:
 ```go
 import (
 	"io"
-	"github.com/cactus/go-statsd-client/statsd"
+	"github.com/cactus/go-statsd-client/v5/statsd"
 	"github.com/uber-go/tally"
 	tallystatsd "github.com/uber-go/tally/statsd"
 	// ...
