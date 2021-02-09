@@ -11,14 +11,12 @@ all: lint test
 
 .PHONY: dependencies
 dependencies:
-	@echo "Installing Glide and locked dependencies..."
-	glide --version || go get -u -f github.com/Masterminds/glide
-	glide install
+	go mod download
 	@echo "Installing test dependencies..."
-	go install ./vendor/github.com/axw/gocov/gocov
-	go install ./vendor/github.com/mattn/goveralls
+	go install github.com/axw/gocov/gocov
+	go install github.com/mattn/goveralls
 	@echo "Installing golint..."
-	go install ./vendor/github.com/golang/lint/golint
+	go install golang.org/x/lint
 
 .PHONY: lint
 lint:
