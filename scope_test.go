@@ -388,21 +388,31 @@ func TestWriteOnce(t *testing.T) {
 	r.hg.Add(1)
 	s.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
 		RecordValue(42.42)
+	r.hg.Add(1)
+	s.Histogram("bat", MustMakeLinearValueBuckets(1, 1, 3)).RecordValue(2.1)
+	r.hg.Add(1)
+	s.SubScope("test").Histogram("qux", MustMakeLinearValueBuckets(100, 10, 3)).RecordValue(135.0)
 
-	s.report(r)
+	s.reportLoopRun()
+
 	r.WaitAll()
 
 	assert.EqualValues(t, 1, r.counters["bar"].val)
 	assert.EqualValues(t, 1, r.gauges["zed"].val)
 	assert.EqualValues(t, time.Millisecond*175, r.timers["ticky"].val)
 	assert.EqualValues(t, 1, r.histograms["baz"].valueSamples[50.0])
+	assert.EqualValues(t, 1, r.histograms["bat"].valueSamples[3.0])
+	assert.EqualValues(t, 1, r.histograms["test.qux"].valueSamples[math.MaxFloat64])
 
 	r = newTestStatsReporter()
-	s.report(r)
+	s.reportLoopRun()
 
 	assert.Nil(t, r.counters["bar"])
 	assert.Nil(t, r.gauges["zed"])
 	assert.Nil(t, r.timers["ticky"])
+	assert.Nil(t, r.histograms["baz"])
+	assert.Nil(t, r.histograms["bat"])
+	assert.Nil(t, r.histograms["test.qux"])
 }
 
 func TestCounterSanitized(t *testing.T) {

@@ -31,7 +31,7 @@ import (
 
 	"github.com/uber-go/tally"
 	"github.com/uber-go/tally/m3"
-	m3thrift "github.com/uber-go/tally/m3/thrift"
+	m3thrift "github.com/uber-go/tally/m3/thrift/v1"
 
 	validator "gopkg.in/validator.v2"
 	yaml "gopkg.in/yaml.v2"

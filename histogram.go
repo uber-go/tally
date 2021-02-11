@@ -217,18 +217,14 @@ func BucketPairs(buckets Buckets) []BucketPair {
 
 func copyAndSortValues(values []float64) []float64 {
 	valuesCopy := make([]float64, len(values))
-	for i := range values {
-		valuesCopy[i] = values[i]
-	}
+	copy(valuesCopy, values)
 	sort.Sort(ValueBuckets(valuesCopy))
 	return valuesCopy
 }
 
 func copyAndSortDurations(durations []time.Duration) []time.Duration {
 	durationsCopy := make([]time.Duration, len(durations))
-	for i := range durations {
-		durationsCopy[i] = durations[i]
-	}
+	copy(durationsCopy, durations)
 	sort.Sort(DurationBuckets(durationsCopy))
 	return durationsCopy
 }

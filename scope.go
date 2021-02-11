@@ -22,8 +22,11 @@ package tally
 
 import (
 	"io"
+	"math"
 	"sync"
 	"time"
+
+	"github.com/uber-go/tally/internal/identity"
 )
 
 const (
@@ -84,6 +87,25 @@ type scope struct {
 	timers          map[string]*timer
 	// nb: deliberately skipping timersSlice as we report timers immediately,
 	// no buffering is involved.
+
+	bucketCache map[uint64]bucketStorage
+}
+
+func getBucketsIdentity(buckets Buckets) uint64 {
+	acc := identity.NewAccumulator()
+
+	if dbuckets, ok := buckets.(DurationBuckets); ok {
+		for _, dur := range dbuckets {
+			acc = acc.AddUint64(uint64(dur))
+		}
+	} else {
+		vbuckets := buckets.(ValueBuckets)
+		for _, val := range vbuckets {
+			acc = acc.AddUint64(math.Float64bits(val))
+		}
+	}
+
+	return acc.Value()
 }
 
 type scopeStatus struct {
@@ -165,6 +187,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		histograms:      make(map[string]*histogram),
 		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
 		timers:          make(map[string]*timer),
+		bucketCache:     make(map[uint64]bucketStorage),
 	}
 
 	// NB(r): Take a copy of the tags on creation
@@ -382,6 +405,11 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 		b = s.defaultBuckets
 	}
 
+	htype := valueHistogramType
+	if _, ok := b.(DurationBuckets); ok {
+		htype = durationHistogramType
+	}
+
 	s.hm.Lock()
 	defer s.hm.Unlock()
 
@@ -396,8 +424,15 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 		)
 	}
 
+	bid := getBucketsIdentity(b)
+	storage, ok := s.bucketCache[bid]
+	if !ok {
+		storage = newBucketStorage(htype, b, cachedHistogram)
+		s.bucketCache[bid] = storage
+	}
+
 	h := newHistogram(
-		s.fullyQualifiedName(name), s.tags, s.reporter, b, cachedHistogram,
+		htype, s.fullyQualifiedName(name), s.tags, s.reporter, storage,
 	)
 	s.histograms[name] = h
 	s.histogramsSlice = append(s.histogramsSlice, h)
