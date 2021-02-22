@@ -38,10 +38,6 @@ import (
 	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
 )
 
-// need to pool:
-// []MetricTag
-// []Metric
-
 // Protocol describes a M3 thrift transport protocol.
 type Protocol int
 
@@ -105,23 +101,19 @@ type Reporter interface {
 // remote M3 collector, metrics are batched together and emitted
 // via either thrift compact or binary protocol in batch UDP packets.
 type reporter struct {
-	client *m3thrift.M3Client
-	// curBatch     *m3thrift.MetricBatch
-	// curBatchLock sync.Mutex
-	calc      *customtransport.TCalcTransport
-	calcProto thrift.TProtocol
-	calcLock  sync.Mutex
-	// commonTags      map[*m3thrift.MetricTag]bool
-	commonTags      []m3thrift.MetricTag
-	freeBytes       int32
-	processors      sync.WaitGroup
-	resourcePool    *resourcePool
 	bucketIDTagName string
 	bucketTagName   string
 	bucketValFmt    string
-
-	status reporterStatus
-	metCh  chan sizedMetric
+	calc            *customtransport.TCalcTransport
+	calcLock        sync.Mutex
+	calcProto       thrift.TProtocol
+	client          *m3thrift.M3Client
+	commonTags      []m3thrift.MetricTag
+	freeBytes       int32
+	metCh           chan sizedMetric
+	processors      sync.WaitGroup
+	resourcePool    *resourcePool
+	status          reporterStatus
 }
 
 type reporterStatus struct {
@@ -191,32 +183,30 @@ func NewReporter(opts Options) (Reporter, error) {
 	)
 
 	// Create common tags
-	// tags := resourcePool.getTagList()
 	for k, v := range opts.CommonTags {
 		tagm[k] = v
-		// tags[createTag(resourcePool, k, v)] = true
 	}
+
 	if opts.CommonTags[ServiceTag] == "" {
 		if opts.Service == "" {
 			return nil, fmt.Errorf("%s common tag is required", ServiceTag)
 		}
-		// tags[createTag(resourcePool, ServiceTag, opts.Service)] = true
 		tagm[ServiceTag] = opts.Service
 	}
+
 	if opts.CommonTags[EnvTag] == "" {
 		if opts.Env == "" {
 			return nil, fmt.Errorf("%s common tag is required", EnvTag)
 		}
-		// tags[createTag(resourcePool, EnvTag, opts.Env)] = true
 		tagm[EnvTag] = opts.Env
 	}
+
 	if opts.IncludeHost {
 		if opts.CommonTags[HostTag] == "" {
 			hostname, err := os.Hostname()
 			if err != nil {
 				return nil, errors.WithMessage(err, "error resolving host tag")
 			}
-			// tags[createTag(resourcePool, HostTag, hostname)] = true
 			tagm[HostTag] = hostname
 		}
 	}
@@ -258,16 +248,16 @@ func NewReporter(opts Options) (Reporter, error) {
 	}
 
 	r := &reporter{
-		client:          client,
-		calc:            calc,
-		calcProto:       proto,
-		commonTags:      tags,
-		freeBytes:       freeBytes,
-		resourcePool:    resourcePool,
 		bucketIDTagName: opts.HistogramBucketIDName,
 		bucketTagName:   opts.HistogramBucketName,
 		bucketValFmt:    "%." + strconv.Itoa(int(opts.HistogramBucketTagPrecision)) + "f",
+		calc:            calc,
+		calcProto:       proto,
+		client:          client,
+		commonTags:      tags,
+		freeBytes:       freeBytes,
 		metCh:           make(chan sizedMetric, opts.MaxQueueSize),
+		resourcePool:    resourcePool,
 	}
 
 	r.processors.Add(1)
@@ -507,7 +497,7 @@ func (r *reporter) reportCopyMetric(m m3thrift.Metric, size int32) {
 		select {
 		case r.metCh <- sm:
 		default:
-			// TODO
+			// TODO: don't drop when full, or add metric to track
 		}
 	}
 	r.status.RUnlock()

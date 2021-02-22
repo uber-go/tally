@@ -91,6 +91,10 @@ type scope struct {
 	bucketCache map[uint64]bucketStorage
 }
 
+// n.b. This function is used to uniquely identify a given set of buckets
+//      commutatively through hash folding, in order to do cache lookups and
+//      avoid allocating additional storage for data that is shared among all
+//      instances of a particular set of buckets.
 func getBucketsIdentity(buckets Buckets) uint64 {
 	acc := identity.NewAccumulator()
 
