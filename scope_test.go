@@ -391,7 +391,13 @@ func TestWriteOnce(t *testing.T) {
 	r.hg.Add(1)
 	s.Histogram("bat", MustMakeLinearValueBuckets(1, 1, 3)).RecordValue(2.1)
 	r.hg.Add(1)
+	s.SubScope("test").Histogram("bat", MustMakeLinearValueBuckets(1, 1, 3)).RecordValue(1.1)
+	r.hg.Add(1)
+	s.SubScope("test").Histogram("bat", MustMakeLinearValueBuckets(1, 1, 3)).RecordValue(2.1)
+	r.hg.Add(1)
 	s.SubScope("test").Histogram("qux", MustMakeLinearValueBuckets(100, 10, 3)).RecordValue(135.0)
+	r.hg.Add(1)
+	s.SubScope("test").Histogram("quux", MustMakeLinearValueBuckets(100, 10, 3)).RecordValue(101.0)
 
 	s.reportLoopRun()
 
@@ -402,7 +408,10 @@ func TestWriteOnce(t *testing.T) {
 	assert.EqualValues(t, time.Millisecond*175, r.timers["ticky"].val)
 	assert.EqualValues(t, 1, r.histograms["baz"].valueSamples[50.0])
 	assert.EqualValues(t, 1, r.histograms["bat"].valueSamples[3.0])
+	assert.EqualValues(t, 1, r.histograms["test.bat"].valueSamples[2.0])
+	assert.EqualValues(t, 1, r.histograms["test.bat"].valueSamples[3.0])
 	assert.EqualValues(t, 1, r.histograms["test.qux"].valueSamples[math.MaxFloat64])
+	assert.EqualValues(t, 1, r.histograms["test.quux"].valueSamples[110.0])
 
 	r = newTestStatsReporter()
 	s.reportLoopRun()

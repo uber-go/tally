@@ -22,7 +22,6 @@ package m3
 
 import (
 	"bytes"
-	"fmt"
 	"math/rand"
 	"net"
 	"os"
@@ -321,7 +320,6 @@ func TestReporterHistogram(t *testing.T) {
 	require.Equal(t, "my-histogram", counter.GetName())
 	require.True(t, counter.IsSetTags())
 	for _, tag := range counter.GetTags() {
-		fmt.Println("Checking tag", tag.GetName(), tag.GetValue())
 		require.Equal(t, map[string]string{
 			"foo":      "bar",
 			"bucketid": "0001",
