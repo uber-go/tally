@@ -3,7 +3,7 @@ sudo: false
 go:
   - 1.13.x
   - 1.14.x
-  - 1.15.xgi
+  - 1.15.x
 env:
   global:
     - GO15VENDOREXPERIMENT=1
