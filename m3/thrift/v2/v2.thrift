@@ -13,22 +13,22 @@ struct MetricValue {
 }
 
 struct MetricTag {
-	1: required string name
-	2: required string value
+    1: required string name
+    2: required string value
 }
 
 struct Metric {
-	1: required string name
+    1: required string name
     2: required MetricValue value
     3: required i64 timestamp
     4: optional list<MetricTag> tags
 }
 
 struct MetricBatch {
-	1: required list<Metric> metrics
-	2: optional list<MetricTag> commonTags
+    1: required list<Metric> metrics
+    2: optional list<MetricTag> commonTags
 }
 
 service M3 {
-	oneway void emitMetricBatch(1: MetricBatch batch)
+    oneway void emitMetricBatch(1: MetricBatch batch)
 }

@@ -348,61 +348,38 @@ func (r *reporter) AllocateHistogram(
 	}
 
 	for i, pair := range tally.BucketPairs(buckets) {
-		idTagValue := fmt.Sprintf(bucketIDFmt, i)
+		var (
+			counter    = r.allocateCounter(name, htags)
+			idTagValue = fmt.Sprintf(bucketIDFmt, i)
+			hbucket    = cachedHistogramBucket{
+				valueUpperBound:    pair.UpperBoundValue(),
+				durationUpperBound: pair.UpperBoundDuration(),
+				metric:             counter,
+			}
+		)
 
+		hbucket.metric.metric.Tags = append(
+			hbucket.metric.metric.Tags,
+			m3thrift.MetricTag{
+				Name:  r.bucketIDTagName,
+				Value: idTagValue,
+			},
+			m3thrift.MetricTag{
+				Name: r.bucketTagName,
+			},
+		)
+
+		bucketIdx := len(hbucket.metric.metric.Tags) - 1
 		if isDuration {
-			var (
-				counter = r.allocateCounter(name, htags)
-				bucket  = r.durationBucketString(pair.LowerBoundDuration()) +
+			hbucket.metric.metric.Tags[bucketIdx].Value =
+				r.durationBucketString(pair.LowerBoundDuration()) +
 					"-" + r.durationBucketString(pair.UpperBoundDuration())
-			)
-			counter.metric.Tags = append(
-				counter.metric.Tags,
-				m3thrift.MetricTag{
-					Name:  r.bucketIDTagName,
-					Value: idTagValue,
-				},
-				m3thrift.MetricTag{
-					Name:  r.bucketTagName,
-					Value: bucket,
-				},
-			)
-
-			cachedDurationBuckets = append(
-				cachedDurationBuckets,
-				cachedHistogramBucket{
-					valueUpperBound:    pair.UpperBoundValue(),
-					durationUpperBound: pair.UpperBoundDuration(),
-					metric:             counter,
-				},
-			)
+			cachedDurationBuckets = append(cachedDurationBuckets, hbucket)
 		} else {
-			var (
-				counter = r.allocateCounter(name, htags)
-				bucket  = r.valueBucketString(pair.LowerBoundValue()) +
+			hbucket.metric.metric.Tags[bucketIdx].Value =
+				r.valueBucketString(pair.LowerBoundValue()) +
 					"-" + r.valueBucketString(pair.UpperBoundValue())
-			)
-
-			counter.metric.Tags = append(
-				counter.metric.Tags,
-				m3thrift.MetricTag{
-					Name:  r.bucketIDTagName,
-					Value: idTagValue,
-				},
-				m3thrift.MetricTag{
-					Name:  r.bucketTagName,
-					Value: bucket,
-				},
-			)
-
-			cachedValueBuckets = append(
-				cachedValueBuckets,
-				cachedHistogramBucket{
-					valueUpperBound:    pair.UpperBoundValue(),
-					durationUpperBound: pair.UpperBoundDuration(),
-					metric:             counter,
-				},
-			)
+			cachedValueBuckets = append(cachedValueBuckets, hbucket)
 		}
 	}
 
@@ -460,15 +437,16 @@ func (r *reporter) newMetric(
 		m.Value.Timer = _maxInt64
 	}
 
-	if len(tags) > 0 {
-		m.Tags = r.resourcePool.getMetricTagSlice()
+	if len(tags) == 0 {
+		return m
+	}
 
-		for k, v := range tags {
-			m.Tags = append(m.Tags, m3thrift.MetricTag{
-				Name:  k,
-				Value: v,
-			})
-		}
+	m.Tags = r.resourcePool.getMetricTagSlice()
+	for k, v := range tags {
+		m.Tags = append(m.Tags, m3thrift.MetricTag{
+			Name:  k,
+			Value: v,
+		})
 	}
 
 	return m
