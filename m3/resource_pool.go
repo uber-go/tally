@@ -83,6 +83,10 @@ func (r *resourcePool) releaseProto(proto thrift.TProtocol) {
 }
 
 func (r *resourcePool) releaseMetricSlice(metrics []m3thrift.Metric) {
+	if metrics == nil {
+		return
+	}
+
 	for i := 0; i < len(metrics); i++ {
 		metrics[i].Tags = nil
 	}
@@ -92,5 +96,9 @@ func (r *resourcePool) releaseMetricSlice(metrics []m3thrift.Metric) {
 
 //nolint:unused
 func (r *resourcePool) releaseMetricTagSlice(tags []m3thrift.MetricTag) {
+	if tags == nil {
+		return
+	}
+
 	r.metricSlicePool.Put(tags[:0])
 }

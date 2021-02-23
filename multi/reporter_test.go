@@ -281,6 +281,8 @@ func (r *capturingStatsReporter) AllocateCounter(
 	}}
 }
 
+func (r *capturingStatsReporter) DeallocateCounter(tally.CachedCount) {}
+
 func (r *capturingStatsReporter) AllocateGauge(
 	name string,
 	tags map[string]string,
@@ -290,6 +292,8 @@ func (r *capturingStatsReporter) AllocateGauge(
 	}}
 }
 
+func (r *capturingStatsReporter) DeallocateGauge(tally.CachedGauge) {}
+
 func (r *capturingStatsReporter) AllocateTimer(
 	name string,
 	tags map[string]string,
@@ -298,6 +302,8 @@ func (r *capturingStatsReporter) AllocateTimer(
 		r.timers = append(r.timers, capturedTimer{name, tags, value})
 	}}
 }
+
+func (r *capturingStatsReporter) DeallocateTimer(tally.CachedTimer) {}
 
 func (r *capturingStatsReporter) AllocateHistogram(
 	name string,
@@ -319,6 +325,8 @@ func (r *capturingStatsReporter) AllocateHistogram(
 		},
 	}
 }
+
+func (r *capturingStatsReporter) DeallocateHistogram(tally.CachedHistogram) {}
 
 func (r *capturingStatsReporter) Capabilities() tally.Capabilities {
 	r.capabilities++
