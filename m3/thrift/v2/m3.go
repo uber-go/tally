@@ -37,7 +37,7 @@ var _ = bytes.Equal
 type M3 interface {
 	// Parameters:
 	//  - Batch
-	EmitMetricBatch(batch MetricBatch) (err error)
+	EmitMetricBatchV2(batch MetricBatch) (err error)
 }
 
 type M3Client struct {
@@ -68,24 +68,24 @@ func NewM3ClientProtocol(t thrift.TTransport, iprot thrift.TProtocol, oprot thri
 
 // Parameters:
 //  - Batch
-func (p *M3Client) EmitMetricBatch(batch MetricBatch) (err error) {
-	if err = p.sendEmitMetricBatch(batch); err != nil {
+func (p *M3Client) EmitMetricBatchV2(batch MetricBatch) (err error) {
+	if err = p.sendEmitMetricBatchV2(batch); err != nil {
 		return
 	}
 	return
 }
 
-func (p *M3Client) sendEmitMetricBatch(batch MetricBatch) (err error) {
+func (p *M3Client) sendEmitMetricBatchV2(batch MetricBatch) (err error) {
 	oprot := p.OutputProtocol
 	if oprot == nil {
 		oprot = p.ProtocolFactory.GetProtocol(p.Transport)
 		p.OutputProtocol = oprot
 	}
 	p.SeqId++
-	if err = oprot.WriteMessageBegin("emitMetricBatch", thrift.ONEWAY, p.SeqId); err != nil {
+	if err = oprot.WriteMessageBegin("emitMetricBatchV2", thrift.ONEWAY, p.SeqId); err != nil {
 		return
 	}
-	args := M3EmitMetricBatchArgs{
+	args := M3EmitMetricBatchV2Args{
 		Batch: batch,
 	}
 	if err = args.Write(oprot); err != nil {
@@ -118,7 +118,7 @@ func (p *M3Processor) ProcessorMap() map[string]thrift.TProcessorFunction {
 func NewM3Processor(handler M3) *M3Processor {
 
 	self3 := &M3Processor{handler: handler, processorMap: make(map[string]thrift.TProcessorFunction)}
-	self3.processorMap["emitMetricBatch"] = &m3ProcessorEmitMetricBatch{handler: handler}
+	self3.processorMap["emitMetricBatchV2"] = &m3ProcessorEmitMetricBatchV2{handler: handler}
 	return self3
 }
 
@@ -141,12 +141,12 @@ func (p *M3Processor) Process(iprot, oprot thrift.TProtocol) (success bool, err 
 
 }
 
-type m3ProcessorEmitMetricBatch struct {
+type m3ProcessorEmitMetricBatchV2 struct {
 	handler M3
 }
 
-func (p *m3ProcessorEmitMetricBatch) Process(seqId int32, iprot, oprot thrift.TProtocol) (success bool, err thrift.TException) {
-	args := M3EmitMetricBatchArgs{}
+func (p *m3ProcessorEmitMetricBatchV2) Process(seqId int32, iprot, oprot thrift.TProtocol) (success bool, err thrift.TException) {
+	args := M3EmitMetricBatchV2Args{}
 	if err = args.Read(iprot); err != nil {
 		iprot.ReadMessageEnd()
 		return false, err
@@ -154,7 +154,7 @@ func (p *m3ProcessorEmitMetricBatch) Process(seqId int32, iprot, oprot thrift.TP
 
 	iprot.ReadMessageEnd()
 	var err2 error
-	if err2 = p.handler.EmitMetricBatch(args.Batch); err2 != nil {
+	if err2 = p.handler.EmitMetricBatchV2(args.Batch); err2 != nil {
 		return true, err2
 	}
 	return true, nil
@@ -164,27 +164,27 @@ func (p *m3ProcessorEmitMetricBatch) Process(seqId int32, iprot, oprot thrift.TP
 
 // Attributes:
 //  - Batch
-type M3EmitMetricBatchArgs struct {
+type M3EmitMetricBatchV2Args struct {
 	Batch MetricBatch `thrift:"batch,1" json:"batch"`
 }
 
-func NewM3EmitMetricBatchArgs() *M3EmitMetricBatchArgs {
-	return &M3EmitMetricBatchArgs{}
+func NewM3EmitMetricBatchV2Args() *M3EmitMetricBatchV2Args {
+	return &M3EmitMetricBatchV2Args{}
 }
 
-var M3EmitMetricBatchArgs_Batch_DEFAULT MetricBatch
+var M3EmitMetricBatchV2Args_Batch_DEFAULT MetricBatch
 
-func (p *M3EmitMetricBatchArgs) GetBatch() MetricBatch {
+func (p *M3EmitMetricBatchV2Args) GetBatch() MetricBatch {
 	if !p.IsSetBatch() {
-		return M3EmitMetricBatchArgs_Batch_DEFAULT
+		return M3EmitMetricBatchV2Args_Batch_DEFAULT
 	}
 	return p.Batch
 }
-func (p *M3EmitMetricBatchArgs) IsSetBatch() bool {
+func (p *M3EmitMetricBatchV2Args) IsSetBatch() bool {
 	return p.Batch.Metrics != nil || p.Batch.CommonTags != nil
 }
 
-func (p *M3EmitMetricBatchArgs) Read(iprot thrift.TProtocol) error {
+func (p *M3EmitMetricBatchV2Args) Read(iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
 	}
@@ -217,7 +217,7 @@ func (p *M3EmitMetricBatchArgs) Read(iprot thrift.TProtocol) error {
 	return nil
 }
 
-func (p *M3EmitMetricBatchArgs) readField1(iprot thrift.TProtocol) error {
+func (p *M3EmitMetricBatchV2Args) readField1(iprot thrift.TProtocol) error {
 	p.Batch = MetricBatch{}
 	if err := p.Batch.Read(iprot); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", p.Batch), err)
@@ -225,8 +225,8 @@ func (p *M3EmitMetricBatchArgs) readField1(iprot thrift.TProtocol) error {
 	return nil
 }
 
-func (p *M3EmitMetricBatchArgs) Write(oprot thrift.TProtocol) error {
-	if err := oprot.WriteStructBegin("emitMetricBatch_args"); err != nil {
+func (p *M3EmitMetricBatchV2Args) Write(oprot thrift.TProtocol) error {
+	if err := oprot.WriteStructBegin("emitMetricBatchV2_args"); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
 	}
 	if err := p.writeField1(oprot); err != nil {
@@ -241,7 +241,7 @@ func (p *M3EmitMetricBatchArgs) Write(oprot thrift.TProtocol) error {
 	return nil
 }
 
-func (p *M3EmitMetricBatchArgs) writeField1(oprot thrift.TProtocol) (err error) {
+func (p *M3EmitMetricBatchV2Args) writeField1(oprot thrift.TProtocol) (err error) {
 	if err := oprot.WriteFieldBegin("batch", thrift.STRUCT, 1); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T write field begin error 1:batch: ", p), err)
 	}
@@ -254,9 +254,9 @@ func (p *M3EmitMetricBatchArgs) writeField1(oprot thrift.TProtocol) (err error) 
 	return err
 }
 
-func (p *M3EmitMetricBatchArgs) String() string {
+func (p *M3EmitMetricBatchV2Args) String() string {
 	if p == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("M3EmitMetricBatchArgs(%+v)", *p)
+	return fmt.Sprintf("M3EmitMetricBatchV2Args(%+v)", *p)
 }

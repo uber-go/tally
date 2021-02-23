@@ -30,5 +30,5 @@ struct MetricBatch {
 }
 
 service M3 {
-    oneway void emitMetricBatch(1: MetricBatch batch)
+    oneway void emitMetricBatchV2(1: MetricBatch batch)
 }
