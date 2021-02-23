@@ -82,10 +82,11 @@ type scope struct {
 	histograms      map[string]*histogram
 	histogramsSlice []*histogram
 	timers          map[string]*timer
-	// nb: deliberately skipping timersSlice as we report timers immediately,
-	// no buffering is involved.
+	timersSlice     []*timer
 
 	bucketCache *bucketCache
+	lastReport  time.Time
+	root        bool
 }
 
 type scopeStatus struct {
@@ -103,6 +104,18 @@ type ScopeOptions struct {
 	Separator       string
 	DefaultBuckets  Buckets
 	SanitizeOptions *SanitizeOptions
+
+	// UnusedScopeTTL configures scopes and the metrics they hold to be
+	// evicted from cache and deallocated if no metrics for a given scope have
+	// been reported within UnusedScopeTTL. Importantly, any pointers to scopes
+	// or metrics that are deallocated through this feature are invalidated.
+	// This setting does not affect root scopes.
+	UnusedScopeTTL time.Duration
+
+	// UnusedScopeDeepEviction controls whether unused scopes evicted from cache
+	// after UnusedScopeTTL has elapsed simply have their metrics deallocated
+	// (shallow) or both the metrics and the scope itself (deep).
+	UnusedScopeDeepEviction bool
 }
 
 // NewRootScope creates a new root Scope with a set of options and
@@ -155,6 +168,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		baseReporter:   baseReporter,
 		defaultBuckets: opts.DefaultBuckets,
 		sanitizer:      sanitizer,
+		root:           true,
 		status: scopeStatus{
 			closed: false,
 			quit:   make(chan struct{}, 1),
@@ -168,6 +182,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
 		timers:          make(map[string]*timer),
 		bucketCache:     newBucketCache(),
+		timersSlice:     make([]*timer, 0, _defaultInitialSliceSize),
 	}
 
 	// NB(r): Take a copy of the tags on creation
@@ -175,7 +190,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 	s.tags = s.copyAndSanitizeMap(opts.Tags)
 
 	// Register the root scope
-	s.registry = newScopeRegistry(s)
+	s.registry = newScopeRegistry(s, opts)
 
 	if interval > 0 {
 		go s.reportLoop(interval)
@@ -185,48 +200,78 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 }
 
 // report dumps all aggregated stats into the reporter. Should be called automatically by the root scope periodically.
-func (s *scope) report(r StatsReporter) {
+func (s *scope) report(r StatsReporter) (reported bool) {
 	s.cm.RLock()
 	for name, counter := range s.counters {
-		counter.report(s.fullyQualifiedName(name), s.tags, r)
+		if rep := counter.report(s.fullyQualifiedName(name), s.tags, r); rep {
+			reported = true
+		}
 	}
 	s.cm.RUnlock()
 
 	s.gm.RLock()
 	for name, gauge := range s.gauges {
-		gauge.report(s.fullyQualifiedName(name), s.tags, r)
+		if rep := gauge.report(s.fullyQualifiedName(name), s.tags, r); rep {
+			reported = true
+		}
 	}
 	s.gm.RUnlock()
 
 	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
+	s.tm.RLock()
+	for _, timer := range s.timersSlice {
+		if rep := timer.hasReported(); rep {
+			reported = true
+		}
+	}
+	s.tm.RUnlock()
 
 	s.hm.RLock()
 	for name, histogram := range s.histograms {
-		histogram.report(s.fullyQualifiedName(name), s.tags, r)
+		if rep := histogram.report(s.fullyQualifiedName(name), s.tags, r); rep {
+			reported = true
+		}
 	}
 	s.hm.RUnlock()
+
+	return
 }
 
-func (s *scope) cachedReport() {
+func (s *scope) cachedReport() (reported bool) {
 	s.cm.RLock()
 	for _, counter := range s.countersSlice {
-		counter.cachedReport()
+		if rep := counter.cachedReport(); rep {
+			reported = true
+		}
 	}
 	s.cm.RUnlock()
 
 	s.gm.RLock()
 	for _, gauge := range s.gaugesSlice {
-		gauge.cachedReport()
+		if rep := gauge.cachedReport(); rep {
+			reported = true
+		}
 	}
 	s.gm.RUnlock()
 
 	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
+	s.tm.RLock()
+	for _, timer := range s.timersSlice {
+		if rep := timer.hasReported(); rep {
+			reported = true
+		}
+	}
+	s.tm.RUnlock()
 
 	s.hm.RLock()
 	for _, histogram := range s.histogramsSlice {
-		histogram.cachedReport()
+		if rep := histogram.cachedReport(); rep {
+			reported = true
+		}
 	}
 	s.hm.RUnlock()
+
+	return
 }
 
 // reportLoop is used by the root scope for periodic reporting
@@ -363,6 +408,7 @@ func (s *scope) Timer(name string) Timer {
 		s.fullyQualifiedName(name), s.tags, s.reporter, cachedTimer,
 	)
 	s.timers[name] = t
+	s.timersSlice = append(s.timersSlice, t)
 
 	return t
 }
@@ -399,6 +445,7 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 
 	var cachedHistogram CachedHistogram
 	if s.cachedReporter != nil {
+		// TODO: reuse common cached histogram storage
 		cachedHistogram = s.cachedReporter.AllocateHistogram(
 			s.fullyQualifiedName(name), s.tags, b,
 		)
@@ -550,6 +597,79 @@ func (s *scope) copyAndSanitizeMap(tags map[string]string) map[string]string {
 		result[k] = v
 	}
 	return result
+}
+
+func (s *scope) release() {
+	if s.root {
+		return
+	}
+
+	// Release all internal state. This invalidates any pointers held by users.
+	// As we're cleaning up, avoid doing work inside map loops so the compiler
+	// can optimize map clears; instead, do deallocs inside slice loops. This
+	// is effectively a scope-local STW, so lock everything at once: if we're
+	// calling this method, there's nothing left for this scope to do anyway.
+	//
+	// Since it's possible that there will be dangling pointers, delete all
+	// storage, not solely pooled storage.
+
+	s.cm.Lock()
+	defer s.cm.Unlock()
+	s.gm.Lock()
+	defer s.gm.Unlock()
+	s.tm.Lock()
+	defer s.tm.Unlock()
+	s.hm.Lock()
+	defer s.hm.Unlock()
+
+	for k := range s.counters {
+		delete(s.counters, k)
+	}
+	for i := range s.countersSlice {
+		s.cachedReporter.DeallocateCounter(s.countersSlice[i].cachedCount)
+		s.countersSlice[i].cachedCount = nil
+	}
+	s.countersSlice = s.countersSlice[:0]
+
+	for k := range s.gauges {
+		delete(s.gauges, k)
+	}
+	for i := range s.gaugesSlice {
+		s.cachedReporter.DeallocateGauge(s.gaugesSlice[i].cachedGauge)
+		s.gaugesSlice[i].cachedGauge = nil
+	}
+	s.gaugesSlice = s.gaugesSlice[:0]
+
+	for k := range s.timers {
+		delete(s.timers, k)
+	}
+	for i := range s.timersSlice {
+		s.cachedReporter.DeallocateTimer(s.timersSlice[i].cachedTimer)
+		s.timersSlice[i].cachedTimer = nil
+		for k := range s.timersSlice[i].tags {
+			delete(s.timersSlice[i].tags, k)
+		}
+		s.timersSlice[i].tags = nil
+	}
+	s.timersSlice = s.timersSlice[:0]
+
+	for k := range s.histograms {
+		delete(s.histograms, k)
+	}
+	for i := range s.histogramsSlice {
+		// n.b. We don't want to deallocate any shared storage, so instead just
+		//      deallocate bucket sample counters, which are unique to each
+		//      bucket within a given histogram instance.
+		for j := range s.histogramsSlice[i].samples {
+			s.cachedReporter.DeallocateCounter(s.histogramsSlice[i].samples[j].cachedCount)
+		}
+		s.histogramsSlice[i].samples = s.histogramsSlice[i].samples[:0]
+		for k := range s.histogramsSlice[i].tags {
+			delete(s.histogramsSlice[i].tags, k)
+		}
+		s.histogramsSlice[i].tags = nil
+	}
+	s.histogramsSlice = s.histogramsSlice[:0]
 }
 
 // TestScope is a metrics collector that has no reporting, ensuring that

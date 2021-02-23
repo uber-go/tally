@@ -88,17 +88,26 @@ type CachedStatsReporter interface {
 		tags map[string]string,
 	) CachedCount
 
+	// DeallocateCounter deallocates a counter that is no longer needed.
+	DeallocateCounter(CachedCount)
+
 	// AllocateGauge pre allocates a gauge data structure with name & tags.
 	AllocateGauge(
 		name string,
 		tags map[string]string,
 	) CachedGauge
 
+	// DeallocateGauge deallocates a gauge that is no longer needed.
+	DeallocateGauge(CachedGauge)
+
 	// AllocateTimer pre allocates a timer data structure with name & tags.
 	AllocateTimer(
 		name string,
 		tags map[string]string,
 	) CachedTimer
+
+	// DeallocateTimer deallocates a timer that is no longer needed.
+	DeallocateTimer(CachedTimer)
 
 	// AllocateHistogram pre allocates a histogram data structure with name, tags,
 	// value buckets and duration buckets.
@@ -107,6 +116,9 @@ type CachedStatsReporter interface {
 		tags map[string]string,
 		buckets Buckets,
 	) CachedHistogram
+
+	// DeallocateHistogram deallocates a histogram that is no longer needed.
+	DeallocateHistogram(CachedHistogram)
 }
 
 // CachedCount interface for reporting an individual counter

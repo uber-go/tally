@@ -20,18 +20,25 @@
 
 package tally
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 var scopeRegistryKey = keyForPrefixedStringMaps
 
 type scopeRegistry struct {
 	mu        sync.RWMutex
 	subscopes map[string]*scope
+	ttl       time.Duration
+	deep      bool
 }
 
-func newScopeRegistry(root *scope) *scopeRegistry {
+func newScopeRegistry(root *scope, opts ScopeOptions) *scopeRegistry {
 	r := &scopeRegistry{
 		subscopes: make(map[string]*scope),
+		ttl:       opts.UnusedScopeTTL,
+		deep:      opts.UnusedScopeDeepEviction,
 	}
 	r.subscopes[scopeRegistryKey(root.prefix, root.tags)] = root
 	return r
@@ -41,8 +48,23 @@ func (r *scopeRegistry) Report(reporter StatsReporter) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	for _, s := range r.subscopes {
-		s.report(reporter)
+	now := time.Now()
+	for key, s := range r.subscopes {
+		if s.report(reporter) {
+			s.lastReport = now
+			continue
+		}
+
+		if r.ttl > 0 && now.Sub(s.lastReport) > r.ttl {
+			s.release()
+
+			if r.deep {
+				delete(r.subscopes, key)
+				for k := range s.tags {
+					delete(s.tags, k)
+				}
+			}
+		}
 	}
 }
 
@@ -50,8 +72,23 @@ func (r *scopeRegistry) CachedReport() {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	for _, s := range r.subscopes {
-		s.cachedReport()
+	now := time.Now()
+	for key, s := range r.subscopes {
+		if s.cachedReport() {
+			s.lastReport = now
+			continue
+		}
+
+		if r.ttl > 0 && now.Sub(s.lastReport) > r.ttl {
+			s.release()
+
+			if r.deep {
+				delete(r.subscopes, key)
+				for k := range s.tags {
+					delete(s.tags, k)
+				}
+			}
+		}
 	}
 }
 
