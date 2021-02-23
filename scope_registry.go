@@ -48,14 +48,14 @@ func (r *scopeRegistry) Report(reporter StatsReporter) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	now := time.Now()
+	now := time.Now().UnixNano()
 	for key, s := range r.subscopes {
 		if s.report(reporter) {
 			s.lastReport = now
 			continue
 		}
 
-		if r.ttl > 0 && now.Sub(s.lastReport) > r.ttl {
+		if r.ttl > 0 && time.Duration(now-s.lastReport) > r.ttl {
 			s.release(r.deep)
 
 			if r.deep {
@@ -72,14 +72,14 @@ func (r *scopeRegistry) CachedReport() {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	now := time.Now()
+	now := time.Now().UnixNano()
 	for key, s := range r.subscopes {
 		if s.cachedReport() {
 			s.lastReport = now
 			continue
 		}
 
-		if r.ttl > 0 && now.Sub(s.lastReport) > r.ttl {
+		if r.ttl > 0 && time.Duration(now-s.lastReport) > r.ttl {
 			s.release(r.deep)
 
 			if r.deep {
@@ -140,6 +140,7 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
 		timers:          make(map[string]*timer),
 		bucketCache:     parent.bucketCache,
+		lastReport:      time.Now().UnixNano(),
 	}
 	r.subscopes[key] = subscope
 	return subscope

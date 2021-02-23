@@ -85,7 +85,7 @@ type scope struct {
 	timersSlice     []*timer
 
 	bucketCache *bucketCache
-	lastReport  time.Time
+	lastReport  int64
 	root        bool
 }
 
@@ -181,8 +181,9 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		histograms:      make(map[string]*histogram),
 		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
 		timers:          make(map[string]*timer),
-		bucketCache:     newBucketCache(),
 		timersSlice:     make([]*timer, 0, _defaultInitialSliceSize),
+		bucketCache:     newBucketCache(),
+		lastReport:      time.Now().UnixNano(),
 	}
 
 	// NB(r): Take a copy of the tags on creation
@@ -203,34 +204,26 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 func (s *scope) report(r StatsReporter) (reported bool) {
 	s.cm.RLock()
 	for name, counter := range s.counters {
-		if rep := counter.report(s.fullyQualifiedName(name), s.tags, r); rep {
-			reported = true
-		}
+		reported = counter.report(s.fullyQualifiedName(name), s.tags, r) || reported
 	}
 	s.cm.RUnlock()
 
 	s.gm.RLock()
 	for name, gauge := range s.gauges {
-		if rep := gauge.report(s.fullyQualifiedName(name), s.tags, r); rep {
-			reported = true
-		}
+		reported = gauge.report(s.fullyQualifiedName(name), s.tags, r) || reported
 	}
 	s.gm.RUnlock()
 
 	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
 	s.tm.RLock()
 	for _, timer := range s.timersSlice {
-		if rep := timer.hasReported(); rep {
-			reported = true
-		}
+		reported = timer.hasReported() || reported
 	}
 	s.tm.RUnlock()
 
 	s.hm.RLock()
 	for name, histogram := range s.histograms {
-		if rep := histogram.report(s.fullyQualifiedName(name), s.tags, r); rep {
-			reported = true
-		}
+		reported = histogram.report(s.fullyQualifiedName(name), s.tags, r) || reported
 	}
 	s.hm.RUnlock()
 
@@ -240,34 +233,26 @@ func (s *scope) report(r StatsReporter) (reported bool) {
 func (s *scope) cachedReport() (reported bool) {
 	s.cm.RLock()
 	for _, counter := range s.countersSlice {
-		if rep := counter.cachedReport(); rep {
-			reported = true
-		}
+		reported = counter.cachedReport() || reported
 	}
 	s.cm.RUnlock()
 
 	s.gm.RLock()
 	for _, gauge := range s.gaugesSlice {
-		if rep := gauge.cachedReport(); rep {
-			reported = true
-		}
+		reported = gauge.cachedReport() || reported
 	}
 	s.gm.RUnlock()
 
 	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
 	s.tm.RLock()
 	for _, timer := range s.timersSlice {
-		if rep := timer.hasReported(); rep {
-			reported = true
-		}
+		reported = timer.hasReported() || reported
 	}
 	s.tm.RUnlock()
 
 	s.hm.RLock()
 	for _, histogram := range s.histogramsSlice {
-		if rep := histogram.cachedReport(); rep {
-			reported = true
-		}
+		reported = histogram.cachedReport() || reported
 	}
 	s.hm.RUnlock()
 
