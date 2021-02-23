@@ -662,7 +662,7 @@ func (m *fakeM3Service) getMetrics() []m3thrift.Metric {
 	return m.metrics
 }
 
-func (m *fakeM3Service) EmitMetricBatch(batch m3thrift.MetricBatch) (err error) {
+func (m *fakeM3Service) EmitMetricBatchV2(batch m3thrift.MetricBatch) (err error) {
 	m.lock.Lock()
 	m.batches = append(m.batches, batch)
 	if m.wg != nil && m.countBatches {
