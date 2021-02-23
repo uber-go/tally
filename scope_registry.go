@@ -56,7 +56,7 @@ func (r *scopeRegistry) Report(reporter StatsReporter) {
 		}
 
 		if r.ttl > 0 && now.Sub(s.lastReport) > r.ttl {
-			s.release()
+			s.release(r.deep)
 
 			if r.deep {
 				delete(r.subscopes, key)
@@ -80,7 +80,7 @@ func (r *scopeRegistry) CachedReport() {
 		}
 
 		if r.ttl > 0 && now.Sub(s.lastReport) > r.ttl {
-			s.release()
+			s.release(r.deep)
 
 			if r.deep {
 				delete(r.subscopes, key)

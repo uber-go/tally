@@ -599,7 +599,7 @@ func (s *scope) copyAndSanitizeMap(tags map[string]string) map[string]string {
 	return result
 }
 
-func (s *scope) release() {
+func (s *scope) release(deep bool) {
 	if s.root {
 		return
 	}
@@ -670,6 +670,17 @@ func (s *scope) release() {
 		s.histogramsSlice[i].tags = nil
 	}
 	s.histogramsSlice = s.histogramsSlice[:0]
+
+	if deep {
+		s.counters = nil
+		s.countersSlice = nil
+		s.gauges = nil
+		s.gaugesSlice = nil
+		s.timers = nil
+		s.timersSlice = nil
+		s.histograms = nil
+		s.histogramsSlice = nil
+	}
 }
 
 // TestScope is a metrics collector that has no reporting, ensuring that
