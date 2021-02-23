@@ -556,7 +556,7 @@ func (r *reporter) flush(
 	mets []m3thrift.Metric,
 ) []m3thrift.Metric {
 	//nolint:errcheck
-	r.client.EmitMetricBatch(m3thrift.MetricBatch{
+	r.client.EmitMetricBatchV2(m3thrift.MetricBatch{
 		Metrics:    mets,
 		CommonTags: r.commonTags,
 	})
