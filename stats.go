@@ -26,6 +26,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/uber-go/tally/internal/identity"
 )
 
 var (
@@ -472,6 +474,59 @@ func newBucketStorage(
 	}
 
 	return storage
+}
+
+type bucketCache struct {
+	mtx   sync.RWMutex
+	cache map[uint64]bucketStorage
+}
+
+func newBucketCache() *bucketCache {
+	return &bucketCache{
+		cache: make(map[uint64]bucketStorage),
+	}
+}
+
+func (c *bucketCache) Get(
+	htype histogramType,
+	buckets Buckets,
+	cachedHistogram CachedHistogram,
+) bucketStorage {
+	id := getBucketsIdentity(buckets)
+
+	c.mtx.RLock()
+	storage, ok := c.cache[id]
+	if !ok {
+		c.mtx.RUnlock()
+		c.mtx.Lock()
+		storage = newBucketStorage(htype, buckets, cachedHistogram)
+		c.cache[id] = storage
+		c.mtx.Unlock()
+	} else {
+		c.mtx.RUnlock()
+	}
+	return storage
+}
+
+// n.b. This function is used to uniquely identify a given set of buckets
+//      commutatively through hash folding, in order to do cache lookups and
+//      avoid allocating additional storage for data that is shared among all
+//      instances of a particular set of buckets.
+func getBucketsIdentity(buckets Buckets) uint64 {
+	acc := identity.NewAccumulator()
+
+	if dbuckets, ok := buckets.(DurationBuckets); ok {
+		for _, dur := range dbuckets {
+			acc = acc.AddUint64(uint64(dur))
+		}
+	} else {
+		vbuckets := buckets.(ValueBuckets)
+		for _, val := range vbuckets {
+			acc = acc.AddUint64(math.Float64bits(val))
+		}
+	}
+
+	return acc.Value()
 }
 
 // NullStatsReporter is an implementation of StatsReporter than simply does nothing.
