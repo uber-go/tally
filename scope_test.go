@@ -1028,8 +1028,9 @@ func TestScopeDefaultBuckets(t *testing.T) {
 	s.report(r)
 	r.WaitAll()
 
-	assert.EqualValues(t, 1, r.histograms["baz"].durationSamples[60*time.Millisecond])
-	assert.EqualValues(t, 2, r.histograms["baz"].durationSamples[90*time.Millisecond])
+	histograms := r.getHistograms()
+	assert.EqualValues(t, 1, histograms["baz"].durationSamples[60*time.Millisecond])
+	assert.EqualValues(t, 2, histograms["baz"].durationSamples[90*time.Millisecond])
 }
 
 type testMets struct {
