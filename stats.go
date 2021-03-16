@@ -450,7 +450,6 @@ type bucketStorage struct {
 func newBucketStorage(
 	htype histogramType,
 	buckets Buckets,
-	// cachedHistogram CachedHistogram,
 ) bucketStorage {
 	var (
 		pairs   = BucketPairs(buckets)
@@ -477,22 +476,8 @@ func newBucketStorage(
 
 		switch htype {
 		case valueHistogramType:
-			/*
-				if cachedHistogram != nil {
-					bucket.cachedValueBucket = cachedHistogram.ValueBucket(
-						bucket.valueLowerBound, bucket.valueUpperBound,
-					)
-				}
-			*/
 			storage.lookupByValue = append(storage.lookupByValue, bucket.valueUpperBound)
 		case durationHistogramType:
-			/*
-				if cachedHistogram != nil {
-					bucket.cachedDurationBucket = cachedHistogram.DurationBucket(
-						bucket.durationLowerBound, bucket.durationUpperBound,
-					)
-				}
-			*/
 			storage.lookupByDuration = append(storage.lookupByDuration, int(bucket.durationUpperBound))
 		}
 
@@ -516,7 +501,6 @@ func newBucketCache() *bucketCache {
 func (c *bucketCache) Get(
 	htype histogramType,
 	buckets Buckets,
-	cachedHistogram CachedHistogram,
 ) bucketStorage {
 	id := getBucketsIdentity(buckets)
 
@@ -525,7 +509,7 @@ func (c *bucketCache) Get(
 	if !ok {
 		c.mtx.RUnlock()
 		c.mtx.Lock()
-		storage = newBucketStorage(htype, buckets) //, cachedHistogram)
+		storage = newBucketStorage(htype, buckets)
 		c.cache[id] = storage
 		c.mtx.Unlock()
 	} else {

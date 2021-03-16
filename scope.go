@@ -409,7 +409,7 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 		s.fullyQualifiedName(name),
 		s.tags,
 		s.reporter,
-		s.bucketCache.Get(htype, b, cachedHistogram),
+		s.bucketCache.Get(htype, b),
 		cachedHistogram,
 	)
 	s.histograms[name] = h
