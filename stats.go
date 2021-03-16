@@ -263,13 +263,12 @@ type sampleCounter struct {
 }
 
 type histogram struct {
-	htype         histogramType
-	name          string
-	tags          map[string]string
-	reporter      StatsReporter
-	specification Buckets
-	buckets       []histogramBucket
-	// samples          []*counter
+	htype            histogramType
+	name             string
+	tags             map[string]string
+	reporter         StatsReporter
+	specification    Buckets
+	buckets          []histogramBucket
 	samples          []sampleCounter
 	lookupByValue    []float64
 	lookupByDuration []int
