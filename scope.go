@@ -410,6 +410,7 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 		s.tags,
 		s.reporter,
 		s.bucketCache.Get(htype, b, cachedHistogram),
+		cachedHistogram,
 	)
 	s.histograms[name] = h
 	s.histogramsSlice = append(s.histogramsSlice, h)

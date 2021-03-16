@@ -234,7 +234,7 @@ func (r *timerNoReporterSink) ReportHistogramValueSamples(
 	name string,
 	tags map[string]string,
 	buckets Buckets,
-	bucketLowerBound,
+	bucketLowerBound float64,
 	bucketUpperBound float64,
 	samples int64,
 ) {
@@ -244,7 +244,7 @@ func (r *timerNoReporterSink) ReportHistogramDurationSamples(
 	name string,
 	tags map[string]string,
 	buckets Buckets,
-	bucketLowerBound,
+	bucketLowerBound time.Duration,
 	bucketUpperBound time.Duration,
 	samples int64,
 ) {
@@ -257,14 +257,20 @@ func (r *timerNoReporterSink) Capabilities() Capabilities {
 func (r *timerNoReporterSink) Flush() {
 }
 
+type sampleCounter struct {
+	counter      *counter
+	cachedBucket CachedHistogramBucket
+}
+
 type histogram struct {
-	htype            histogramType
-	name             string
-	tags             map[string]string
-	reporter         StatsReporter
-	specification    Buckets
-	buckets          []histogramBucket
-	samples          []*counter
+	htype         histogramType
+	name          string
+	tags          map[string]string
+	reporter      StatsReporter
+	specification Buckets
+	buckets       []histogramBucket
+	// samples          []*counter
+	samples          []sampleCounter
 	lookupByValue    []float64
 	lookupByDuration []int
 }
@@ -276,12 +282,13 @@ const (
 	durationHistogramType
 )
 
-func newHistogram( // need to be able to reuse internal histogram buckets and lookups
+func newHistogram(
 	htype histogramType,
 	name string,
 	tags map[string]string,
 	reporter StatsReporter,
 	storage bucketStorage,
+	cachedHistogram CachedHistogram,
 ) *histogram {
 	h := &histogram{
 		htype:            htype,
@@ -290,13 +297,28 @@ func newHistogram( // need to be able to reuse internal histogram buckets and lo
 		reporter:         reporter,
 		specification:    storage.buckets,
 		buckets:          storage.hbuckets,
-		samples:          make([]*counter, len(storage.hbuckets)),
+		samples:          make([]sampleCounter, len(storage.hbuckets)),
 		lookupByValue:    storage.lookupByValue,
 		lookupByDuration: storage.lookupByDuration,
 	}
 
-	for i := range h.samples {
-		h.samples[i] = newCounter(nil)
+	for i := range h.buckets {
+		h.samples[i].counter = newCounter(nil)
+
+		if cachedHistogram != nil {
+			switch htype {
+			case durationHistogramType:
+				h.samples[i].cachedBucket = cachedHistogram.DurationBucket(
+					h.buckets[i].durationLowerBound,
+					h.buckets[i].durationUpperBound,
+				)
+			case valueHistogramType:
+				h.samples[i].cachedBucket = cachedHistogram.ValueBucket(
+					h.buckets[i].valueLowerBound,
+					h.buckets[i].valueUpperBound,
+				)
+			}
+		}
 	}
 
 	return h
@@ -304,7 +326,7 @@ func newHistogram( // need to be able to reuse internal histogram buckets and lo
 
 func (h *histogram) report(name string, tags map[string]string, r StatsReporter) {
 	for i := range h.buckets {
-		samples := h.samples[i].value()
+		samples := h.samples[i].counter.value()
 		if samples == 0 {
 			continue
 		}
@@ -334,16 +356,16 @@ func (h *histogram) report(name string, tags map[string]string, r StatsReporter)
 
 func (h *histogram) cachedReport() {
 	for i := range h.buckets {
-		samples := h.samples[i].value()
+		samples := h.samples[i].counter.value()
 		if samples == 0 {
 			continue
 		}
 
 		switch h.htype {
 		case valueHistogramType:
-			h.buckets[i].cachedValueBucket.ReportSamples(samples)
+			h.samples[i].cachedBucket.ReportSamples(samples)
 		case durationHistogramType:
-			h.buckets[i].cachedDurationBucket.ReportSamples(samples)
+			h.samples[i].cachedBucket.ReportSamples(samples)
 		}
 	}
 }
@@ -358,7 +380,7 @@ func (h *histogram) RecordValue(value float64) {
 	// buckets there will always be an inclusive bucket as
 	// we always have a math.MaxFloat64 bucket.
 	idx := sort.SearchFloat64s(h.lookupByValue, value)
-	h.samples[idx].Inc(1)
+	h.samples[idx].counter.Inc(1)
 }
 
 func (h *histogram) RecordDuration(value time.Duration) {
@@ -371,7 +393,7 @@ func (h *histogram) RecordDuration(value time.Duration) {
 	// buckets there will always be an inclusive bucket as
 	// we always have a math.MaxInt64 bucket.
 	idx := sort.SearchInts(h.lookupByDuration, int(value))
-	h.samples[idx].Inc(1)
+	h.samples[idx].counter.Inc(1)
 }
 
 func (h *histogram) Start() Stopwatch {
@@ -390,7 +412,7 @@ func (h *histogram) snapshotValues() map[float64]int64 {
 
 	vals := make(map[float64]int64, len(h.buckets))
 	for i := range h.buckets {
-		vals[h.buckets[i].valueUpperBound] = h.samples[i].snapshot()
+		vals[h.buckets[i].valueUpperBound] = h.samples[i].counter.snapshot()
 	}
 
 	return vals
@@ -403,7 +425,7 @@ func (h *histogram) snapshotDurations() map[time.Duration]int64 {
 
 	durations := make(map[time.Duration]int64, len(h.buckets))
 	for i := range h.buckets {
-		durations[h.buckets[i].durationUpperBound] = h.samples[i].snapshot()
+		durations[h.buckets[i].durationUpperBound] = h.samples[i].counter.snapshot()
 	}
 
 	return durations
@@ -428,7 +450,7 @@ type bucketStorage struct {
 func newBucketStorage(
 	htype histogramType,
 	buckets Buckets,
-	cachedHistogram CachedHistogram,
+	// cachedHistogram CachedHistogram,
 ) bucketStorage {
 	var (
 		pairs   = BucketPairs(buckets)
@@ -455,18 +477,22 @@ func newBucketStorage(
 
 		switch htype {
 		case valueHistogramType:
-			if cachedHistogram != nil {
-				bucket.cachedValueBucket = cachedHistogram.ValueBucket(
-					bucket.valueLowerBound, bucket.valueUpperBound,
-				)
-			}
+			/*
+				if cachedHistogram != nil {
+					bucket.cachedValueBucket = cachedHistogram.ValueBucket(
+						bucket.valueLowerBound, bucket.valueUpperBound,
+					)
+				}
+			*/
 			storage.lookupByValue = append(storage.lookupByValue, bucket.valueUpperBound)
 		case durationHistogramType:
-			if cachedHistogram != nil {
-				bucket.cachedDurationBucket = cachedHistogram.DurationBucket(
-					bucket.durationLowerBound, bucket.durationUpperBound,
-				)
-			}
+			/*
+				if cachedHistogram != nil {
+					bucket.cachedDurationBucket = cachedHistogram.DurationBucket(
+						bucket.durationLowerBound, bucket.durationUpperBound,
+					)
+				}
+			*/
 			storage.lookupByDuration = append(storage.lookupByDuration, int(bucket.durationUpperBound))
 		}
 
@@ -499,7 +525,7 @@ func (c *bucketCache) Get(
 	if !ok {
 		c.mtx.RUnlock()
 		c.mtx.Lock()
-		storage = newBucketStorage(htype, buckets, cachedHistogram)
+		storage = newBucketStorage(htype, buckets) //, cachedHistogram)
 		c.cache[id] = storage
 		c.mtx.Unlock()
 	} else {
