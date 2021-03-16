@@ -646,7 +646,7 @@ func (s *scope) release(deep bool) {
 		//      deallocate bucket sample counters, which are unique to each
 		//      bucket within a given histogram instance.
 		for j := range s.histogramsSlice[i].samples {
-			s.cachedReporter.DeallocateCounter(s.histogramsSlice[i].samples[j].cachedCount)
+			s.cachedReporter.DeallocateCounter(s.histogramsSlice[i].samples[j].counter.cachedCount)
 		}
 		s.histogramsSlice[i].samples = s.histogramsSlice[i].samples[:0]
 		for k := range s.histogramsSlice[i].tags {
