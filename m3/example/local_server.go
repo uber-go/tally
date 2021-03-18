@@ -86,7 +86,10 @@ func (f *localM3Server) Serve() error {
 		} else {
 			proto = thrift.NewTBinaryProtocolTransport(trans)
 		}
-		f.processor.Process(proto, proto)
+
+		if _, err = f.processor.Process(proto, proto); err != nil {
+			fmt.Println("Error processing thrift metric:", err)
+		}
 	}
 }
 

@@ -280,29 +280,40 @@ func newHistogram(
 	buckets Buckets,
 	cachedHistogram CachedHistogram,
 ) *histogram {
-	htype := valueHistogramType
+	var (
+		pairs = BucketPairs(buckets)
+		htype = valueHistogramType
+	)
+
 	if _, ok := buckets.(DurationBuckets); ok {
 		htype = durationHistogramType
 	}
 
-	pairs := BucketPairs(buckets)
-
 	h := &histogram{
-		htype:            htype,
-		name:             name,
-		tags:             tags,
-		reporter:         reporter,
-		specification:    buckets,
-		buckets:          make([]histogramBucket, 0, len(pairs)),
-		lookupByValue:    make([]float64, 0, len(pairs)),
-		lookupByDuration: make([]int, 0, len(pairs)),
+		htype:         htype,
+		name:          name,
+		tags:          tags,
+		reporter:      reporter,
+		specification: buckets,
+		buckets:       make([]histogramBucket, 0, len(pairs)),
+	}
+
+	switch htype {
+	case valueHistogramType:
+		h.lookupByValue = make([]float64, 0, len(pairs))
+	case durationHistogramType:
+		h.lookupByDuration = make([]int, 0, len(pairs))
 	}
 
 	for _, pair := range pairs {
-		h.addBucket(newHistogramBucket(h,
-			pair.LowerBoundValue(), pair.UpperBoundValue(),
-			pair.LowerBoundDuration(), pair.UpperBoundDuration(),
-			cachedHistogram))
+		h.addBucket(newHistogramBucket(
+			h,
+			pair.LowerBoundValue(),
+			pair.UpperBoundValue(),
+			pair.LowerBoundDuration(),
+			pair.UpperBoundDuration(),
+			cachedHistogram,
+		))
 	}
 
 	return h
@@ -310,8 +321,15 @@ func newHistogram(
 
 func (h *histogram) addBucket(b histogramBucket) {
 	h.buckets = append(h.buckets, b)
-	h.lookupByValue = append(h.lookupByValue, b.valueUpperBound)
-	h.lookupByDuration = append(h.lookupByDuration, int(b.durationUpperBound))
+
+	switch h.htype {
+	case durationHistogramType:
+		h.lookupByDuration = append(h.lookupByDuration, int(b.durationUpperBound))
+	case valueHistogramType:
+		h.lookupByValue = append(h.lookupByValue, b.valueUpperBound)
+	default:
+		// nop
+	}
 }
 
 func (h *histogram) report(name string, tags map[string]string, r StatsReporter) {
@@ -320,15 +338,26 @@ func (h *histogram) report(name string, tags map[string]string, r StatsReporter)
 		if samples == 0 {
 			continue
 		}
+
 		switch h.htype {
 		case valueHistogramType:
-			r.ReportHistogramValueSamples(name, tags, h.specification,
-				h.buckets[i].valueLowerBound, h.buckets[i].valueUpperBound,
-				samples)
+			r.ReportHistogramValueSamples(
+				name,
+				tags,
+				h.specification,
+				h.buckets[i].valueLowerBound,
+				h.buckets[i].valueUpperBound,
+				samples,
+			)
 		case durationHistogramType:
-			r.ReportHistogramDurationSamples(name, tags, h.specification,
-				h.buckets[i].durationLowerBound, h.buckets[i].durationUpperBound,
-				samples)
+			r.ReportHistogramDurationSamples(
+				name,
+				tags,
+				h.specification,
+				h.buckets[i].durationLowerBound,
+				h.buckets[i].durationUpperBound,
+				samples,
+			)
 		}
 	}
 }
@@ -339,6 +368,7 @@ func (h *histogram) cachedReport() {
 		if samples == 0 {
 			continue
 		}
+
 		switch h.htype {
 		case valueHistogramType:
 			h.buckets[i].cachedValueBucket.ReportSamples(samples)
@@ -349,6 +379,10 @@ func (h *histogram) cachedReport() {
 }
 
 func (h *histogram) RecordValue(value float64) {
+	if h.htype != valueHistogramType {
+		return
+	}
+
 	// Find the highest inclusive of the bucket upper bound
 	// and emit directly to it. Since we use BucketPairs to derive
 	// buckets there will always be an inclusive bucket as
@@ -358,6 +392,10 @@ func (h *histogram) RecordValue(value float64) {
 }
 
 func (h *histogram) RecordDuration(value time.Duration) {
+	if h.htype != durationHistogramType {
+		return
+	}
+
 	// Find the highest inclusive of the bucket upper bound
 	// and emit directly to it. Since we use BucketPairs to derive
 	// buckets there will always be an inclusive bucket as
@@ -376,7 +414,7 @@ func (h *histogram) RecordStopwatch(stopwatchStart time.Time) {
 }
 
 func (h *histogram) snapshotValues() map[float64]int64 {
-	if h.htype == durationHistogramType {
+	if h.htype != valueHistogramType {
 		return nil
 	}
 
@@ -389,7 +427,7 @@ func (h *histogram) snapshotValues() map[float64]int64 {
 }
 
 func (h *histogram) snapshotDurations() map[time.Duration]int64 {
-	if h.htype == valueHistogramType {
+	if h.htype != durationHistogramType {
 		return nil
 	}
 
@@ -414,9 +452,9 @@ type histogramBucket struct {
 
 func newHistogramBucket(
 	h *histogram,
-	valueLowerBound,
+	valueLowerBound float64,
 	valueUpperBound float64,
-	durationLowerBound,
+	durationLowerBound time.Duration,
 	durationUpperBound time.Duration,
 	cachedHistogram CachedHistogram,
 ) histogramBucket {
@@ -427,14 +465,21 @@ func newHistogramBucket(
 		durationLowerBound: durationLowerBound,
 		durationUpperBound: durationUpperBound,
 	}
+
 	if cachedHistogram != nil {
-		bucket.cachedValueBucket = cachedHistogram.ValueBucket(
-			bucket.valueLowerBound, bucket.valueUpperBound,
-		)
-		bucket.cachedDurationBucket = cachedHistogram.DurationBucket(
-			bucket.durationLowerBound, bucket.durationUpperBound,
-		)
+		if h.htype == valueHistogramType {
+			bucket.cachedValueBucket = cachedHistogram.ValueBucket(
+				bucket.valueLowerBound, bucket.valueUpperBound,
+			)
+		}
+
+		if h.htype == durationHistogramType {
+			bucket.cachedDurationBucket = cachedHistogram.DurationBucket(
+				bucket.durationLowerBound, bucket.durationUpperBound,
+			)
+		}
 	}
+
 	return bucket
 }
 

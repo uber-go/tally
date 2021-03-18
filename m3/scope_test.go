@@ -231,6 +231,7 @@ func BenchmarkScopeReportHistogram(b *testing.B) {
 	}
 
 	histogram := perEndpointScope.Histogram("inbound.latency", buckets)
+	b.ReportAllocs()
 	b.ResetTimer()
 
 	bucketsLen := len(buckets)

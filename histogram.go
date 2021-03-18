@@ -35,6 +35,13 @@ var (
 	errBucketsCountNeedsGreaterThanZero = errors.New("n needs to be > 0")
 	errBucketsStartNeedsGreaterThanZero = errors.New("start needs to be > 0")
 	errBucketsFactorNeedsGreaterThanOne = errors.New("factor needs to be > 1")
+
+	_singleBucket = bucketPair{
+		lowerBoundDuration: time.Duration(math.MinInt64),
+		upperBoundDuration: time.Duration(math.MaxInt64),
+		lowerBoundValue:    -math.MaxFloat64,
+		upperBoundValue:    math.MaxFloat64,
+	}
 )
 
 // ValueBuckets is a set of float64 values that implements Buckets.
@@ -119,54 +126,90 @@ func (v DurationBuckets) AsDurations() []time.Duration {
 	return []time.Duration(v)
 }
 
+func newBucketPair(
+	htype histogramType,
+	durations []time.Duration,
+	prevDuration time.Duration,
+	values []float64,
+	prevValue float64,
+	upperBoundIndex int,
+) bucketPair {
+	var pair bucketPair
+
+	switch htype {
+	case durationHistogramType:
+		pair = bucketPair{
+			lowerBoundDuration: prevDuration,
+			upperBoundDuration: durations[upperBoundIndex],
+		}
+	case valueHistogramType:
+		pair = bucketPair{
+			lowerBoundValue: prevValue,
+			upperBoundValue: values[upperBoundIndex],
+		}
+	default:
+		// nop
+	}
+
+	return pair
+}
+
 // BucketPairs creates a set of bucket pairs from a set
 // of buckets describing the lower and upper bounds for
 // each derived bucket.
 func BucketPairs(buckets Buckets) []BucketPair {
-	if buckets == nil || buckets.Len() < 1 {
-		return []BucketPair{
+	htype := valueHistogramType
+	if _, ok := buckets.(DurationBuckets); ok {
+		htype = durationHistogramType
+	}
 
-			bucketPair{
-				lowerBoundValue:    -math.MaxFloat64,
-				upperBoundValue:    math.MaxFloat64,
-				lowerBoundDuration: time.Duration(math.MinInt64),
-				upperBoundDuration: time.Duration(math.MaxInt64),
-			},
-		}
+	if buckets == nil || buckets.Len() < 1 {
+		return []BucketPair{_singleBucket}
 	}
 
 	var (
-		asValueBuckets    = copyAndSortValues(buckets.AsValues())
-		asDurationBuckets = copyAndSortDurations(buckets.AsDurations())
-		pairs             = make([]BucketPair, 0, buckets.Len()+2)
+		values       []float64
+		durations    []time.Duration
+		prevDuration = _singleBucket.lowerBoundDuration
+		prevValue    = _singleBucket.lowerBoundValue
+		pairs        = make([]BucketPair, 0, buckets.Len()+2)
+		pair         bucketPair
 	)
 
-	pairs = append(pairs, bucketPair{
-		lowerBoundValue:    -math.MaxFloat64,
-		upperBoundValue:    asValueBuckets[0],
-		lowerBoundDuration: time.Duration(math.MinInt64),
-		upperBoundDuration: asDurationBuckets[0],
-	})
+	switch htype {
+	case durationHistogramType:
+		durations = copyAndSortDurations(buckets.AsDurations())
+		pair.lowerBoundDuration = prevDuration
+		pair.upperBoundDuration = durations[0]
+	case valueHistogramType:
+		values = copyAndSortValues(buckets.AsValues())
+		pair.lowerBoundValue = prevValue
+		pair.upperBoundValue = values[0]
+	default:
+		// n.b. This branch will never be executed because htype is only ever
+		//      one of two values.
+		panic("unsupported histogram type")
+	}
 
-	prevValueBucket, prevDurationBucket :=
-		asValueBuckets[0], asDurationBuckets[0]
+	pairs = append(pairs, pair)
+	prevDuration = pairs[0].UpperBoundDuration()
+	prevValue = pairs[0].UpperBoundValue()
 
 	for i := 1; i < buckets.Len(); i++ {
-		pairs = append(pairs, bucketPair{
-			lowerBoundValue:    prevValueBucket,
-			upperBoundValue:    asValueBuckets[i],
-			lowerBoundDuration: prevDurationBucket,
-			upperBoundDuration: asDurationBuckets[i],
-		})
-		prevValueBucket, prevDurationBucket =
-			asValueBuckets[i], asDurationBuckets[i]
+		pairs = append(
+			pairs,
+			newBucketPair(htype, durations, prevDuration, values, prevValue, i),
+		)
+
+		prevValue = pairs[i].UpperBoundValue()
+		prevDuration = pairs[i].UpperBoundDuration()
 	}
 
 	pairs = append(pairs, bucketPair{
-		lowerBoundValue:    prevValueBucket,
-		upperBoundValue:    math.MaxFloat64,
-		lowerBoundDuration: prevDurationBucket,
-		upperBoundDuration: time.Duration(math.MaxInt64),
+		lowerBoundValue:    prevValue,
+		upperBoundValue:    _singleBucket.upperBoundValue,
+		lowerBoundDuration: prevDuration,
+		upperBoundDuration: _singleBucket.upperBoundDuration,
 	})
 
 	return pairs

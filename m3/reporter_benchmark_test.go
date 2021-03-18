@@ -28,16 +28,6 @@ import (
 	"github.com/uber-go/tally"
 )
 
-const (
-	updaters = 10
-	updates  = 1000
-	numIds   = 10
-
-	testID = "stats.$dc.gauges.m3+" +
-		"servers.my-internal-server-$dc.network.eth0_tx_colls+" +
-		"dc=$dc,domain=production.$zone,env=production,pipe=$pipe,service=servers,type=gauge"
-)
-
 func BenchmarkNewMetric(b *testing.B) {
 	r, _ := NewReporter(Options{
 		HostPorts:  []string{"127.0.0.1:9052"},
