@@ -23,12 +23,16 @@ package tally
 import (
 	"fmt"
 	"math"
+	"math/rand"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -115,6 +119,74 @@ func newTestStatsReporter() *testStatsReporter {
 		timers:     make(map[string]*testIntValue),
 		histograms: make(map[string]*testHistogramValue),
 	}
+}
+
+func (r *testStatsReporter) getCounters() map[string]*testIntValue {
+	dst := make(map[string]*testIntValue, len(r.counters))
+	for k, v := range r.counters {
+		var (
+			parts = strings.Split(k, "+")
+			name  string
+		)
+		if len(parts) > 0 {
+			name = parts[0]
+		}
+
+		dst[name] = v
+	}
+
+	return dst
+}
+
+func (r *testStatsReporter) getGauges() map[string]*testFloatValue {
+	dst := make(map[string]*testFloatValue, len(r.gauges))
+	for k, v := range r.gauges {
+		var (
+			parts = strings.Split(k, "+")
+			name  string
+		)
+		if len(parts) > 0 {
+			name = parts[0]
+		}
+
+		dst[name] = v
+	}
+
+	return dst
+}
+
+func (r *testStatsReporter) getTimers() map[string]*testIntValue {
+	dst := make(map[string]*testIntValue, len(r.timers))
+	for k, v := range r.timers {
+		var (
+			parts = strings.Split(k, "+")
+			name  string
+		)
+		if len(parts) > 0 {
+			name = parts[0]
+		}
+
+		dst[name] = v
+	}
+
+	return dst
+}
+
+func (r *testStatsReporter) getHistograms() map[string]*testHistogramValue {
+	dst := make(map[string]*testHistogramValue, len(r.histograms))
+	for k, v := range r.histograms {
+		var (
+			parts = strings.Split(k, "+")
+			name  string
+		)
+		if len(parts) > 0 {
+			name = parts[0]
+		}
+
+		dst[name] = v
+	}
+
+	return dst
 }
 
 func (r *testStatsReporter) WaitAll() {
@@ -237,15 +309,16 @@ func (r *testStatsReporter) ReportHistogramValueSamples(
 	name string,
 	tags map[string]string,
 	buckets Buckets,
-	bucketLowerBound,
+	bucketLowerBound float64,
 	bucketUpperBound float64,
 	samples int64,
 ) {
-	value, ok := r.histograms[name]
+	key := KeyForPrefixedStringMap(name, tags)
+	value, ok := r.histograms[key]
 	if !ok {
 		value = newTestHistogramValue()
 		value.tags = tags
-		r.histograms[name] = value
+		r.histograms[key] = value
 	}
 	value.valueSamples[bucketUpperBound] = int(samples)
 	r.hg.Done()
@@ -255,15 +328,16 @@ func (r *testStatsReporter) ReportHistogramDurationSamples(
 	name string,
 	tags map[string]string,
 	buckets Buckets,
-	bucketLowerBound,
+	bucketLowerBound time.Duration,
 	bucketUpperBound time.Duration,
 	samples int64,
 ) {
-	value, ok := r.histograms[name]
+	key := KeyForPrefixedStringMap(name, tags)
+	value, ok := r.histograms[key]
 	if !ok {
 		value = newTestHistogramValue()
 		value.tags = tags
-		r.histograms[name] = value
+		r.histograms[key] = value
 	}
 	value.durationSamples[bucketUpperBound] = int(samples)
 	r.hg.Done()
@@ -388,21 +462,124 @@ func TestWriteOnce(t *testing.T) {
 	r.hg.Add(1)
 	s.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
 		RecordValue(42.42)
+	r.hg.Add(1)
+	s.Histogram("bat", MustMakeLinearValueBuckets(1, 1, 3)).RecordValue(2.1)
+	r.hg.Add(1)
+	s.SubScope("test").Histogram("bat", MustMakeLinearValueBuckets(1, 1, 3)).RecordValue(1.1)
+	r.hg.Add(1)
+	s.SubScope("test").Histogram("bat", MustMakeLinearValueBuckets(1, 1, 3)).RecordValue(2.1)
 
-	s.report(r)
+	buckets := MustMakeLinearValueBuckets(100, 10, 3)
+	r.hg.Add(1)
+	s.SubScope("test").Histogram("qux", buckets).RecordValue(135.0)
+	r.hg.Add(1)
+	s.SubScope("test").Histogram("quux", buckets).RecordValue(101.0)
+	r.hg.Add(1)
+	s.SubScope("test2").Histogram("quux", buckets).RecordValue(101.0)
+
+	s.reportLoopRun()
+
 	r.WaitAll()
 
-	assert.EqualValues(t, 1, r.counters["bar"].val)
-	assert.EqualValues(t, 1, r.gauges["zed"].val)
-	assert.EqualValues(t, time.Millisecond*175, r.timers["ticky"].val)
-	assert.EqualValues(t, 1, r.histograms["baz"].valueSamples[50.0])
+	var (
+		counters   = r.getCounters()
+		gauges     = r.getGauges()
+		timers     = r.getTimers()
+		histograms = r.getHistograms()
+	)
+
+	assert.EqualValues(t, 1, counters["bar"].val)
+	assert.EqualValues(t, 1, gauges["zed"].val)
+	assert.EqualValues(t, time.Millisecond*175, timers["ticky"].val)
+	assert.EqualValues(t, 1, histograms["baz"].valueSamples[50.0])
+	assert.EqualValues(t, 1, histograms["bat"].valueSamples[3.0])
+	assert.EqualValues(t, 1, histograms["test.bat"].valueSamples[2.0])
+	assert.EqualValues(t, 1, histograms["test.bat"].valueSamples[3.0])
+	assert.EqualValues(t, 1, histograms["test.qux"].valueSamples[math.MaxFloat64])
+	assert.EqualValues(t, 1, histograms["test.quux"].valueSamples[110.0])
+	assert.EqualValues(t, 1, histograms["test2.quux"].valueSamples[110.0])
 
 	r = newTestStatsReporter()
-	s.report(r)
+	s.reportLoopRun()
 
-	assert.Nil(t, r.counters["bar"])
-	assert.Nil(t, r.gauges["zed"])
-	assert.Nil(t, r.timers["ticky"])
+	counters = r.getCounters()
+	gauges = r.getGauges()
+	timers = r.getTimers()
+	histograms = r.getHistograms()
+
+	assert.Nil(t, counters["bar"])
+	assert.Nil(t, gauges["zed"])
+	assert.Nil(t, timers["ticky"])
+	assert.Nil(t, histograms["baz"])
+	assert.Nil(t, histograms["bat"])
+	assert.Nil(t, histograms["test.qux"])
+}
+
+func TestHistogramSharedBucketMetrics(t *testing.T) {
+	var (
+		r     = newTestStatsReporter()
+		scope = newRootScope(ScopeOptions{
+			Prefix:         "",
+			Tags:           nil,
+			CachedReporter: r,
+		}, 0)
+		builder = func(s Scope) func(map[string]string) {
+			buckets := MustMakeLinearValueBuckets(10, 10, 3)
+			return func(tags map[string]string) {
+				s.Tagged(tags).Histogram("hist", buckets).RecordValue(19.0)
+			}
+		}
+	)
+
+	var (
+		wg     = &sync.WaitGroup{}
+		record = builder(scope)
+	)
+
+	r.hg.Add(4)
+	for i := 0; i < 10000; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			val := strconv.Itoa(i % 4)
+			record(map[string]string{
+				"key": val,
+			})
+
+			time.Sleep(time.Duration(rand.Float64() * float64(time.Second)))
+		}()
+	}
+
+	wg.Wait()
+	scope.status.Lock()
+	scope.reportRegistryWithLock()
+	scope.status.Unlock()
+	r.WaitAll()
+
+	unseen := map[string]struct{}{
+		"0": {},
+		"1": {},
+		"2": {},
+		"3": {},
+	}
+
+	require.Equal(t, len(unseen), len(r.histograms))
+
+	for name, value := range r.histograms {
+		if !strings.HasPrefix(name, "hist+") {
+			continue
+		}
+
+		count, ok := value.valueSamples[20.0]
+		require.True(t, ok)
+		require.Equal(t, 2500, count)
+
+		delete(unseen, value.tags["key"])
+	}
+
+	require.Equal(t, 0, len(unseen), fmt.Sprintf("%v", unseen))
 }
 
 func TestCounterSanitized(t *testing.T) {
@@ -429,26 +606,38 @@ func TestCounterSanitized(t *testing.T) {
 	s.report(r)
 	r.WaitAll()
 
-	assert.Nil(t, r.counters["how?"])
-	assert.EqualValues(t, 1, r.counters["how_"].val)
-	assert.Nil(t, r.gauges["does!"])
-	assert.EqualValues(t, 1, r.gauges["does_"].val)
-	assert.Nil(t, r.timers["this!"])
-	assert.EqualValues(t, time.Millisecond*175, r.timers["this_"].val)
-	assert.Nil(t, r.histograms["work1!?"])
-	assert.EqualValues(t, 1, r.histograms["work1__"].valueSamples[50.0])
+	var (
+		counters   = r.getCounters()
+		gauges     = r.getGauges()
+		timers     = r.getTimers()
+		histograms = r.getHistograms()
+	)
+
+	assert.Nil(t, counters["how?"])
+	assert.EqualValues(t, 1, counters["how_"].val)
+	assert.Nil(t, gauges["does!"])
+	assert.EqualValues(t, 1, gauges["does_"].val)
+	assert.Nil(t, timers["this!"])
+	assert.EqualValues(t, time.Millisecond*175, timers["this_"].val)
+	assert.Nil(t, histograms["work1!?"])
+	assert.EqualValues(t, 1, histograms["work1__"].valueSamples[50.0])
 
 	r = newTestStatsReporter()
 	s.report(r)
 
-	assert.Nil(t, r.counters["how?"])
-	assert.Nil(t, r.counters["how_"])
-	assert.Nil(t, r.gauges["does!"])
-	assert.Nil(t, r.gauges["does_"])
-	assert.Nil(t, r.timers["this!"])
-	assert.Nil(t, r.timers["this_"])
-	assert.Nil(t, r.histograms["work1!?"])
-	assert.Nil(t, r.histograms["work1__"])
+	counters = r.getCounters()
+	gauges = r.getGauges()
+	timers = r.getTimers()
+	histograms = r.getHistograms()
+
+	assert.Nil(t, counters["how?"])
+	assert.Nil(t, counters["how_"])
+	assert.Nil(t, gauges["does!"])
+	assert.Nil(t, gauges["does_"])
+	assert.Nil(t, timers["this!"])
+	assert.Nil(t, timers["this_"])
+	assert.Nil(t, histograms["work1!?"])
+	assert.Nil(t, histograms["work1__"])
 }
 
 func TestCachedReporter(t *testing.T) {
@@ -474,11 +663,18 @@ func TestCachedReporter(t *testing.T) {
 	s.cachedReport()
 	r.WaitAll()
 
-	assert.EqualValues(t, 1, r.counters["bar"].val)
-	assert.EqualValues(t, 1, r.gauges["zed"].val)
-	assert.EqualValues(t, time.Millisecond*175, r.timers["ticky"].val)
-	assert.EqualValues(t, 1, r.histograms["baz"].valueSamples[50.0])
-	assert.EqualValues(t, 1, r.histograms["qux"].durationSamples[50*time.Millisecond])
+	var (
+		counters   = r.getCounters()
+		gauges     = r.getGauges()
+		timers     = r.getTimers()
+		histograms = r.getHistograms()
+	)
+
+	assert.EqualValues(t, 1, counters["bar"].val)
+	assert.EqualValues(t, 1, gauges["zed"].val)
+	assert.EqualValues(t, time.Millisecond*175, timers["ticky"].val)
+	assert.EqualValues(t, 1, histograms["baz"].valueSamples[50.0])
+	assert.EqualValues(t, 1, histograms["qux"].durationSamples[50*time.Millisecond])
 }
 
 func TestRootScopeWithoutPrefix(t *testing.T) {
@@ -502,10 +698,17 @@ func TestRootScopeWithoutPrefix(t *testing.T) {
 	s.report(r)
 	r.WaitAll()
 
-	assert.EqualValues(t, 21, r.counters["bar"].val)
-	assert.EqualValues(t, 1, r.gauges["zed"].val)
-	assert.EqualValues(t, time.Millisecond*175, r.timers["blork"].val)
-	assert.EqualValues(t, 1, r.histograms["baz"].valueSamples[50.0])
+	var (
+		counters   = r.getCounters()
+		gauges     = r.getGauges()
+		timers     = r.getTimers()
+		histograms = r.getHistograms()
+	)
+
+	assert.EqualValues(t, 21, counters["bar"].val)
+	assert.EqualValues(t, 1, gauges["zed"].val)
+	assert.EqualValues(t, time.Millisecond*175, timers["blork"].val)
+	assert.EqualValues(t, 1, histograms["baz"].valueSamples[50.0])
 }
 
 func TestRootScopeWithPrefix(t *testing.T) {
@@ -529,10 +732,17 @@ func TestRootScopeWithPrefix(t *testing.T) {
 	s.report(r)
 	r.WaitAll()
 
-	assert.EqualValues(t, 21, r.counters["foo.bar"].val)
-	assert.EqualValues(t, 1, r.gauges["foo.zed"].val)
-	assert.EqualValues(t, time.Millisecond*175, r.timers["foo.blork"].val)
-	assert.EqualValues(t, 1, r.histograms["foo.baz"].valueSamples[50.0])
+	var (
+		counters   = r.getCounters()
+		gauges     = r.getGauges()
+		timers     = r.getTimers()
+		histograms = r.getHistograms()
+	)
+
+	assert.EqualValues(t, 21, counters["foo.bar"].val)
+	assert.EqualValues(t, 1, gauges["foo.zed"].val)
+	assert.EqualValues(t, time.Millisecond*175, timers["foo.blork"].val)
+	assert.EqualValues(t, 1, histograms["foo.baz"].valueSamples[50.0])
 }
 
 func TestRootScopeWithDifferentSeparator(t *testing.T) {
@@ -556,10 +766,17 @@ func TestRootScopeWithDifferentSeparator(t *testing.T) {
 	s.report(r)
 	r.WaitAll()
 
-	assert.EqualValues(t, 21, r.counters["foo_bar"].val)
-	assert.EqualValues(t, 1, r.gauges["foo_zed"].val)
-	assert.EqualValues(t, time.Millisecond*175, r.timers["foo_blork"].val)
-	assert.EqualValues(t, 1, r.histograms["foo_baz"].valueSamples[50.0])
+	var (
+		counters   = r.getCounters()
+		gauges     = r.getGauges()
+		timers     = r.getTimers()
+		histograms = r.getHistograms()
+	)
+
+	assert.EqualValues(t, 21, counters["foo_bar"].val)
+	assert.EqualValues(t, 1, gauges["foo_zed"].val)
+	assert.EqualValues(t, time.Millisecond*175, timers["foo_blork"].val)
+	assert.EqualValues(t, 1, histograms["foo_baz"].valueSamples[50.0])
 }
 
 func TestSubScope(t *testing.T) {
@@ -584,17 +801,24 @@ func TestSubScope(t *testing.T) {
 	s.report(r)
 	r.WaitAll()
 
+	var (
+		counters   = r.getCounters()
+		gauges     = r.getGauges()
+		timers     = r.getTimers()
+		histograms = r.getHistograms()
+	)
+
 	// Assert prefixed correctly
-	assert.EqualValues(t, 21, r.counters["foo.mork.bar"].val)
-	assert.EqualValues(t, 1, r.gauges["foo.mork.zed"].val)
-	assert.EqualValues(t, time.Millisecond*175, r.timers["foo.mork.blork"].val)
-	assert.EqualValues(t, 1, r.histograms["foo.mork.baz"].valueSamples[50.0])
+	assert.EqualValues(t, 21, counters["foo.mork.bar"].val)
+	assert.EqualValues(t, 1, gauges["foo.mork.zed"].val)
+	assert.EqualValues(t, time.Millisecond*175, timers["foo.mork.blork"].val)
+	assert.EqualValues(t, 1, histograms["foo.mork.baz"].valueSamples[50.0])
 
 	// Assert tags inherited
-	assert.Equal(t, tags, r.counters["foo.mork.bar"].tags)
-	assert.Equal(t, tags, r.gauges["foo.mork.zed"].tags)
-	assert.Equal(t, tags, r.timers["foo.mork.blork"].tags)
-	assert.Equal(t, tags, r.histograms["foo.mork.baz"].tags)
+	assert.Equal(t, tags, counters["foo.mork.bar"].tags)
+	assert.Equal(t, tags, gauges["foo.mork.zed"].tags)
+	assert.Equal(t, tags, timers["foo.mork.blork"].tags)
+	assert.Equal(t, tags, histograms["foo.mork.baz"].tags)
 }
 
 func TestTaggedSubScope(t *testing.T) {
@@ -624,23 +848,28 @@ func TestTaggedSubScope(t *testing.T) {
 	tscope.report(r)
 	r.cg.Wait()
 
-	assert.EqualValues(t, 1, r.counters["foo.beep"].val)
-	assert.EqualValues(t, ts, r.counters["foo.beep"].tags)
+	var (
+		counters   = r.getCounters()
+		histograms = r.getHistograms()
+	)
 
-	assert.EqualValues(t, 1, r.counters["foo.boop"].val)
+	assert.EqualValues(t, 1, counters["foo.beep"].val)
+	assert.EqualValues(t, ts, counters["foo.beep"].tags)
+
+	assert.EqualValues(t, 1, counters["foo.boop"].val)
 	assert.EqualValues(t, map[string]string{
 		"env":     "test",
 		"service": "test",
-	}, r.counters["foo.boop"].tags)
+	}, counters["foo.boop"].tags)
 
-	assert.EqualValues(t, 1, r.histograms["foo.baz"].valueSamples[50.0])
-	assert.EqualValues(t, ts, r.histograms["foo.baz"].tags)
+	assert.EqualValues(t, 1, histograms["foo.baz"].valueSamples[50.0])
+	assert.EqualValues(t, ts, histograms["foo.baz"].tags)
 
-	assert.EqualValues(t, 1, r.histograms["foo.bar"].valueSamples[50.0])
+	assert.EqualValues(t, 1, histograms["foo.bar"].valueSamples[50.0])
 	assert.EqualValues(t, map[string]string{
 		"env":     "test",
 		"service": "test",
-	}, r.histograms["foo.bar"].tags)
+	}, histograms["foo.bar"].tags)
 }
 
 func TestTaggedSanitizedSubScope(t *testing.T) {
@@ -666,11 +895,12 @@ func TestTaggedSanitizedSubScope(t *testing.T) {
 	tscope.report(r)
 	r.cg.Wait()
 
-	assert.EqualValues(t, 1, r.counters["foo_beep"].val)
+	counters := r.getCounters()
+	assert.EqualValues(t, 1, counters["foo_beep"].val)
 	assert.EqualValues(t, map[string]string{
 		"env":     "test_env",
 		"service": "test_service",
-	}, r.counters["foo_beep"].tags)
+	}, counters["foo_beep"].tags)
 }
 
 func TestTaggedExistingReturnsSameScope(t *testing.T) {
@@ -798,8 +1028,9 @@ func TestScopeDefaultBuckets(t *testing.T) {
 	s.report(r)
 	r.WaitAll()
 
-	assert.EqualValues(t, 1, r.histograms["baz"].durationSamples[60*time.Millisecond])
-	assert.EqualValues(t, 2, r.histograms["baz"].durationSamples[90*time.Millisecond])
+	histograms := r.getHistograms()
+	assert.EqualValues(t, 1, histograms["baz"].durationSamples[60*time.Millisecond])
+	assert.EqualValues(t, 2, histograms["baz"].durationSamples[90*time.Millisecond])
 }
 
 type testMets struct {
@@ -826,7 +1057,8 @@ func TestReturnByValue(t *testing.T) {
 	s.report(r)
 	r.cg.Wait()
 
-	assert.EqualValues(t, 3, r.counters["honk"].val)
+	counters := r.getCounters()
+	assert.EqualValues(t, 3, counters["honk"].val)
 }
 
 func TestScopeAvoidReportLoopRunOnClose(t *testing.T) {
@@ -850,11 +1082,12 @@ func TestScopeFlushOnClose(t *testing.T) {
 
 	r.cg.Add(1)
 	root.Counter("foo").Inc(1)
-	assert.Nil(t, r.counters["foo"])
 
+	counters := r.getCounters()
+	assert.Nil(t, counters["foo"])
 	assert.NoError(t, closer.Close())
 
-	assert.EqualValues(t, 1, r.counters["foo"].val)
-
+	counters = r.getCounters()
+	assert.EqualValues(t, 1, counters["foo"].val)
 	assert.NoError(t, closer.Close())
 }

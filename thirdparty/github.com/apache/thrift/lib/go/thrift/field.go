@@ -19,6 +19,8 @@
 
 package thrift
 
+import "strconv"
+
 // Helper class that encapsulates field metadata.
 type field struct {
 	name   string
@@ -55,7 +57,7 @@ func (p *field) String() string {
 	if p == nil {
 		return "<nil>"
 	}
-	return "<TField name:'" + p.name + "' type:" + string(p.typeId) + " field-id:" + string(p.id) + ">"
+	return "<TField name:'" + p.name + "' type:" + string(p.typeId) + " field-id:" + strconv.Itoa(p.id) + ">"
 }
 
 var ANONYMOUS_FIELD *field

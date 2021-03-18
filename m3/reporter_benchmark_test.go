@@ -76,9 +76,8 @@ func BenchmarkCalulateSize(b *testing.B) {
 	defer r.Close()
 	benchReporter := r.(*reporter)
 
-	val := int64(123456)
 	met := benchReporter.newMetric("foo", map[string]string{"domain": "foo"}, counterType)
-	met.MetricValue.Count.I64Value = &val
+	met.Value.Count = 123456
 
 	b.ResetTimer()
 
@@ -100,10 +99,9 @@ func BenchmarkTimer(b *testing.B) {
 	benchReporter := r.(*reporter)
 
 	go func() {
-		resourcePool := benchReporter.resourcePool
 		// Blindly consume metrics
-		for met := range benchReporter.metCh {
-			resourcePool.releaseShallowMetric(met.m)
+		for range benchReporter.metCh {
+			// nop
 		}
 	}()
 

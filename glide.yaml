@@ -18,6 +18,8 @@ import:
   version: ^1
 - package: github.com/pkg/errors
   version: ^0.8.1
+- package: github.com/twmb/murmur3
+  version: ^1.1.5
 testImport:
 - package: github.com/axw/gocov
   version: 54b98cfcac0c63fb3f9bd8e7ad241b724d4e985b

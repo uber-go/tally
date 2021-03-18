@@ -102,6 +102,7 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		histograms:      make(map[string]*histogram),
 		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
 		timers:          make(map[string]*timer),
+		bucketCache:     parent.bucketCache,
 	}
 	r.subscopes[key] = subscope
 	return subscope

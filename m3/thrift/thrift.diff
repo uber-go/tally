@@ -1,0 +1,190 @@
+diff --git a/m3/thrift/v2/m3.go b/m3/thrift/v2/m3.go
+index fc46a31..f0a288c 100644
+--- a/m3/thrift/v2/m3.go
++++ b/m3/thrift/v2/m3.go
+@@ -17,7 +17,7 @@ var _ = bytes.Equal
+ type M3 interface {
+ 	// Parameters:
+ 	//  - Batch
+-	EmitMetricBatchV2(batch *MetricBatch) (err error)
++	EmitMetricBatchV2(batch MetricBatch) (err error)
+ }
+
+ type M3Client struct {
+@@ -48,14 +48,14 @@ func NewM3ClientProtocol(t thrift.TTransport, iprot thrift.TProtocol, oprot thri
+
+ // Parameters:
+ //  - Batch
+-func (p *M3Client) EmitMetricBatchV2(batch *MetricBatch) (err error) {
++func (p *M3Client) EmitMetricBatchV2(batch MetricBatch) (err error) {
+ 	if err = p.sendEmitMetricBatchV2(batch); err != nil {
+ 		return
+ 	}
+ 	return
+ }
+
+-func (p *M3Client) sendEmitMetricBatchV2(batch *MetricBatch) (err error) {
++func (p *M3Client) sendEmitMetricBatchV2(batch MetricBatch) (err error) {
+ 	oprot := p.OutputProtocol
+ 	if oprot == nil {
+ 		oprot = p.ProtocolFactory.GetProtocol(p.Transport)
+@@ -145,23 +145,23 @@ func (p *m3ProcessorEmitMetricBatchV2) Process(seqId int32, iprot, oprot thrift.TP
+ // Attributes:
+ //  - Batch
+ type M3EmitMetricBatchV2Args struct {
+-	Batch *MetricBatch `thrift:"batch,1" json:"batch"`
++	Batch MetricBatch `thrift:"batch,1" json:"batch"`
+ }
+
+ func NewM3EmitMetricBatchV2Args() *M3EmitMetricBatchV2Args {
+ 	return &M3EmitMetricBatchV2Args{}
+ }
+
+-var M3EmitMetricBatchV2Args_Batch_DEFAULT *MetricBatch
++var M3EmitMetricBatchV2Args_Batch_DEFAULT MetricBatch
+
+-func (p *M3EmitMetricBatchV2Args) GetBatch() *MetricBatch {
++func (p *M3EmitMetricBatchV2Args) GetBatch() MetricBatch {
+ 	if !p.IsSetBatch() {
+ 		return M3EmitMetricBatchV2Args_Batch_DEFAULT
+ 	}
+ 	return p.Batch
+ }
+ func (p *M3EmitMetricBatchV2Args) IsSetBatch() bool {
+-	return p.Batch != nil
++	return p.Batch.Metrics != nil || p.Batch.CommonTags != nil
+ }
+
+ func (p *M3EmitMetricBatchV2Args) Read(iprot thrift.TProtocol) error {
+@@ -198,7 +198,7 @@ func (p *M3EmitMetricBatchV2Args) Read(iprot thrift.TProtocol) error {
+ }
+
+ func (p *M3EmitMetricBatchV2Args) readField1(iprot thrift.TProtocol) error {
+-	p.Batch = &MetricBatch{}
++	p.Batch = MetricBatch{}
+ 	if err := p.Batch.Read(iprot); err != nil {
+ 		return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", p.Batch), err)
+ 	}
+diff --git a/m3/thrift/v2/ttypes.go b/m3/thrift/v2/ttypes.go
+index 5f83caa..3e6c33b 100644
+--- a/m3/thrift/v2/ttypes.go
++++ b/m3/thrift/v2/ttypes.go
+@@ -429,10 +429,10 @@ func (p *MetricTag) String() string {
+ //  - Timestamp
+ //  - Tags
+ type Metric struct {
+-	Name      string       `thrift:"name,1,required" json:"name"`
+-	Value     *MetricValue `thrift:"value,2,required" json:"value"`
+-	Timestamp int64        `thrift:"timestamp,3,required" json:"timestamp"`
+-	Tags      []*MetricTag `thrift:"tags,4" json:"tags,omitempty"`
++	Name      string      `thrift:"name,1,required" json:"name"`
++	Value     MetricValue `thrift:"value,2,required" json:"value"`
++	Timestamp int64       `thrift:"timestamp,3,required" json:"timestamp"`
++	Tags      []MetricTag `thrift:"tags,4" json:"tags,omitempty"`
+ }
+
+ func NewMetric() *Metric {
+@@ -443,9 +443,9 @@ func (p *Metric) GetName() string {
+ 	return p.Name
+ }
+
+-var Metric_Value_DEFAULT *MetricValue
++var Metric_Value_DEFAULT MetricValue
+
+-func (p *Metric) GetValue() *MetricValue {
++func (p *Metric) GetValue() MetricValue {
+ 	if !p.IsSetValue() {
+ 		return Metric_Value_DEFAULT
+ 	}
+@@ -456,13 +456,13 @@ func (p *Metric) GetTimestamp() int64 {
+ 	return p.Timestamp
+ }
+
+-var Metric_Tags_DEFAULT []*MetricTag
++var Metric_Tags_DEFAULT []MetricTag
+
+-func (p *Metric) GetTags() []*MetricTag {
++func (p *Metric) GetTags() []MetricTag {
+ 	return p.Tags
+ }
+ func (p *Metric) IsSetValue() bool {
+-	return p.Value != nil
++	return p.Value.GetMetricType() != MetricType_INVALID || p.Value.Count != 0 || p.Value.Gauge != 0 || p.Value.Timer != 0
+ }
+
+ func (p *Metric) IsSetTags() bool {
+@@ -540,7 +540,7 @@ func (p *Metric) readField1(iprot thrift.TProtocol) error {
+ }
+
+ func (p *Metric) readField2(iprot thrift.TProtocol) error {
+-	p.Value = &MetricValue{}
++	p.Value = MetricValue{}
+ 	if err := p.Value.Read(iprot); err != nil {
+ 		return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", p.Value), err)
+ 	}
+@@ -561,10 +561,10 @@ func (p *Metric) readField4(iprot thrift.TProtocol) error {
+ 	if err != nil {
+ 		return thrift.PrependError("error reading list begin: ", err)
+ 	}
+-	tSlice := make([]*MetricTag, 0, size)
++	tSlice := make([]MetricTag, 0, size)
+ 	p.Tags = tSlice
+ 	for i := 0; i < size; i++ {
+-		_elem0 := &MetricTag{}
++		_elem0 := MetricTag{}
+ 		if err := _elem0.Read(iprot); err != nil {
+ 			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem0), err)
+ 		}
+@@ -674,21 +674,21 @@ func (p *Metric) String() string {
+ //  - Metrics
+ //  - CommonTags
+ type MetricBatch struct {
+-	Metrics    []*Metric    `thrift:"metrics,1,required" json:"metrics"`
+-	CommonTags []*MetricTag `thrift:"commonTags,2" json:"commonTags,omitempty"`
++	Metrics    []Metric    `thrift:"metrics,1,required" json:"metrics"`
++	CommonTags []MetricTag `thrift:"commonTags,2" json:"commonTags,omitempty"`
+ }
+
+ func NewMetricBatch() *MetricBatch {
+ 	return &MetricBatch{}
+ }
+
+-func (p *MetricBatch) GetMetrics() []*Metric {
++func (p *MetricBatch) GetMetrics() []Metric {
+ 	return p.Metrics
+ }
+
+-var MetricBatch_CommonTags_DEFAULT []*MetricTag
++var MetricBatch_CommonTags_DEFAULT []MetricTag
+
+-func (p *MetricBatch) GetCommonTags() []*MetricTag {
++func (p *MetricBatch) GetCommonTags() []MetricTag {
+ 	return p.CommonTags
+ }
+ func (p *MetricBatch) IsSetCommonTags() bool {
+@@ -743,10 +743,10 @@ func (p *MetricBatch) readField1(iprot thrift.TProtocol) error {
+ 	if err != nil {
+ 		return thrift.PrependError("error reading list begin: ", err)
+ 	}
+-	tSlice := make([]*Metric, 0, size)
++	tSlice := make([]Metric, 0, size)
+ 	p.Metrics = tSlice
+ 	for i := 0; i < size; i++ {
+-		_elem1 := &Metric{}
++		_elem1 := Metric{}
+ 		if err := _elem1.Read(iprot); err != nil {
+ 			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem1), err)
+ 		}
+@@ -763,10 +763,10 @@ func (p *MetricBatch) readField2(iprot thrift.TProtocol) error {
+ 	if err != nil {
+ 		return thrift.PrependError("error reading list begin: ", err)
+ 	}
+-	tSlice := make([]*MetricTag, 0, size)
++	tSlice := make([]MetricTag, 0, size)
+ 	p.CommonTags = tSlice
+ 	for i := 0; i < size; i++ {
+-		_elem2 := &MetricTag{}
++		_elem2 := MetricTag{}
+ 		if err := _elem2.Read(iprot); err != nil {
+ 			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem2), err)
+ 		}

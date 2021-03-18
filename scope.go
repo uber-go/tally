@@ -84,6 +84,8 @@ type scope struct {
 	timers          map[string]*timer
 	// nb: deliberately skipping timersSlice as we report timers immediately,
 	// no buffering is involved.
+
+	bucketCache *bucketCache
 }
 
 type scopeStatus struct {
@@ -165,6 +167,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		histograms:      make(map[string]*histogram),
 		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
 		timers:          make(map[string]*timer),
+		bucketCache:     newBucketCache(),
 	}
 
 	// NB(r): Take a copy of the tags on creation
@@ -382,6 +385,11 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 		b = s.defaultBuckets
 	}
 
+	htype := valueHistogramType
+	if _, ok := b.(DurationBuckets); ok {
+		htype = durationHistogramType
+	}
+
 	s.hm.Lock()
 	defer s.hm.Unlock()
 
@@ -397,7 +405,12 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 	}
 
 	h := newHistogram(
-		s.fullyQualifiedName(name), s.tags, s.reporter, b, cachedHistogram,
+		htype,
+		s.fullyQualifiedName(name),
+		s.tags,
+		s.reporter,
+		s.bucketCache.Get(htype, b),
+		cachedHistogram,
 	)
 	s.histograms[name] = h
 	s.histogramsSlice = append(s.histogramsSlice, h)

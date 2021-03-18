@@ -33,7 +33,7 @@ import (
 
 	"github.com/uber-go/tally"
 	customtransport "github.com/uber-go/tally/m3/customtransports"
-	m3thrift "github.com/uber-go/tally/m3/thrift"
+	m3thrift "github.com/uber-go/tally/m3/thrift/v2"
 	"github.com/uber-go/tally/m3/thriftudp"
 	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
 
@@ -102,11 +102,11 @@ func TestReporter(t *testing.T) {
 			require.NotNil(t, batch)
 			require.True(t, batch.IsSetCommonTags())
 			require.Equal(t, len(commonTags)+1, len(batch.GetCommonTags()))
-			for tag := range batch.GetCommonTags() {
-				if tag.GetTagName() == ServiceTag {
-					require.Equal(t, "test-service", tag.GetTagValue())
+			for _, tag := range batch.GetCommonTags() {
+				if tag.GetName() == ServiceTag {
+					require.Equal(t, "test-service", tag.GetValue())
 				} else {
-					require.Equal(t, commonTags[tag.GetTagName()], tag.GetTagValue())
+					require.Equal(t, commonTags[tag.GetName()], tag.GetValue())
 				}
 			}
 		}
@@ -125,26 +125,18 @@ func TestReporter(t *testing.T) {
 		require.Equal(t, "my-counter", emittedCounter.GetName())
 		require.True(t, emittedCounter.IsSetTags())
 		require.Equal(t, len(tags), len(emittedCounter.GetTags()))
-		for tag := range emittedCounter.GetTags() {
-			require.Equal(t, tags[tag.GetTagName()], tag.GetTagValue())
+		for _, tag := range emittedCounter.GetTags() {
+			require.Equal(t, tags[tag.GetName()], tag.GetValue())
 		}
-		require.True(t, emittedCounter.IsSetMetricValue())
-		emittedVal := emittedCounter.GetMetricValue()
-		require.True(t, emittedVal.IsSetCount())
-		require.False(t, emittedVal.IsSetGauge())
-		require.False(t, emittedVal.IsSetTimer())
+		require.True(t, emittedCounter.IsSetValue())
+		emittedVal := emittedCounter.GetValue()
 		emittedCount := emittedVal.GetCount()
-		require.True(t, emittedCount.IsSetI64Value())
-		require.EqualValues(t, int64(10), emittedCount.GetI64Value())
+		require.EqualValues(t, int64(10), emittedCount)
 
-		require.True(t, emittedTimer.IsSetMetricValue())
-		emittedVal = emittedTimer.GetMetricValue()
-		require.False(t, emittedVal.IsSetCount())
-		require.False(t, emittedVal.IsSetGauge())
-		require.True(t, emittedVal.IsSetTimer())
+		require.True(t, emittedTimer.IsSetValue())
+		emittedVal = emittedTimer.GetValue()
 		emittedTimerVal := emittedVal.GetTimer()
-		require.True(t, emittedTimerVal.IsSetI64Value())
-		require.EqualValues(t, int64(5*1000*1000), emittedTimerVal.GetI64Value())
+		require.EqualValues(t, int64(5*1000*1000), emittedTimerVal)
 	}
 }
 
@@ -327,43 +319,35 @@ func TestReporterHistogram(t *testing.T) {
 	counter := server.Service.getBatches()[0].GetMetrics()[0]
 	require.Equal(t, "my-histogram", counter.GetName())
 	require.True(t, counter.IsSetTags())
-	require.Equal(t, 3, len(counter.GetTags()))
-	for tag := range counter.GetTags() {
+	for _, tag := range counter.GetTags() {
 		require.Equal(t, map[string]string{
 			"foo":      "bar",
 			"bucketid": "0001",
 			"bucket":   "0-25ms",
-		}[tag.GetTagName()], tag.GetTagValue())
+		}[tag.GetName()], tag.GetValue())
 	}
-	require.True(t, counter.IsSetMetricValue())
-	val := counter.GetMetricValue()
-	require.True(t, val.IsSetCount())
-	require.False(t, val.IsSetGauge())
-	require.False(t, val.IsSetTimer())
+	require.Equal(t, 3, len(counter.GetTags()))
+	require.True(t, counter.IsSetValue())
+	val := counter.GetValue()
 	count := val.GetCount()
-	require.True(t, count.IsSetI64Value())
-	require.Equal(t, int64(7), count.GetI64Value())
+	require.Equal(t, int64(7), count)
 
 	// Verify second bucket
 	counter = server.Service.getBatches()[0].GetMetrics()[1]
 	require.Equal(t, "my-histogram", counter.GetName())
 	require.True(t, counter.IsSetTags())
 	require.Equal(t, 3, len(counter.GetTags()))
-	for tag := range counter.GetTags() {
+	for _, tag := range counter.GetTags() {
 		require.Equal(t, map[string]string{
 			"foo":      "bar",
 			"bucketid": "0003",
 			"bucket":   "50ms-75ms",
-		}[tag.GetTagName()], tag.GetTagValue())
+		}[tag.GetName()], tag.GetValue())
 	}
-	require.True(t, counter.IsSetMetricValue())
-	val = counter.GetMetricValue()
-	require.True(t, val.IsSetCount())
-	require.False(t, val.IsSetGauge())
-	require.False(t, val.IsSetTimer())
+	require.True(t, counter.IsSetValue())
+	val = counter.GetValue()
 	count = val.GetCount()
-	require.True(t, count.IsSetI64Value())
-	require.Equal(t, int64(3), count.GetI64Value())
+	require.Equal(t, int64(3), count)
 }
 
 func TestBatchSizes(t *testing.T) {
@@ -455,14 +439,14 @@ func TestReporterSpecifyService(t *testing.T) {
 	reporter, ok := r.(*reporter)
 	require.True(t, ok)
 	assert.Equal(t, 3, len(reporter.commonTags))
-	for tag := range reporter.commonTags {
-		switch tag.GetTagName() {
+	for _, tag := range reporter.commonTags {
+		switch tag.GetName() {
 		case ServiceTag:
-			assert.Equal(t, "overrideService", tag.GetTagValue())
+			assert.Equal(t, "overrideService", tag.GetValue())
 		case EnvTag:
-			assert.Equal(t, "test", tag.GetTagValue())
+			assert.Equal(t, "test", tag.GetValue())
 		case HostTag:
-			assert.Equal(t, "overrideHost", tag.GetTagValue())
+			assert.Equal(t, "overrideHost", tag.GetValue())
 		}
 	}
 }
@@ -555,8 +539,8 @@ func TestReporterResetTagsAfterReturnToPool(t *testing.T) {
 	metrics := server.Service.getMetrics()
 	require.Equal(t, 2, len(metrics))
 	require.Equal(t, len(tags), len(metrics[0].GetTags()))
-	for tag := range metrics[0].GetTags() {
-		require.Equal(t, tags[tag.GetTagName()], tag.GetTagValue())
+	for _, tag := range metrics[0].GetTags() {
+		require.Equal(t, tags[tag.GetName()], tag.GetValue())
 	}
 	require.Equal(t, 0, len(metrics[1].GetTags()))
 }
@@ -660,25 +644,25 @@ func newFakeM3Service(wg *sync.WaitGroup, countBatches bool) *fakeM3Service {
 
 type fakeM3Service struct {
 	lock         sync.RWMutex
-	batches      []*m3thrift.MetricBatch
-	metrics      []*m3thrift.Metric
+	batches      []m3thrift.MetricBatch
+	metrics      []m3thrift.Metric
 	wg           *sync.WaitGroup
 	countBatches bool
 }
 
-func (m *fakeM3Service) getBatches() []*m3thrift.MetricBatch {
+func (m *fakeM3Service) getBatches() []m3thrift.MetricBatch {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
 	return m.batches
 }
 
-func (m *fakeM3Service) getMetrics() []*m3thrift.Metric {
+func (m *fakeM3Service) getMetrics() []m3thrift.Metric {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
 	return m.metrics
 }
 
-func (m *fakeM3Service) EmitMetricBatch(batch *m3thrift.MetricBatch) (err error) {
+func (m *fakeM3Service) EmitMetricBatchV2(batch m3thrift.MetricBatch) (err error) {
 	m.lock.Lock()
 	m.batches = append(m.batches, batch)
 	if m.wg != nil && m.countBatches {
@@ -704,19 +688,19 @@ func hostname() string {
 	return host
 }
 
-func tagIncluded(tags map[*m3thrift.MetricTag]bool, tagName string) bool {
-	for k, v := range tags {
-		if v && k.TagName == tagName {
+func tagIncluded(tags []m3thrift.MetricTag, tagName string) bool {
+	for _, tag := range tags {
+		if tag.Name == tagName {
 			return true
 		}
 	}
 	return false
 }
 
-func tagEquals(tags map[*m3thrift.MetricTag]bool, tagName, tagValue string) bool {
-	for k, v := range tags {
-		if v && k.GetTagName() == tagName {
-			return k.GetTagValue() == tagValue
+func tagEquals(tags []m3thrift.MetricTag, tagName string, tagValue string) bool {
+	for _, tag := range tags {
+		if tag.GetName() == tagName && tag.GetValue() == tagValue {
+			return true
 		}
 	}
 	return false
