@@ -38,20 +38,16 @@ type Accumulator uint64
 //      are unnecessary as memory width is bounded to each instance of `a` (a
 //      uint64) and, potentially, a single stack-local loop temporary while
 //      iterating.
-//
-//go:nosplit
 func NewAccumulator() Accumulator {
 	return Accumulator(_hashSeed)
 }
 
 // NewAccumulatorWithSeed creates a new Accumulator with the provided seed value.
-//go:nosplit
 func NewAccumulatorWithSeed(seed uint64) Accumulator {
 	return Accumulator(seed)
 }
 
 // AddString hashes str and folds it into the accumulator.
-//go:nosplit
 func (a Accumulator) AddString(str string) Accumulator {
 	return a + (Accumulator(murmur3.StringSum64(str)) * Accumulator(_hashFold))
 }
@@ -67,7 +63,6 @@ func (a Accumulator) AddStrings(strs ...string) Accumulator {
 }
 
 // AddUint64 folds u64 into the accumulator.
-//go:nosplit
 func (a Accumulator) AddUint64(u64 uint64) Accumulator {
 	return a + Accumulator(u64*_hashFold)
 }
@@ -83,7 +78,6 @@ func (a Accumulator) AddUint64s(u64s ...uint64) Accumulator {
 }
 
 // Value returns the accumulated value.
-//go:nosplit
 func (a Accumulator) Value() uint64 {
 	return uint64(a)
 }
