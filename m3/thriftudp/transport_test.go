@@ -280,8 +280,6 @@ func TestFlushErrors(t *testing.T) {
 
 		_, err = trans.Write([]byte{1, 2, 3, 4})
 		require.NoError(t, err)
-
-		// err = trans.Flush()
 		require.Error(t, trans.Flush(), "Flush with data should fail")
 	})
 }

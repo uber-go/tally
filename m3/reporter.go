@@ -33,7 +33,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/uber-go/tally"
 	customtransport "github.com/uber-go/tally/m3/customtransports"
-	m3thrift "github.com/uber-go/tally/m3/thrift"
+	m3thrift "github.com/uber-go/tally/m3/thrift/v2"
 	"github.com/uber-go/tally/m3/thriftudp"
 	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
 )
@@ -72,16 +72,10 @@ const (
 	minMetricBucketIDTagLength = 4
 )
 
-// Initialize max vars in init function to avoid lint error.
 var (
-	maxInt64   int64
-	maxFloat64 float64
+	_maxInt64   = int64(math.MaxInt64)
+	_maxFloat64 = math.MaxFloat64
 )
-
-func init() {
-	maxInt64 = math.MaxInt64
-	maxFloat64 = math.MaxFloat64
-}
 
 type metricType int
 
@@ -107,22 +101,19 @@ type Reporter interface {
 // remote M3 collector, metrics are batched together and emitted
 // via either thrift compact or binary protocol in batch UDP packets.
 type reporter struct {
-	client          *m3thrift.M3Client
-	curBatch        *m3thrift.MetricBatch
-	curBatchLock    sync.Mutex
-	calc            *customtransport.TCalcTransport
-	calcProto       thrift.TProtocol
-	calcLock        sync.Mutex
-	commonTags      map[*m3thrift.MetricTag]bool
-	freeBytes       int32
-	processors      sync.WaitGroup
-	resourcePool    *resourcePool
 	bucketIDTagName string
 	bucketTagName   string
 	bucketValFmt    string
-
-	status reporterStatus
-	metCh  chan sizedMetric
+	calc            *customtransport.TCalcTransport
+	calcLock        sync.Mutex
+	calcProto       thrift.TProtocol
+	client          *m3thrift.M3Client
+	commonTags      []m3thrift.MetricTag
+	freeBytes       int32
+	metCh           chan sizedMetric
+	processors      sync.WaitGroup
+	resourcePool    *resourcePool
+	status          reporterStatus
 }
 
 type reporterStatus struct {
@@ -184,48 +175,66 @@ func NewReporter(opts Options) (Reporter, error) {
 		protocolFactory = thrift.NewTBinaryProtocolFactoryDefault()
 	}
 
-	client := m3thrift.NewM3ClientFactory(trans, protocolFactory)
-	resourcePool := newResourcePool(protocolFactory)
+	var (
+		client       = m3thrift.NewM3ClientFactory(trans, protocolFactory)
+		resourcePool = newResourcePool(protocolFactory)
+		tagm         = make(map[string]string)
+		tags         = resourcePool.getMetricTagSlice()
+	)
 
 	// Create common tags
-	tags := resourcePool.getTagList()
 	for k, v := range opts.CommonTags {
-		tags[createTag(resourcePool, k, v)] = true
+		tagm[k] = v
 	}
+
 	if opts.CommonTags[ServiceTag] == "" {
 		if opts.Service == "" {
 			return nil, fmt.Errorf("%s common tag is required", ServiceTag)
 		}
-		tags[createTag(resourcePool, ServiceTag, opts.Service)] = true
+		tagm[ServiceTag] = opts.Service
 	}
+
 	if opts.CommonTags[EnvTag] == "" {
 		if opts.Env == "" {
 			return nil, fmt.Errorf("%s common tag is required", EnvTag)
 		}
-		tags[createTag(resourcePool, EnvTag, opts.Env)] = true
+		tagm[EnvTag] = opts.Env
 	}
+
 	if opts.IncludeHost {
 		if opts.CommonTags[HostTag] == "" {
 			hostname, err := os.Hostname()
 			if err != nil {
 				return nil, errors.WithMessage(err, "error resolving host tag")
 			}
-			tags[createTag(resourcePool, HostTag, hostname)] = true
+			tagm[HostTag] = hostname
 		}
 	}
 
-	// Calculate size of common tags
-	batch := resourcePool.getBatch()
-	batch.CommonTags = tags
-	batch.Metrics = []*m3thrift.Metric{}
+	for k, v := range tagm {
+		tags = append(tags, m3thrift.MetricTag{
+			Name:  k,
+			Value: v,
+		})
+	}
 
-	proto := resourcePool.getProto()
+	// Calculate size of common tags
+	var (
+		batch = m3thrift.MetricBatch{
+			Metrics:    resourcePool.getMetricSlice(),
+			CommonTags: tags,
+		}
+		proto = resourcePool.getProto()
+	)
+
 	if err := batch.Write(proto); err != nil {
 		return nil, errors.WithMessage(
 			err,
 			"failed to write to proto for size calculation",
 		)
 	}
+
+	resourcePool.releaseMetricSlice(batch.Metrics)
 
 	var (
 		calc             = proto.Transport().(*customtransport.TCalcTransport)
@@ -239,17 +248,16 @@ func NewReporter(opts Options) (Reporter, error) {
 	}
 
 	r := &reporter{
-		client:          client,
-		curBatch:        batch,
-		calc:            calc,
-		calcProto:       proto,
-		commonTags:      tags,
-		freeBytes:       freeBytes,
-		resourcePool:    resourcePool,
 		bucketIDTagName: opts.HistogramBucketIDName,
 		bucketTagName:   opts.HistogramBucketName,
 		bucketValFmt:    "%." + strconv.Itoa(int(opts.HistogramBucketTagPrecision)) + "f",
+		calc:            calc,
+		calcProto:       proto,
+		client:          client,
+		commonTags:      tags,
+		freeBytes:       freeBytes,
 		metCh:           make(chan sizedMetric, opts.MaxQueueSize),
+		resourcePool:    resourcePool,
 	}
 
 	r.processors.Add(1)
@@ -330,40 +338,48 @@ func (r *reporter) AllocateHistogram(
 		))
 		bucketIDLenStr        = strconv.Itoa(bucketIDLen)
 		bucketIDFmt           = "%0" + bucketIDLenStr + "d"
+		htags                 = make(map[string]string, len(tags))
 		cachedValueBuckets    []cachedHistogramBucket
 		cachedDurationBuckets []cachedHistogramBucket
 	)
 
+	for k, v := range tags {
+		htags[k] = v
+	}
+
 	for i, pair := range tally.BucketPairs(buckets) {
 		var (
-			histTags   = make(map[string]string, len(tags))
+			counter    = r.allocateCounter(name, htags)
 			idTagValue = fmt.Sprintf(bucketIDFmt, i)
+			hbucket    = cachedHistogramBucket{
+				valueUpperBound:    pair.UpperBoundValue(),
+				durationUpperBound: pair.UpperBoundDuration(),
+				metric:             counter,
+			}
 		)
-		for k, v := range tags {
-			histTags[k] = v
-		}
-		histTags[r.bucketIDTagName] = idTagValue
 
+		hbucket.metric.metric.Tags = append(
+			hbucket.metric.metric.Tags,
+			m3thrift.MetricTag{
+				Name:  r.bucketIDTagName,
+				Value: idTagValue,
+			},
+			m3thrift.MetricTag{
+				Name: r.bucketTagName,
+			},
+		)
+
+		bucketIdx := len(hbucket.metric.metric.Tags) - 1
 		if isDuration {
-			histTags[r.bucketTagName] =
-				r.durationBucketString(pair.LowerBoundDuration()) + "-" +
-					r.durationBucketString(pair.UpperBoundDuration())
-
-			cachedDurationBuckets = append(cachedDurationBuckets, cachedHistogramBucket{
-				valueUpperBound:    pair.UpperBoundValue(),
-				durationUpperBound: pair.UpperBoundDuration(),
-				metric:             r.allocateCounter(name, histTags),
-			})
+			hbucket.metric.metric.Tags[bucketIdx].Value =
+				r.durationBucketString(pair.LowerBoundDuration()) +
+					"-" + r.durationBucketString(pair.UpperBoundDuration())
+			cachedDurationBuckets = append(cachedDurationBuckets, hbucket)
 		} else {
-			histTags[r.bucketTagName] =
-				r.valueBucketString(pair.LowerBoundValue()) + "-" +
-					r.valueBucketString(pair.UpperBoundValue())
-
-			cachedValueBuckets = append(cachedValueBuckets, cachedHistogramBucket{
-				valueUpperBound:    pair.UpperBoundValue(),
-				durationUpperBound: pair.UpperBoundDuration(),
-				metric:             r.allocateCounter(name, histTags),
-			})
+			hbucket.metric.metric.Tags[bucketIdx].Value =
+				r.valueBucketString(pair.LowerBoundValue()) +
+					"-" + r.valueBucketString(pair.UpperBoundValue())
+			cachedValueBuckets = append(cachedValueBuckets, hbucket)
 		}
 	}
 
@@ -403,47 +419,40 @@ func (r *reporter) newMetric(
 	name string,
 	tags map[string]string,
 	t metricType,
-) *m3thrift.Metric {
-	var (
-		m      = r.resourcePool.getMetric()
-		metVal = r.resourcePool.getValue()
-	)
-	m.Name = name
-	if tags != nil {
-		metTags := r.resourcePool.getTagList()
-		for k, v := range tags {
-			val := v
-			metTag := r.resourcePool.getTag()
-			metTag.TagName = k
-			metTag.TagValue = &val
-			metTags[metTag] = true
-		}
-		m.Tags = metTags
-	} else {
-		m.Tags = nil
+) m3thrift.Metric {
+	m := m3thrift.Metric{
+		Name:      name,
+		Timestamp: _maxInt64,
 	}
-	m.Timestamp = &maxInt64
 
 	switch t {
 	case counterType:
-		c := r.resourcePool.getCount()
-		c.I64Value = &maxInt64
-		metVal.Count = c
+		m.Value.MetricType = m3thrift.MetricType_COUNTER
+		m.Value.Count = _maxInt64
 	case gaugeType:
-		g := r.resourcePool.getGauge()
-		g.DValue = &maxFloat64
-		metVal.Gauge = g
+		m.Value.MetricType = m3thrift.MetricType_GAUGE
+		m.Value.Gauge = _maxFloat64
 	case timerType:
-		t := r.resourcePool.getTimer()
-		t.I64Value = &maxInt64
-		metVal.Timer = t
+		m.Value.MetricType = m3thrift.MetricType_TIMER
+		m.Value.Timer = _maxInt64
 	}
-	m.MetricValue = metVal
+
+	if len(tags) == 0 {
+		return m
+	}
+
+	m.Tags = r.resourcePool.getMetricTagSlice()
+	for k, v := range tags {
+		m.Tags = append(m.Tags, m3thrift.MetricTag{
+			Name:  k,
+			Value: v,
+		})
+	}
 
 	return m
 }
 
-func (r *reporter) calculateSize(m *m3thrift.Metric) int32 {
+func (r *reporter) calculateSize(m m3thrift.Metric) int32 {
 	r.calcLock.Lock()
 	m.Write(r.calcProto) //nolint:errcheck
 	size := r.calc.GetCount()
@@ -452,40 +461,21 @@ func (r *reporter) calculateSize(m *m3thrift.Metric) int32 {
 	return size
 }
 
-func (r *reporter) reportCopyMetric(
-	m *m3thrift.Metric,
-	size int32,
-	t metricType,
-	iValue int64,
-	dValue float64,
-) {
-	copy := r.resourcePool.getMetric()
-	copy.Name = m.Name
-	copy.Tags = m.Tags
-	timestampNano := time.Now().UnixNano()
-	copy.Timestamp = &timestampNano
-	copy.MetricValue = r.resourcePool.getValue()
+func (r *reporter) reportCopyMetric(m m3thrift.Metric, size int32) {
+	m.Timestamp = time.Now().UnixNano()
 
-	switch t {
-	case counterType:
-		c := r.resourcePool.getCount()
-		c.I64Value = &iValue
-		copy.MetricValue.Count = c
-	case gaugeType:
-		g := r.resourcePool.getGauge()
-		g.DValue = &dValue
-		copy.MetricValue.Gauge = g
-	case timerType:
-		t := r.resourcePool.getTimer()
-		t.I64Value = &iValue
-		copy.MetricValue.Timer = t
+	sm := sizedMetric{
+		m:    m,
+		size: size,
+		set:  true,
 	}
 
 	r.status.RLock()
 	if !r.status.closed {
 		select {
-		case r.metCh <- sizedMetric{copy, size}:
+		case r.metCh <- sm:
 		default:
+			// TODO: don't drop when full, or add metric to track
 		}
 	}
 	r.status.RUnlock()
@@ -531,12 +521,12 @@ func (r *reporter) Tagging() bool {
 
 func (r *reporter) process() {
 	var (
-		mets  = make([]*m3thrift.Metric, 0, (r.freeBytes / 10))
+		mets  = make([]m3thrift.Metric, 0, (r.freeBytes / 10))
 		bytes int32
 	)
 
 	for smet := range r.metCh {
-		if smet.m == nil {
+		if !smet.set {
 			// Explicit flush requested
 			if len(mets) > 0 {
 				mets = r.flush(mets)
@@ -563,56 +553,41 @@ func (r *reporter) process() {
 }
 
 func (r *reporter) flush(
-	mets []*m3thrift.Metric,
-) []*m3thrift.Metric {
-	r.curBatchLock.Lock()
-	r.curBatch.Metrics = mets
-	r.client.EmitMetricBatch(r.curBatch) //nolint:errcheck
-	r.curBatch.Metrics = nil
-	r.curBatchLock.Unlock()
+	mets []m3thrift.Metric,
+) []m3thrift.Metric {
+	//nolint:errcheck
+	r.client.EmitMetricBatchV2(m3thrift.MetricBatch{
+		Metrics:    mets,
+		CommonTags: r.commonTags,
+	})
 
-	r.resourcePool.releaseShallowMetrics(mets)
-
-	for i := range mets {
-		mets[i] = nil
-	}
 	return mets[:0]
 }
 
-func createTag(
-	pool *resourcePool,
-	tagName, tagValue string,
-) *m3thrift.MetricTag {
-	tag := pool.getTag()
-	tag.TagName = tagName
-	if tagValue != "" {
-		tag.TagValue = &tagValue
-	}
-
-	return tag
-}
-
 type cachedMetric struct {
-	metric   *m3thrift.Metric
+	metric   m3thrift.Metric
 	reporter *reporter
 	size     int32
 }
 
 func (c cachedMetric) ReportCount(value int64) {
-	c.reporter.reportCopyMetric(c.metric, c.size, counterType, value, 0)
+	c.metric.Value.Count = value
+	c.reporter.reportCopyMetric(c.metric, c.size)
 }
 
 func (c cachedMetric) ReportGauge(value float64) {
-	c.reporter.reportCopyMetric(c.metric, c.size, gaugeType, 0, value)
+	c.metric.Value.Gauge = value
+	c.reporter.reportCopyMetric(c.metric, c.size)
 }
 
 func (c cachedMetric) ReportTimer(interval time.Duration) {
-	val := int64(interval)
-	c.reporter.reportCopyMetric(c.metric, c.size, timerType, val, 0)
+	c.metric.Value.Timer = int64(interval)
+	c.reporter.reportCopyMetric(c.metric, c.size)
 }
 
 func (c cachedMetric) ReportSamples(value int64) {
-	c.reporter.reportCopyMetric(c.metric, c.size, counterType, value, 0)
+	c.metric.Value.Count = value
+	c.reporter.reportCopyMetric(c.metric, c.size)
 }
 
 type noopMetric struct {
@@ -681,6 +656,7 @@ func (h cachedHistogram) DurationBucket(
 }
 
 type sizedMetric struct {
-	m    *m3thrift.Metric
+	m    m3thrift.Metric
 	size int32
+	set  bool
 }

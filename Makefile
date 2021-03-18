@@ -2,7 +2,7 @@ export GO15VENDOREXPERIMENT=1
 
 BENCH_FLAGS ?= -cpuprofile=cpu.pprof -memprofile=mem.pprof -benchmem
 PKGS ?= $(shell glide novendor)
-PKG_FILES ?= *.go example/*.go m3
+PKG_FILES ?= *.go example/*.go m3/*.go m3/customtransports m3/thriftudp
 LINT_IGNORE = m3/thrift\|thirdparty
 LICENSE_IGNORE = thirdparty
 
