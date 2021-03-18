@@ -208,6 +208,8 @@ func (r *testStatsReporter) AllocateCounter(
 	return counter
 }
 
+func (r *testStatsReporter) DeallocateCounter(CachedCount) {}
+
 func (r *testStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
 	r.counters[name] = &testIntValue{
 		val:  value,
@@ -227,6 +229,8 @@ func (r *testStatsReporter) AllocateGauge(
 	r.gauges[name] = gauge
 	return gauge
 }
+
+func (r *testStatsReporter) DeallocateGauge(CachedGauge) {}
 
 func (r *testStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
 	r.gauges[name] = &testFloatValue{
@@ -248,6 +252,8 @@ func (r *testStatsReporter) AllocateTimer(
 	return timer
 }
 
+func (r *testStatsReporter) DeallocateTimer(CachedTimer) {}
+
 func (r *testStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
 	r.timers[name] = &testIntValue{
 		val:  int64(interval),
@@ -263,6 +269,8 @@ func (r *testStatsReporter) AllocateHistogram(
 ) CachedHistogram {
 	return testStatsReporterCachedHistogram{r, name, tags, buckets}
 }
+
+func (r *testStatsReporter) DeallocateHistogram(CachedHistogram) {}
 
 type testStatsReporterCachedHistogram struct {
 	r       *testStatsReporter

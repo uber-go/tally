@@ -141,6 +141,12 @@ func (r *multiCached) AllocateCounter(
 	return multiMetric{counters: metrics}
 }
 
+func (r *multiCached) DeallocateCounter(counter tally.CachedCount) {
+	for _, rep := range r.reporters {
+		rep.DeallocateCounter(counter)
+	}
+}
+
 func (r *multiCached) AllocateGauge(
 	name string,
 	tags map[string]string,
@@ -150,6 +156,12 @@ func (r *multiCached) AllocateGauge(
 		metrics = append(metrics, r.AllocateGauge(name, tags))
 	}
 	return multiMetric{gauges: metrics}
+}
+
+func (r *multiCached) DeallocateGauge(gauge tally.CachedGauge) {
+	for _, rep := range r.reporters {
+		rep.DeallocateGauge(gauge)
+	}
 }
 
 func (r *multiCached) AllocateTimer(
@@ -163,6 +175,12 @@ func (r *multiCached) AllocateTimer(
 	return multiMetric{timers: metrics}
 }
 
+func (r *multiCached) DeallocateTimer(timer tally.CachedTimer) {
+	for _, rep := range r.reporters {
+		rep.DeallocateTimer(timer)
+	}
+}
+
 func (r *multiCached) AllocateHistogram(
 	name string,
 	tags map[string]string,
@@ -173,6 +191,12 @@ func (r *multiCached) AllocateHistogram(
 		metrics = append(metrics, r.AllocateHistogram(name, tags, buckets))
 	}
 	return multiMetric{histograms: metrics}
+}
+
+func (r *multiCached) DeallocateHistogram(histogram tally.CachedHistogram) {
+	for _, rep := range r.reporters {
+		rep.DeallocateHistogram(histogram)
+	}
 }
 
 func (r *multiCached) Capabilities() tally.Capabilities {

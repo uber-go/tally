@@ -83,22 +83,28 @@ func (c *counter) value() int64 {
 	return curr - prev
 }
 
-func (c *counter) report(name string, tags map[string]string, r StatsReporter) {
+func (c *counter) report(
+	name string,
+	tags map[string]string,
+	r StatsReporter,
+) bool {
 	delta := c.value()
 	if delta == 0 {
-		return
+		return false
 	}
 
 	r.ReportCounter(name, tags, delta)
+	return true
 }
 
-func (c *counter) cachedReport() {
+func (c *counter) cachedReport() bool {
 	delta := c.value()
 	if delta == 0 {
-		return
+		return false
 	}
 
 	c.cachedCount.ReportCount(delta)
+	return true
 }
 
 func (c *counter) snapshot() int64 {
@@ -124,16 +130,26 @@ func (g *gauge) value() float64 {
 	return math.Float64frombits(atomic.LoadUint64(&g.curr))
 }
 
-func (g *gauge) report(name string, tags map[string]string, r StatsReporter) {
-	if atomic.SwapUint64(&g.updated, 0) == 1 {
-		r.ReportGauge(name, tags, g.value())
+func (g *gauge) report(
+	name string,
+	tags map[string]string,
+	r StatsReporter,
+) bool {
+	if atomic.SwapUint64(&g.updated, 0) == 0 {
+		return false
 	}
+
+	r.ReportGauge(name, tags, g.value())
+	return true
 }
 
-func (g *gauge) cachedReport() {
-	if atomic.SwapUint64(&g.updated, 0) == 1 {
-		g.cachedGauge.ReportGauge(g.value())
+func (g *gauge) cachedReport() bool {
+	if atomic.SwapUint64(&g.updated, 0) == 0 {
+		return false
 	}
+
+	g.cachedGauge.ReportGauge(g.value())
+	return true
 }
 
 func (g *gauge) snapshot() float64 {
@@ -149,6 +165,7 @@ type timer struct {
 	reporter    StatsReporter
 	cachedTimer CachedTimer
 	unreported  timerValues
+	updated     uint32
 }
 
 type timerValues struct {
@@ -180,6 +197,8 @@ func (t *timer) Record(interval time.Duration) {
 	} else {
 		t.reporter.ReportTimer(t.name, t.tags, interval)
 	}
+
+	atomic.StoreUint32(&t.updated, 1)
 }
 
 func (t *timer) Start() Stopwatch {
@@ -189,6 +208,10 @@ func (t *timer) Start() Stopwatch {
 func (t *timer) RecordStopwatch(stopwatchStart time.Time) {
 	d := globalNow().Sub(stopwatchStart)
 	t.Record(d)
+}
+
+func (t *timer) hasReported() bool {
+	return atomic.SwapUint32(&t.updated, 0) == 1
 }
 
 func (t *timer) snapshot() []time.Duration {
@@ -323,12 +346,18 @@ func newHistogram(
 	return h
 }
 
-func (h *histogram) report(name string, tags map[string]string, r StatsReporter) {
+func (h *histogram) report(
+	name string,
+	tags map[string]string,
+	r StatsReporter,
+) (reported bool) {
 	for i := range h.buckets {
 		samples := h.samples[i].counter.value()
 		if samples == 0 {
 			continue
 		}
+
+		reported = true
 
 		switch h.htype {
 		case valueHistogramType:
@@ -351,14 +380,18 @@ func (h *histogram) report(name string, tags map[string]string, r StatsReporter)
 			)
 		}
 	}
+
+	return
 }
 
-func (h *histogram) cachedReport() {
+func (h *histogram) cachedReport() (reported bool) {
 	for i := range h.buckets {
 		samples := h.samples[i].counter.value()
 		if samples == 0 {
 			continue
 		}
+
+		reported = true
 
 		switch h.htype {
 		case valueHistogramType:
@@ -367,6 +400,8 @@ func (h *histogram) cachedReport() {
 			h.samples[i].cachedBucket.ReportSamples(samples)
 		}
 	}
+
+	return
 }
 
 func (h *histogram) RecordValue(value float64) {

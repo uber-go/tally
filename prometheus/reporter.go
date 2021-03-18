@@ -369,6 +369,10 @@ func (r *reporter) AllocateCounter(name string, tags map[string]string) tally.Ca
 	return &cachedMetric{counter: counterVec.With(tags)}
 }
 
+// DeallocateCounter implements tally.CachedStatsReporter.
+// This is currently a nop method.
+func (r *reporter) DeallocateCounter(tally.CachedCount) {}
+
 func (r *reporter) RegisterGauge(
 	name string,
 	tagKeys []string,
@@ -417,6 +421,10 @@ func (r *reporter) AllocateGauge(name string, tags map[string]string) tally.Cach
 	}
 	return &cachedMetric{gauge: gaugeVec.With(tags)}
 }
+
+// DeallocateGauge implements tally.CachedStatsReporter.
+// This is currently a nop method.
+func (r *reporter) DeallocateGauge(tally.CachedGauge) {}
 
 func (r *reporter) RegisterTimer(
 	name string,
@@ -557,6 +565,10 @@ func (r *reporter) AllocateTimer(name string, tags map[string]string) tally.Cach
 	return timer
 }
 
+// DeallocateTimer implements tally.CachedStatsReporter.
+// This is currently a nop method.
+func (r *reporter) DeallocateTimer(tally.CachedTimer) {}
+
 func (r *reporter) AllocateHistogram(
 	name string,
 	tags map[string]string,
@@ -570,6 +582,10 @@ func (r *reporter) AllocateHistogram(
 	}
 	return &cachedMetric{histogram: histogramVec.With(tags)}
 }
+
+// DeallocateHistogram implements tally.CachedStatsReporter.
+// This is currently a nop method.
+func (r *reporter) DeallocateHistogram(tally.CachedHistogram) {}
 
 func (r *reporter) Capabilities() tally.Capabilities {
 	return r

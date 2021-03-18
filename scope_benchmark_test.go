@@ -239,13 +239,22 @@ func (n noopCachedReporter) AllocateCounter(name string, tags map[string]string)
 	return noopStat{}
 }
 
+func (n noopCachedReporter) DeallocateCounter(CachedCount) {}
+
 func (n noopCachedReporter) AllocateGauge(name string, tags map[string]string) CachedGauge {
 	return noopStat{}
 }
 
+func (n noopCachedReporter) DeallocateGauge(CachedGauge) {}
+
 func (n noopCachedReporter) AllocateTimer(name string, tags map[string]string) CachedTimer {
 	return noopStat{}
 }
+
+func (n noopCachedReporter) DeallocateTimer(CachedTimer) {}
+
 func (n noopCachedReporter) AllocateHistogram(name string, tags map[string]string, buckets Buckets) CachedHistogram {
 	return noopStat{}
 }
+
+func (n noopCachedReporter) DeallocateHistogram(CachedHistogram) {}

@@ -290,6 +290,21 @@ func (r *reporter) allocateCounter(
 	}
 }
 
+// DeallocateCounter implements tally.CachedStatsReporter.
+func (r *reporter) DeallocateCounter(counter tally.CachedCount) {
+	if counter == nil {
+		return
+	}
+
+	c, ok := counter.(cachedMetric)
+	if !ok {
+		return
+	}
+
+	r.resourcePool.releaseMetricTagSlice(c.metric.Tags)
+	c.metric.Tags = nil
+}
+
 // AllocateGauge implements tally.CachedStatsReporter.
 func (r *reporter) AllocateGauge(
 	name string,
@@ -307,6 +322,21 @@ func (r *reporter) AllocateGauge(
 	}
 }
 
+// DeallocateGauge implements tally.CachedStatsReporter.
+func (r *reporter) DeallocateGauge(gauge tally.CachedGauge) {
+	if gauge == nil {
+		return
+	}
+
+	g, ok := gauge.(cachedMetric)
+	if !ok {
+		return
+	}
+
+	r.resourcePool.releaseMetricTagSlice(g.metric.Tags)
+	g.metric.Tags = nil
+}
+
 // AllocateTimer implements tally.CachedStatsReporter.
 func (r *reporter) AllocateTimer(
 	name string,
@@ -322,6 +352,21 @@ func (r *reporter) AllocateTimer(
 		reporter: r,
 		size:     size,
 	}
+}
+
+// DeallocateTimer implements tally.CachedStatsReporter.
+func (r *reporter) DeallocateTimer(timer tally.CachedTimer) {
+	if timer == nil {
+		return
+	}
+
+	t, ok := timer.(cachedMetric)
+	if !ok {
+		return
+	}
+
+	r.resourcePool.releaseMetricTagSlice(t.metric.Tags)
+	t.metric.Tags = nil
 }
 
 // AllocateHistogram implements tally.CachedStatsReporter.
@@ -390,6 +435,28 @@ func (r *reporter) AllocateHistogram(
 		cachedValueBuckets:    cachedValueBuckets,
 		cachedDurationBuckets: cachedDurationBuckets,
 	}
+}
+
+// DeallocateHistogram implements tally.CachedStatsReporter.
+func (r *reporter) DeallocateHistogram(histogram tally.CachedHistogram) {
+	if histogram == nil {
+		return
+	}
+
+	h, ok := histogram.(cachedHistogram)
+	if !ok {
+		return
+	}
+
+	for _, hbucket := range h.cachedDurationBuckets {
+		r.DeallocateCounter(hbucket.metric)
+	}
+	h.cachedDurationBuckets = nil
+
+	for _, hbucket := range h.cachedValueBuckets {
+		r.DeallocateCounter(hbucket.metric)
+	}
+	h.cachedValueBuckets = nil
 }
 
 func (r *reporter) valueBucketString(v float64) string {
