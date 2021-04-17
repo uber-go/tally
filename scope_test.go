@@ -819,6 +819,96 @@ func TestSubScope(t *testing.T) {
 	assert.Equal(t, tags, histograms["foo.mork.baz"].tags)
 }
 
+func TestSubScopeClose(t *testing.T) {
+	r := newTestStatsReporter()
+
+	rs, closer := NewRootScope(ScopeOptions{Prefix: "foo", Reporter: r}, 0)
+	// defer closer.Close()
+	_ = closer
+
+	var (
+		root        = rs.(*scope)
+		s           = root.SubScope("mork").(*scope)
+		rootCounter = root.Counter("foo")
+		subCounter  = s.Counter("foo")
+	)
+
+	// Emit a metric from both scopes.
+	r.cg.Add(1)
+	rootCounter.Inc(1)
+	r.cg.Add(1)
+	subCounter.Inc(1)
+
+	// Verify that we got both metrics.
+	root.reportRegistry()
+	r.WaitAll()
+	counters := r.getCounters()
+	require.EqualValues(t, 1, counters["foo.foo"].val)
+	require.EqualValues(t, 1, counters["foo.mork.foo"].val)
+
+	// Close the subscope. We expect both metrics to still be reported, because
+	// we won't have reported the registry before we update the metrics.
+	require.NoError(t, s.Close())
+
+	// Create a subscope from the now-closed scope; it should nop.
+	ns := s.SubScope("foobar")
+	require.Equal(t, NoopScope, ns)
+
+	// Emit a metric from all scopes.
+	r.cg.Add(1)
+	rootCounter.Inc(2)
+	r.cg.Add(1)
+	subCounter.Inc(2)
+
+	// Verify that we still got both metrics.
+	root.reportLoopRun()
+	r.WaitAll()
+	counters = r.getCounters()
+	require.EqualValues(t, 2, counters["foo.foo"].val)
+	require.EqualValues(t, 2, counters["foo.mork.foo"].val)
+
+	// Emit a metric for both scopes. The root counter should succeed, and the
+	// subscope counter should not update what's in the reporter.
+	r.cg.Add(1)
+	rootCounter.Inc(3)
+	subCounter.Inc(3)
+	root.reportLoopRun()
+	r.WaitAll()
+	time.Sleep(time.Second) // since we can't wg.Add the non-reported counter
+
+	// We only expect the root scope counter; the subscope counter will be the
+	// value previously held by the reporter, because it has not been udpated.
+	counters = r.getCounters()
+	require.EqualValues(t, 3, counters["foo.foo"].val)
+	require.EqualValues(t, 2, counters["foo.mork.foo"].val)
+
+	// Ensure that we can double-close harmlessly.
+	require.NoError(t, s.Close())
+
+	// Create one more scope so that we can ensure it's defunct once the root is
+	// closed.
+	ns = root.SubScope("newscope")
+
+	// Close the root scope. We should not be able to emit any more metrics,
+	// because the root scope reports the registry prior to closing.
+	require.NoError(t, closer.Close())
+
+	ns.Counter("newcounter").Inc(1)
+	rootCounter.Inc(4)
+	root.registry.Report(r)
+	time.Sleep(time.Second) // since we can't wg.Add the non-reported counter
+
+	// We do not expect any updates.
+	counters = r.getCounters()
+	require.EqualValues(t, 3, counters["foo.foo"].val)
+	require.EqualValues(t, 2, counters["foo.mork.foo"].val)
+	_, found := counters["newscope.newcounter"]
+	require.False(t, found)
+
+	// Ensure that we can double-close harmlessly.
+	require.NoError(t, closer.Close())
+}
+
 func TestTaggedSubScope(t *testing.T) {
 	r := newTestStatsReporter()
 

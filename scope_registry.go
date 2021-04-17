@@ -20,17 +20,21 @@
 
 package tally
 
-import "sync"
+import (
+	"sync"
+)
 
 var scopeRegistryKey = keyForPrefixedStringMaps
 
 type scopeRegistry struct {
 	mu        sync.RWMutex
+	root      *scope
 	subscopes map[string]*scope
 }
 
 func newScopeRegistry(root *scope) *scopeRegistry {
 	r := &scopeRegistry{
+		root:      root,
 		subscopes: make(map[string]*scope),
 	}
 	r.subscopes[scopeRegistryKey(root.prefix, root.tags)] = root
@@ -38,20 +42,33 @@ func newScopeRegistry(root *scope) *scopeRegistry {
 }
 
 func (r *scopeRegistry) Report(reporter StatsReporter) {
+	defer r.purgeIfRootClosed()
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	for _, s := range r.subscopes {
+	for name, s := range r.subscopes {
 		s.report(reporter)
+
+		if s.closed.Load() {
+			r.removeWithRLock(name)
+			s.clearMetrics()
+		}
 	}
 }
 
 func (r *scopeRegistry) CachedReport() {
+	defer r.purgeIfRootClosed()
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	for _, s := range r.subscopes {
+	for name, s := range r.subscopes {
 		s.cachedReport()
+
+		if s.closed.Load() {
+			r.removeWithRLock(name)
+			s.clearMetrics()
+		}
 	}
 }
 
@@ -65,6 +82,10 @@ func (r *scopeRegistry) ForEachScope(f func(*scope)) {
 }
 
 func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]string) *scope {
+	if r.root.closed.Load() || parent.closed.Load() {
+		return NoopScope.(*scope)
+	}
+
 	key := scopeRegistryKey(prefix, parent.tags, tags)
 
 	r.mu.RLock()
@@ -103,6 +124,7 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
 		timers:          make(map[string]*timer),
 		bucketCache:     parent.bucketCache,
+		done:            make(chan struct{}),
 	}
 	r.subscopes[key] = subscope
 	return subscope
@@ -111,4 +133,29 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 func (r *scopeRegistry) lockedLookup(key string) (*scope, bool) {
 	ss, ok := r.subscopes[key]
 	return ss, ok
+}
+
+func (r *scopeRegistry) purgeIfRootClosed() {
+	if !r.root.closed.Load() {
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for k, s := range r.subscopes {
+		_ = s.Close()
+		s.clearMetrics()
+		delete(r.subscopes, k)
+	}
+}
+
+func (r *scopeRegistry) removeWithRLock(key string) {
+	// n.b. This function must lock the registry for writing and return it to an
+	//      RLocked state prior to exiting. Defer order is important (LIFO).
+	r.mu.RUnlock()
+	defer r.mu.RLock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.subscopes, key)
 }
