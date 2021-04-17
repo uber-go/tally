@@ -24,6 +24,8 @@ import (
 	"io"
 	"sync"
 	"time"
+
+	"go.uber.org/atomic"
 )
 
 const (
@@ -68,7 +70,6 @@ type scope struct {
 	sanitizer      Sanitizer
 
 	registry *scopeRegistry
-	status   scopeStatus
 
 	cm sync.RWMutex
 	gm sync.RWMutex
@@ -86,12 +87,9 @@ type scope struct {
 	// no buffering is involved.
 
 	bucketCache *bucketCache
-}
-
-type scopeStatus struct {
-	sync.RWMutex
-	closed bool
-	quit   chan struct{}
+	closed      atomic.Bool
+	done        chan struct{}
+	wg          sync.WaitGroup
 }
 
 // ScopeOptions is a set of options to construct a scope.
@@ -148,26 +146,22 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 	}
 
 	s := &scope{
-		separator:      sanitizer.Name(opts.Separator),
-		prefix:         sanitizer.Name(opts.Prefix),
-		reporter:       opts.Reporter,
-		cachedReporter: opts.CachedReporter,
-		baseReporter:   baseReporter,
-		defaultBuckets: opts.DefaultBuckets,
-		sanitizer:      sanitizer,
-		status: scopeStatus{
-			closed: false,
-			quit:   make(chan struct{}, 1),
-		},
-
+		baseReporter:    baseReporter,
+		bucketCache:     newBucketCache(),
+		cachedReporter:  opts.CachedReporter,
 		counters:        make(map[string]*counter),
 		countersSlice:   make([]*counter, 0, _defaultInitialSliceSize),
+		defaultBuckets:  opts.DefaultBuckets,
+		done:            make(chan struct{}),
 		gauges:          make(map[string]*gauge),
 		gaugesSlice:     make([]*gauge, 0, _defaultInitialSliceSize),
 		histograms:      make(map[string]*histogram),
 		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
+		prefix:          sanitizer.Name(opts.Prefix),
+		reporter:        opts.Reporter,
+		sanitizer:       sanitizer,
+		separator:       sanitizer.Name(opts.Separator),
 		timers:          make(map[string]*timer),
-		bucketCache:     newBucketCache(),
 	}
 
 	// NB(r): Take a copy of the tags on creation
@@ -178,7 +172,11 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 	s.registry = newScopeRegistry(s)
 
 	if interval > 0 {
-		go s.reportLoop(interval)
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.reportLoop(interval)
+		}()
 	}
 
 	return s
@@ -238,27 +236,21 @@ func (s *scope) reportLoop(interval time.Duration) {
 		select {
 		case <-ticker.C:
 			s.reportLoopRun()
-		case <-s.status.quit:
+		case <-s.done:
 			return
 		}
 	}
 }
 
 func (s *scope) reportLoopRun() {
-	// Need to hold a status lock to ensure not to report
-	// and flush after a close
-	s.status.RLock()
-	defer s.status.RUnlock()
-
-	if s.status.closed {
+	if s.closed.Load() {
 		return
 	}
 
-	s.reportRegistryWithLock()
+	s.reportRegistry()
 }
 
-// reports current registry with scope status lock held
-func (s *scope) reportRegistryWithLock() {
+func (s *scope) reportRegistry() {
 	if s.reporter != nil {
 		s.registry.Report(s.reporter)
 		s.reporter.Flush()
@@ -508,18 +500,12 @@ func (s *scope) Snapshot() Snapshot {
 }
 
 func (s *scope) Close() error {
-	s.status.Lock()
-	defer s.status.Unlock()
-
-	// don't wait to close more than once (panic on double close of
-	// s.status.quit)
-	if s.status.closed {
+	if !s.closed.CAS(false, true) {
 		return nil
 	}
 
-	s.status.closed = true
-	close(s.status.quit)
-	s.reportRegistryWithLock()
+	close(s.done)
+	s.reportRegistry()
 
 	if closer, ok := s.baseReporter.(io.Closer); ok {
 		return closer.Close()

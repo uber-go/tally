@@ -553,9 +553,7 @@ func TestHistogramSharedBucketMetrics(t *testing.T) {
 	}
 
 	wg.Wait()
-	scope.status.Lock()
-	scope.reportRegistryWithLock()
-	scope.status.Unlock()
+	scope.reportRegistry()
 	r.WaitAll()
 
 	unseen := map[string]struct{}{
