@@ -356,6 +356,7 @@ func (r *reporter) AllocateHistogram(
 				durationUpperBound: pair.UpperBoundDuration(),
 				metric:             counter,
 			}
+			delta = len(r.bucketIDTagName) + len(r.bucketTagName) + len(idTagValue)
 		)
 
 		hbucket.metric.metric.Tags = append(
@@ -371,14 +372,16 @@ func (r *reporter) AllocateHistogram(
 
 		bucketIdx := len(hbucket.metric.metric.Tags) - 1
 		if isDuration {
-			hbucket.metric.metric.Tags[bucketIdx].Value =
-				r.durationBucketString(pair.LowerBoundDuration()) +
-					"-" + r.durationBucketString(pair.UpperBoundDuration())
+			bname := r.durationBucketString(pair.LowerBoundDuration()) + "-" +
+				r.durationBucketString(pair.UpperBoundDuration())
+			hbucket.metric.metric.Tags[bucketIdx].Value = bname
+			hbucket.metric.size += int32(delta + len(bname))
 			cachedDurationBuckets = append(cachedDurationBuckets, hbucket)
 		} else {
-			hbucket.metric.metric.Tags[bucketIdx].Value =
-				r.valueBucketString(pair.LowerBoundValue()) +
-					"-" + r.valueBucketString(pair.UpperBoundValue())
+			bname := r.valueBucketString(pair.LowerBoundValue()) + "-" +
+				r.valueBucketString(pair.UpperBoundValue())
+			hbucket.metric.metric.Tags[bucketIdx].Value = bname
+			hbucket.metric.size += int32(delta + len(bname))
 			cachedValueBuckets = append(cachedValueBuckets, hbucket)
 		}
 	}
