@@ -348,11 +348,10 @@ func (r *reporter) AllocateHistogram(
 	var (
 		_, isDuration = buckets.(tally.DurationBuckets)
 		bucketIDLen   = int(math.Max(
-			float64(len(strconv.Itoa(buckets.Len()))),
+			float64(ndigits(buckets.Len())),
 			float64(minMetricBucketIDTagLength),
 		))
-		bucketIDLenStr        = strconv.Itoa(bucketIDLen)
-		bucketIDFmt           = "%0" + bucketIDLenStr + "d"
+		bucketIDFmt           = "%0" + strconv.Itoa(bucketIDLen) + "d"
 		cachedValueBuckets    []cachedHistogramBucket
 		cachedDurationBuckets []cachedHistogramBucket
 	)
@@ -542,8 +541,14 @@ func (r *reporter) Tagging() bool {
 
 func (r *reporter) process() {
 	var (
-		mets  = make([]m3thrift.Metric, 0, r.freeBytes/10)
-		bytes int32
+		extraTags = sync.Pool{
+			New: func() interface{} {
+				return make([]m3thrift.MetricTag, 0, 8)
+			},
+		}
+		borrowedTags = make([][]m3thrift.MetricTag, 0, 128)
+		mets         = make([]m3thrift.Metric, 0, r.freeBytes/10)
+		bytes        int32
 	)
 
 	for smet := range r.metCh {
@@ -551,6 +556,13 @@ func (r *reporter) process() {
 		if flush || bytes+smet.size > r.freeBytes {
 			mets = r.flush(mets)
 			bytes = 0
+
+			if len(borrowedTags) > 0 {
+				for i := range borrowedTags {
+					extraTags.Put(borrowedTags[i][:0])
+				}
+				borrowedTags = borrowedTags[:0]
+			}
 		}
 
 		if !smet.set {
@@ -559,8 +571,10 @@ func (r *reporter) process() {
 
 		m := smet.m
 		if len(smet.bucket) > 0 {
-			m.Tags = append(
-				m.Tags[:len(m.Tags):len(m.Tags)],
+			tags := extraTags.Get().([]m3thrift.MetricTag)
+			tags = append(tags, m.Tags...)
+			tags = append(
+				tags,
 				m3thrift.MetricTag{
 					Name:  r.bucketIDTagName,
 					Value: smet.bucketID,
@@ -570,6 +584,8 @@ func (r *reporter) process() {
 					Value: smet.bucket,
 				},
 			)
+			borrowedTags = append(borrowedTags, tags)
+			m.Tags = tags
 		}
 
 		mets = append(mets, m)
@@ -742,4 +758,13 @@ type sizedMetric struct {
 	set      bool
 	bucket   string
 	bucketID string
+}
+
+func ndigits(i int) int {
+	n := 1
+	for i/10 != 0 {
+		n++
+		i /= 10
+	}
+	return n
 }
