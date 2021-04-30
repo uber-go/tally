@@ -506,7 +506,11 @@ func (c *bucketCache) Get(
 		c.mtx.Unlock()
 	} else {
 		c.mtx.RUnlock()
+		if !bucketsEqual(buckets, storage.buckets) {
+			storage = newBucketStorage(htype, buckets)
+		}
 	}
+
 	return storage
 }
 

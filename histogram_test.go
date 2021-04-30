@@ -193,3 +193,23 @@ func TestBucketPairsNoRaceWhenUnsorted(t *testing.T) {
 		go newPair()
 	}
 }
+
+func BenchmarkBucketsEqual(b *testing.B) {
+	bench := func(b *testing.B, x Buckets, y Buckets) {
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			bucketsEqual(x, y)
+		}
+	}
+
+	b.Run("same 20 values", func(b *testing.B) {
+		buckets := MustMakeLinearValueBuckets(1.0, 1.0, 20)
+		bench(b, buckets, buckets)
+	})
+
+	b.Run("same 20 durations", func(b *testing.B) {
+		buckets := MustMakeLinearDurationBuckets(time.Second, time.Second, 20)
+		bench(b, buckets, buckets)
+	})
+}
