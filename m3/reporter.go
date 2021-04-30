@@ -114,6 +114,7 @@ type reporter struct {
 	client          *m3thrift.M3Client
 	commonTags      []m3thrift.MetricTag
 	done            atomic.Bool
+	donech          chan struct{}
 	freeBytes       int32
 	metCh           chan sizedMetric
 	now             atomic.Int64
@@ -127,8 +128,6 @@ type reporter struct {
 	batchSizeHistogram    tally.CachedHistogram
 	numBatches            atomic.Int64
 	numBatchesCounter     tally.CachedCount
-	numDrops              atomic.Int64
-	numDropsCounter       tally.CachedCount
 	numMetrics            atomic.Int64
 	numMetricsCounter     tally.CachedCount
 	numWriteErrors        atomic.Int64
@@ -275,6 +274,7 @@ func NewReporter(opts Options) (Reporter, error) {
 		calcProto:       proto,
 		client:          client,
 		commonTags:      tags,
+		donech:          make(chan struct{}),
 		freeBytes:       freeBytes,
 		metCh:           make(chan sizedMetric, opts.MaxQueueSize),
 		overheadBytes:   numOverheadBytes,
@@ -290,7 +290,6 @@ func NewReporter(opts Options) (Reporter, error) {
 	)
 	r.batchSizeHistogram = r.AllocateHistogram("tally.internal.batch-size", internalTags, buckets)
 	r.numBatchesCounter = r.AllocateCounter("tally.internal.num-batches", internalTags)
-	r.numDropsCounter = r.AllocateCounter("tally.internal.num-drops", internalTags)
 	r.numMetricsCounter = r.AllocateCounter("tally.internal.num-metrics", internalTags)
 	r.numWriteErrorsCounter = r.AllocateCounter("tally.internal.num-write-errors", internalTags)
 
@@ -521,8 +520,7 @@ func (r *reporter) reportCopyMetric(
 
 	select {
 	case r.metCh <- sm:
-	default:
-		r.numDrops.Inc()
+	case <-r.donech:
 	}
 }
 
@@ -550,6 +548,7 @@ func (r *reporter) Close() (err error) {
 		runtime.Gosched()
 	}
 
+	close(r.donech)
 	close(r.metCh)
 	r.wg.Wait()
 
@@ -671,7 +670,6 @@ func (r *reporter) convertTags(tags map[string]string) []m3thrift.MetricTag {
 func (r *reporter) reportInternalMetrics() {
 	var (
 		batches     = r.numBatches.Swap(0)
-		drops       = r.numDrops.Swap(0)
 		metrics     = r.numMetrics.Swap(0)
 		writeErrors = r.numWriteErrors.Swap(0)
 		batchSize   = float64(metrics) / float64(batches)
@@ -690,7 +688,6 @@ func (r *reporter) reportInternalMetrics() {
 
 	r.batchSizeHistogram.ValueBucket(0, value).ReportSamples(1)
 	r.numBatchesCounter.ReportCount(batches)
-	r.numDropsCounter.ReportCount(drops)
 	r.numMetricsCounter.ReportCount(metrics)
 	r.numWriteErrorsCounter.ReportCount(writeErrors)
 }
