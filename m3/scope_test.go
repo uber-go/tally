@@ -27,7 +27,6 @@ import (
 
 	"github.com/uber-go/tally"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -58,15 +57,8 @@ func newTestReporterScope(
 	}, shortInterval)
 
 	return r, scope, func() {
-		assert.NoError(t, closer.Close())
-
-		// Ensure reporter is closed too
-		r := r.(*reporter)
-		r.status.RLock()
-		closed := r.status.closed
-		r.status.RUnlock()
-
-		assert.True(t, closed)
+		require.NoError(t, closer.Close())
+		require.True(t, r.(*reporter).done.Load())
 	}
 }
 

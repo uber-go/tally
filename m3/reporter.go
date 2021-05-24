@@ -25,6 +25,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"runtime"
 	"sort"
 	"strconv"
 	"sync"
@@ -32,10 +33,12 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/uber-go/tally"
+	"github.com/uber-go/tally/internal/cache"
 	customtransport "github.com/uber-go/tally/m3/customtransports"
 	m3thrift "github.com/uber-go/tally/m3/thrift/v2"
 	"github.com/uber-go/tally/m3/thriftudp"
 	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
+	"go.uber.org/atomic"
 )
 
 // Protocol describes a M3 thrift transport protocol.
@@ -109,16 +112,16 @@ type reporter struct {
 	calcProto       thrift.TProtocol
 	client          *m3thrift.M3Client
 	commonTags      []m3thrift.MetricTag
+	done            atomic.Bool
 	freeBytes       int32
 	metCh           chan sizedMetric
-	processors      sync.WaitGroup
+	now             atomic.Int64
+	overheadBytes   int32
+	pending         atomic.Uint64
 	resourcePool    *resourcePool
-	status          reporterStatus
-}
-
-type reporterStatus struct {
-	sync.RWMutex
-	closed bool
+	stringInterner  *cache.StringInterner
+	tagCache        *cache.TagCache
+	wg              sync.WaitGroup
 }
 
 // Options is a set of options for the M3 reporter.
@@ -257,11 +260,23 @@ func NewReporter(opts Options) (Reporter, error) {
 		commonTags:      tags,
 		freeBytes:       freeBytes,
 		metCh:           make(chan sizedMetric, opts.MaxQueueSize),
+		overheadBytes:   numOverheadBytes,
 		resourcePool:    resourcePool,
+		stringInterner:  cache.NewStringInterner(),
+		tagCache:        cache.NewTagCache(),
 	}
 
-	r.processors.Add(1)
-	go r.process()
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		r.process()
+	}()
+
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		r.timeLoop()
+	}()
 
 	return r, nil
 }
@@ -338,58 +353,55 @@ func (r *reporter) AllocateHistogram(
 		))
 		bucketIDLenStr        = strconv.Itoa(bucketIDLen)
 		bucketIDFmt           = "%0" + bucketIDLenStr + "d"
-		htags                 = make(map[string]string, len(tags))
 		cachedValueBuckets    []cachedHistogramBucket
 		cachedDurationBuckets []cachedHistogramBucket
 	)
 
-	for k, v := range tags {
-		htags[k] = v
-	}
-
+	var (
+		mtags        = r.convertTags(tags)
+		prevDuration = time.Duration(math.MinInt64)
+		prevValue    = -math.MaxFloat64
+	)
 	for i, pair := range tally.BucketPairs(buckets) {
 		var (
-			counter    = r.allocateCounter(name, htags)
-			idTagValue = fmt.Sprintf(bucketIDFmt, i)
-			hbucket    = cachedHistogramBucket{
+			counter = r.allocateCounter(name, nil)
+			hbucket = cachedHistogramBucket{
+				bucketID:           r.stringInterner.Intern(fmt.Sprintf(bucketIDFmt, i)),
 				valueUpperBound:    pair.UpperBoundValue(),
 				durationUpperBound: pair.UpperBoundDuration(),
-				metric:             counter,
+				metric:             &counter,
 			}
-			delta = len(r.bucketIDTagName) + len(r.bucketTagName) + len(idTagValue)
+			delta = len(r.bucketIDTagName) + len(r.bucketTagName) + len(hbucket.bucketID)
 		)
 
-		hbucket.metric.metric.Tags = append(
-			hbucket.metric.metric.Tags,
-			m3thrift.MetricTag{
-				Name:  r.bucketIDTagName,
-				Value: idTagValue,
-			},
-			m3thrift.MetricTag{
-				Name: r.bucketTagName,
-			},
-		)
+		hbucket.metric.metric.Tags = mtags
+		hbucket.metric.size = r.calculateSize(hbucket.metric.metric)
 
-		bucketIdx := len(hbucket.metric.metric.Tags) - 1
 		if isDuration {
-			bname := r.durationBucketString(pair.LowerBoundDuration()) + "-" +
-				r.durationBucketString(pair.UpperBoundDuration())
-			hbucket.metric.metric.Tags[bucketIdx].Value = bname
+			bname := r.stringInterner.Intern(
+				r.durationBucketString(prevDuration) + "-" +
+					r.durationBucketString(pair.UpperBoundDuration()),
+			)
+			hbucket.bucket = bname
 			hbucket.metric.size += int32(delta + len(bname))
 			cachedDurationBuckets = append(cachedDurationBuckets, hbucket)
 		} else {
-			bname := r.valueBucketString(pair.LowerBoundValue()) + "-" +
-				r.valueBucketString(pair.UpperBoundValue())
-			hbucket.metric.metric.Tags[bucketIdx].Value = bname
+			bname := r.stringInterner.Intern(
+				r.valueBucketString(prevValue) + "-" +
+					r.valueBucketString(pair.UpperBoundValue()),
+			)
+			hbucket.bucket = bname
 			hbucket.metric.size += int32(delta + len(bname))
 			cachedValueBuckets = append(cachedValueBuckets, hbucket)
 		}
+
+		prevDuration = pair.UpperBoundDuration()
+		prevValue = pair.UpperBoundValue()
 	}
 
 	return cachedHistogram{
 		r:                     r,
 		name:                  name,
-		tags:                  tags,
 		cachedValueBuckets:    cachedValueBuckets,
 		cachedDurationBuckets: cachedDurationBuckets,
 	}
@@ -424,7 +436,7 @@ func (r *reporter) newMetric(
 	t metricType,
 ) m3thrift.Metric {
 	m := m3thrift.Metric{
-		Name:      name,
+		Name:      r.stringInterner.Intern(name),
 		Timestamp: _maxInt64,
 	}
 
@@ -444,14 +456,7 @@ func (r *reporter) newMetric(
 		return m
 	}
 
-	m.Tags = r.resourcePool.getMetricTagSlice()
-	for k, v := range tags {
-		m.Tags = append(m.Tags, m3thrift.MetricTag{
-			Name:  k,
-			Value: v,
-		})
-	}
-
+	m.Tags = r.convertTags(tags)
 	return m
 }
 
@@ -464,48 +469,61 @@ func (r *reporter) calculateSize(m m3thrift.Metric) int32 {
 	return size
 }
 
-func (r *reporter) reportCopyMetric(m m3thrift.Metric, size int32) {
-	m.Timestamp = time.Now().UnixNano()
+func (r *reporter) reportCopyMetric(
+	m m3thrift.Metric,
+	size int32,
+	bucket string,
+	bucketID string,
+) {
+	r.pending.Inc()
+	defer r.pending.Dec()
+
+	if r.done.Load() {
+		return
+	}
+
+	m.Timestamp = r.now.Load()
 
 	sm := sizedMetric{
-		m:    m,
-		size: size,
-		set:  true,
+		m:        m,
+		size:     size,
+		set:      true,
+		bucket:   bucket,
+		bucketID: bucketID,
 	}
 
-	r.status.RLock()
-	if !r.status.closed {
-		select {
-		case r.metCh <- sm:
-		default:
-			// TODO: don't drop when full, or add metric to track
-		}
+	select {
+	case r.metCh <- sm:
+	default:
+		// TODO: don't drop when full, or add metric to track
 	}
-	r.status.RUnlock()
 }
 
 // Flush sends an empty sizedMetric to signal a flush.
 func (r *reporter) Flush() {
-	r.status.RLock()
-	if !r.status.closed {
-		r.metCh <- sizedMetric{}
+	r.pending.Inc()
+	defer r.pending.Dec()
+
+	if r.done.Load() {
+		return
 	}
-	r.status.RUnlock()
+
+	r.metCh <- sizedMetric{}
 }
 
 // Close waits for metrics to be flushed before closing the backend.
 func (r *reporter) Close() (err error) {
-	r.status.Lock()
-	if r.status.closed {
-		r.status.Unlock()
+	if !r.done.CAS(false, true) {
 		return errAlreadyClosed
 	}
 
-	r.status.closed = true
-	close(r.metCh)
-	r.status.Unlock()
+	// Wait for any pending reports to complete.
+	for r.pending.Load() > 0 {
+		runtime.Gosched()
+	}
 
-	r.processors.Wait()
+	close(r.metCh)
+	r.wg.Wait()
 
 	return nil
 }
@@ -524,47 +542,87 @@ func (r *reporter) Tagging() bool {
 
 func (r *reporter) process() {
 	var (
-		mets  = make([]m3thrift.Metric, 0, (r.freeBytes / 10))
+		mets  = make([]m3thrift.Metric, 0, r.freeBytes/10)
 		bytes int32
 	)
 
 	for smet := range r.metCh {
-		if !smet.set {
-			// Explicit flush requested
-			if len(mets) > 0 {
-				mets = r.flush(mets)
-				bytes = 0
-			}
-			continue
-		}
-
-		if bytes+smet.size > r.freeBytes {
+		flush := !smet.set && len(mets) > 0
+		if flush || bytes+smet.size > r.freeBytes {
 			mets = r.flush(mets)
 			bytes = 0
 		}
 
-		mets = append(mets, smet.m)
+		if !smet.set {
+			continue
+		}
+
+		m := smet.m
+		if len(smet.bucket) > 0 {
+			m.Tags = append(
+				m.Tags[:len(m.Tags):len(m.Tags)],
+				m3thrift.MetricTag{
+					Name:  r.bucketIDTagName,
+					Value: smet.bucketID,
+				},
+				m3thrift.MetricTag{
+					Name:  r.bucketTagName,
+					Value: smet.bucket,
+				},
+			)
+		}
+
+		mets = append(mets, m)
 		bytes += smet.size
 	}
 
-	if len(mets) > 0 {
-		// Final flush
-		r.flush(mets)
-	}
-
-	r.processors.Done()
+	// Final flush
+	r.flush(mets)
 }
 
-func (r *reporter) flush(
-	mets []m3thrift.Metric,
-) []m3thrift.Metric {
+func (r *reporter) flush(mets []m3thrift.Metric) []m3thrift.Metric {
+	if len(mets) == 0 {
+		return mets
+	}
+
 	//nolint:errcheck
 	r.client.EmitMetricBatchV2(m3thrift.MetricBatch{
 		Metrics:    mets,
 		CommonTags: r.commonTags,
 	})
 
+	// n.b. In the event that we had allocated additional tag storage in
+	//      process(), clear it so that it can be reclaimed. This does not
+	//      affect allocated metrics' tags.
+	for i := range mets {
+		mets[i].Tags = nil
+	}
 	return mets[:0]
+}
+
+func (r *reporter) convertTags(tags map[string]string) []m3thrift.MetricTag {
+	key := cache.TagMapKey(tags)
+
+	mtags, ok := r.tagCache.Get(key)
+	if !ok {
+		mtags = r.resourcePool.getMetricTagSlice()
+		for k, v := range tags {
+			mtags = append(mtags, m3thrift.MetricTag{
+				Name:  r.stringInterner.Intern(k),
+				Value: r.stringInterner.Intern(v),
+			})
+		}
+		mtags = r.tagCache.Set(key, mtags)
+	}
+
+	return mtags
+}
+
+func (r *reporter) timeLoop() {
+	for !r.done.Load() {
+		r.now.Store(time.Now().UnixNano())
+		time.Sleep(time.Millisecond)
+	}
 }
 
 type cachedMetric struct {
@@ -575,55 +633,35 @@ type cachedMetric struct {
 
 func (c cachedMetric) ReportCount(value int64) {
 	c.metric.Value.Count = value
-	c.reporter.reportCopyMetric(c.metric, c.size)
+	c.reporter.reportCopyMetric(c.metric, c.size, "", "")
 }
 
 func (c cachedMetric) ReportGauge(value float64) {
 	c.metric.Value.Gauge = value
-	c.reporter.reportCopyMetric(c.metric, c.size)
+	c.reporter.reportCopyMetric(c.metric, c.size, "", "")
 }
 
 func (c cachedMetric) ReportTimer(interval time.Duration) {
 	c.metric.Value.Timer = int64(interval)
-	c.reporter.reportCopyMetric(c.metric, c.size)
+	c.reporter.reportCopyMetric(c.metric, c.size, "", "")
 }
 
-func (c cachedMetric) ReportSamples(value int64) {
-	c.metric.Value.Count = value
-	c.reporter.reportCopyMetric(c.metric, c.size)
-}
+type noopMetric struct{}
 
-type noopMetric struct {
-}
-
-func (c noopMetric) ReportCount(value int64) {
-}
-
-func (c noopMetric) ReportGauge(value float64) {
-}
-
-func (c noopMetric) ReportTimer(interval time.Duration) {
-}
-
-func (c noopMetric) ReportSamples(value int64) {
-}
+func (c noopMetric) ReportCount(value int64)            {}
+func (c noopMetric) ReportGauge(value float64)          {}
+func (c noopMetric) ReportTimer(interval time.Duration) {}
+func (c noopMetric) ReportSamples(value int64)          {}
 
 type cachedHistogram struct {
 	r                     *reporter
 	name                  string
-	tags                  map[string]string
 	cachedValueBuckets    []cachedHistogramBucket
 	cachedDurationBuckets []cachedHistogramBucket
 }
 
-type cachedHistogramBucket struct {
-	valueUpperBound    float64
-	durationUpperBound time.Duration
-	metric             cachedMetric
-}
-
 func (h cachedHistogram) ValueBucket(
-	bucketLowerBound float64,
+	_ float64,
 	bucketUpperBound float64,
 ) tally.CachedHistogramBucket {
 	var (
@@ -637,11 +675,24 @@ func (h cachedHistogram) ValueBucket(
 		return noopMetric{}
 	}
 
-	return h.cachedValueBuckets[idx].metric
+	var (
+		b        = h.cachedValueBuckets[idx]
+		cm       = b.metric
+		m        = cm.metric
+		size     = cm.size
+		bucket   = b.bucket
+		bucketID = b.bucketID
+		rep      = cm.reporter
+	)
+
+	return reportSamplesFunc(func(value int64) {
+		m.Value.Count = value
+		rep.reportCopyMetric(m, size, bucket, bucketID)
+	})
 }
 
 func (h cachedHistogram) DurationBucket(
-	bucketLowerBound time.Duration,
+	_ time.Duration,
 	bucketUpperBound time.Duration,
 ) tally.CachedHistogramBucket {
 	var (
@@ -655,11 +706,40 @@ func (h cachedHistogram) DurationBucket(
 		return noopMetric{}
 	}
 
-	return h.cachedDurationBuckets[idx].metric
+	var (
+		b        = h.cachedDurationBuckets[idx]
+		cm       = b.metric
+		m        = cm.metric
+		size     = cm.size
+		bucket   = b.bucket
+		bucketID = b.bucketID
+		rep      = cm.reporter
+	)
+
+	return reportSamplesFunc(func(value int64) {
+		m.Value.Count = value
+		rep.reportCopyMetric(m, size, bucket, bucketID)
+	})
+}
+
+type cachedHistogramBucket struct {
+	metric             *cachedMetric
+	durationUpperBound time.Duration
+	valueUpperBound    float64
+	bucket             string
+	bucketID           string
+}
+
+type reportSamplesFunc func(value int64)
+
+func (f reportSamplesFunc) ReportSamples(value int64) {
+	f(value)
 }
 
 type sizedMetric struct {
-	m    m3thrift.Metric
-	size int32
-	set  bool
+	m        m3thrift.Metric
+	size     int32
+	set      bool
+	bucket   string
+	bucketID string
 }
