@@ -90,6 +90,7 @@ type scope struct {
 	closed      atomic.Bool
 	done        chan struct{}
 	wg          sync.WaitGroup
+	root        bool
 }
 
 // ScopeOptions is a set of options to construct a scope.
@@ -162,6 +163,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		sanitizer:       sanitizer,
 		separator:       sanitizer.Name(opts.Separator),
 		timers:          make(map[string]*timer),
+		root:            true,
 	}
 
 	// NB(r): Take a copy of the tags on creation
@@ -500,17 +502,52 @@ func (s *scope) Snapshot() Snapshot {
 }
 
 func (s *scope) Close() error {
+	// n.b. Once this flag is set, the next scope report will remove it from
+	//      the registry and clear its metrics.
 	if !s.closed.CAS(false, true) {
 		return nil
 	}
 
 	close(s.done)
-	s.reportRegistry()
 
-	if closer, ok := s.baseReporter.(io.Closer); ok {
-		return closer.Close()
+	if s.root {
+		s.reportRegistry()
+		if closer, ok := s.baseReporter.(io.Closer); ok {
+			return closer.Close()
+		}
 	}
+
 	return nil
+}
+
+func (s *scope) clearMetrics() {
+	s.cm.Lock()
+	s.gm.Lock()
+	s.tm.Lock()
+	s.hm.Lock()
+	defer s.cm.Unlock()
+	defer s.gm.Unlock()
+	defer s.tm.Unlock()
+	defer s.hm.Unlock()
+
+	for k := range s.counters {
+		delete(s.counters, k)
+	}
+	s.countersSlice = nil
+
+	for k := range s.gauges {
+		delete(s.gauges, k)
+	}
+	s.gaugesSlice = nil
+
+	for k := range s.timers {
+		delete(s.timers, k)
+	}
+
+	for k := range s.histograms {
+		delete(s.histograms, k)
+	}
+	s.histogramsSlice = nil
 }
 
 // NB(prateek): We assume concatenation of sanitized inputs is
