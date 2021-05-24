@@ -26,6 +26,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -113,9 +114,9 @@ func TestReporter(t *testing.T) {
 
 		// Validate metrics
 		emittedCounters := batches[0].GetMetrics()
-		require.Equal(t, 1, len(emittedCounters))
+		require.Equal(t, 6, len(emittedCounters))
 		emittedTimers := batches[1].GetMetrics()
-		require.Equal(t, 1, len(emittedTimers))
+		require.Equal(t, 6, len(emittedTimers))
 
 		emittedCounter, emittedTimer := emittedCounters[0], emittedTimers[0]
 		if emittedCounter.GetName() == "my-timer" {
@@ -509,12 +510,13 @@ func TestReporterResetTagsAfterReturnToPool(t *testing.T) {
 	c1 := r.AllocateCounter("counterWithTags", tags)
 
 	// Report the counter with tags to take the last slot.
-	wg.Add(1)
+	wg.Add(6)
 	c1.ReportCount(1)
 	r.Flush()
 	wg.Wait()
 
 	// Empty flush to ensure the copied metric is released.
+	wg.Add(5)
 	r.Flush()
 	for {
 		rep := r.(*reporter)
@@ -529,7 +531,7 @@ func TestReporterResetTagsAfterReturnToPool(t *testing.T) {
 	c2 := r.AllocateCounter("counterWithNoTags", nil)
 
 	// Report the counter with no tags.
-	wg.Add(1)
+	wg.Add(6)
 	c2.ReportCount(1)
 	r.Flush()
 	wg.Wait()
@@ -537,12 +539,21 @@ func TestReporterResetTagsAfterReturnToPool(t *testing.T) {
 	// Verify that first reported counter has tags and the second
 	// reported counter has no tags.
 	metrics := server.Service.getMetrics()
-	require.Equal(t, 2, len(metrics))
-	require.Equal(t, len(tags), len(metrics[0].GetTags()))
-	for _, tag := range metrics[0].GetTags() {
+	require.Equal(t, 17, len(metrics)) // 2 test metrics, 5x3 internal metrics
+
+	var filtered []m3thrift.Metric
+	for _, metric := range metrics {
+		if !strings.HasPrefix(metric.Name, "tally.internal") {
+			filtered = append(filtered, metric)
+		}
+	}
+	require.Equal(t, 2, len(filtered))
+
+	require.Equal(t, len(tags), len(filtered[0].GetTags()))
+	for _, tag := range filtered[0].GetTags() {
 		require.Equal(t, tags[tag.GetName()], tag.GetValue())
 	}
-	require.Equal(t, 0, len(metrics[1].GetTags()))
+	require.Equal(t, 0, len(filtered[1].GetTags()))
 }
 
 func TestReporterHasReportingAndTaggingCapability(t *testing.T) {

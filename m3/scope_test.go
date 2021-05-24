@@ -72,12 +72,11 @@ func TestScope(t *testing.T) {
 	tags := map[string]string{"testTag": "TestValue", "testTag2": "TestValue2"}
 
 	_, scope, close := newTestReporterScope(t, server.Addr, "honk", tags)
-	defer close()
-
 	wg.Add(1)
 
 	timer := scope.Timer("dazzle")
 	timer.Start().Stop()
+	close()
 
 	wg.Wait()
 
@@ -85,7 +84,7 @@ func TestScope(t *testing.T) {
 	require.NotNil(t, server.Service.getBatches()[0])
 
 	emittedTimers := server.Service.getBatches()[0].GetMetrics()
-	require.Equal(t, 1, len(emittedTimers))
+	require.Equal(t, 6, len(emittedTimers))
 	require.Equal(t, "honk.dazzle", emittedTimers[0].GetName())
 }
 
@@ -99,20 +98,18 @@ func TestScopeCounter(t *testing.T) {
 	tags := map[string]string{"testTag": "TestValue", "testTag2": "TestValue2"}
 
 	_, scope, close := newTestReporterScope(t, server.Addr, "honk", tags)
-	defer close()
 
 	wg.Add(1)
-
 	counter := scope.Counter("foobar")
 	counter.Inc(42)
-
+	close()
 	wg.Wait()
 
 	require.Equal(t, 1, len(server.Service.getBatches()))
 	require.NotNil(t, server.Service.getBatches()[0])
 
 	emittedTimers := server.Service.getBatches()[0].GetMetrics()
-	require.Equal(t, 1, len(emittedTimers))
+	require.Equal(t, 6, len(emittedTimers))
 	require.Equal(t, "honk.foobar", emittedTimers[0].GetName())
 }
 
@@ -126,20 +123,18 @@ func TestScopeGauge(t *testing.T) {
 	tags := map[string]string{"testTag": "TestValue", "testTag2": "TestValue2"}
 
 	_, scope, close := newTestReporterScope(t, server.Addr, "honk", tags)
-	defer close()
 
 	wg.Add(1)
-
 	gauge := scope.Gauge("foobaz")
 	gauge.Update(42)
-
+	close()
 	wg.Wait()
 
 	require.Equal(t, 1, len(server.Service.getBatches()))
 	require.NotNil(t, server.Service.getBatches()[0])
 
 	emittedTimers := server.Service.getBatches()[0].GetMetrics()
-	require.Equal(t, 1, len(emittedTimers))
+	require.Equal(t, 6, len(emittedTimers))
 	require.Equal(t, "honk.foobaz", emittedTimers[0].GetName())
 }
 

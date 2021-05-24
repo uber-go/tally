@@ -107,6 +107,7 @@ type reporter struct {
 	bucketIDTagName string
 	bucketTagName   string
 	bucketValFmt    string
+	buckets         []tally.BucketPair
 	calc            *customtransport.TCalcTransport
 	calcLock        sync.Mutex
 	calcProto       thrift.TProtocol
@@ -122,6 +123,16 @@ type reporter struct {
 	stringInterner  *cache.StringInterner
 	tagCache        *cache.TagCache
 	wg              sync.WaitGroup
+
+	batchSizeHistogram    tally.CachedHistogram
+	numBatches            atomic.Int64
+	numBatchesCounter     tally.CachedCount
+	numDrops              atomic.Int64
+	numDropsCounter       tally.CachedCount
+	numMetrics            atomic.Int64
+	numMetricsCounter     tally.CachedCount
+	numWriteErrors        atomic.Int64
+	numWriteErrorsCounter tally.CachedCount
 }
 
 // Options is a set of options for the M3 reporter.
@@ -250,7 +261,13 @@ func NewReporter(opts Options) (Reporter, error) {
 		return nil, errCommonTagSize
 	}
 
+	buckets := tally.ValueBuckets(append(
+		[]float64{0.0},
+		tally.MustMakeExponentialValueBuckets(2.0, 2.0, 11)...,
+	))
+
 	r := &reporter{
+		buckets:         tally.BucketPairs(buckets),
 		bucketIDTagName: opts.HistogramBucketIDName,
 		bucketTagName:   opts.HistogramBucketName,
 		bucketValFmt:    "%." + strconv.Itoa(int(opts.HistogramBucketTagPrecision)) + "f",
@@ -265,6 +282,17 @@ func NewReporter(opts Options) (Reporter, error) {
 		stringInterner:  cache.NewStringInterner(),
 		tagCache:        cache.NewTagCache(),
 	}
+
+	var (
+		internalTags = map[string]string{
+			"version": tally.Version,
+		}
+	)
+	r.batchSizeHistogram = r.AllocateHistogram("tally.internal.batch-size", internalTags, buckets)
+	r.numBatchesCounter = r.AllocateCounter("tally.internal.num-batches", internalTags)
+	r.numDropsCounter = r.AllocateCounter("tally.internal.num-drops", internalTags)
+	r.numMetricsCounter = r.AllocateCounter("tally.internal.num-metrics", internalTags)
+	r.numWriteErrorsCounter = r.AllocateCounter("tally.internal.num-write-errors", internalTags)
 
 	r.wg.Add(1)
 	go func() {
@@ -494,7 +522,7 @@ func (r *reporter) reportCopyMetric(
 	select {
 	case r.metCh <- sm:
 	default:
-		// TODO: don't drop when full, or add metric to track
+		r.numDrops.Inc()
 	}
 }
 
@@ -507,6 +535,7 @@ func (r *reporter) Flush() {
 		return
 	}
 
+	r.reportInternalMetrics()
 	r.metCh <- sizedMetric{}
 }
 
@@ -554,6 +583,7 @@ func (r *reporter) process() {
 	for smet := range r.metCh {
 		flush := !smet.set && len(mets) > 0
 		if flush || bytes+smet.size > r.freeBytes {
+			r.numMetrics.Add(int64(len(mets)))
 			mets = r.flush(mets)
 			bytes = 0
 
@@ -601,11 +631,15 @@ func (r *reporter) flush(mets []m3thrift.Metric) []m3thrift.Metric {
 		return mets
 	}
 
-	//nolint:errcheck
-	r.client.EmitMetricBatchV2(m3thrift.MetricBatch{
+	r.numBatches.Inc()
+
+	err := r.client.EmitMetricBatchV2(m3thrift.MetricBatch{
 		Metrics:    mets,
 		CommonTags: r.commonTags,
 	})
+	if err != nil {
+		r.numWriteErrors.Inc()
+	}
 
 	// n.b. In the event that we had allocated additional tag storage in
 	//      process(), clear it so that it can be reclaimed. This does not
@@ -632,6 +666,33 @@ func (r *reporter) convertTags(tags map[string]string) []m3thrift.MetricTag {
 	}
 
 	return mtags
+}
+
+func (r *reporter) reportInternalMetrics() {
+	var (
+		batches     = r.numBatches.Swap(0)
+		drops       = r.numDrops.Swap(0)
+		metrics     = r.numMetrics.Swap(0)
+		writeErrors = r.numWriteErrors.Swap(0)
+		batchSize   = float64(metrics) / float64(batches)
+	)
+
+	bucket := sort.Search(len(r.buckets), func(i int) bool {
+		return r.buckets[i].UpperBoundValue() >= batchSize
+	})
+
+	var value float64
+	if bucket < len(r.buckets) {
+		value = r.buckets[bucket].UpperBoundValue()
+	} else {
+		value = math.MaxFloat64
+	}
+
+	r.batchSizeHistogram.ValueBucket(0, value).ReportSamples(1)
+	r.numBatchesCounter.ReportCount(batches)
+	r.numDropsCounter.ReportCount(drops)
+	r.numMetricsCounter.ReportCount(metrics)
+	r.numWriteErrorsCounter.ReportCount(writeErrors)
 }
 
 func (r *reporter) timeLoop() {

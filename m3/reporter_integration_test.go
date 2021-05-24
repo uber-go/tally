@@ -107,7 +107,7 @@ func testProcessFlushOnExit(t *testing.T, i int) {
 
 	require.Equal(t, 1, len(server.Service.getBatches()))
 	require.NotNil(t, server.Service.getBatches()[0])
-	require.Equal(t, 3, len(server.Service.getBatches()[0].GetMetrics()))
+	require.Equal(t, 8, len(server.Service.getBatches()[0].GetMetrics()))
 	metrics := server.Service.getBatches()[0].GetMetrics()
 	fmt.Printf("Test %d emitted:\n%v\n", i, metrics)
 }
