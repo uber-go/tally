@@ -126,6 +126,39 @@ func (v DurationBuckets) AsDurations() []time.Duration {
 	return v
 }
 
+func bucketsEqual(x Buckets, y Buckets) bool {
+	switch b1 := x.(type) {
+	case DurationBuckets:
+		b2, ok := y.(DurationBuckets)
+		if !ok {
+			return false
+		}
+		if len(b1) != len(b2) {
+			return false
+		}
+		for i := 0; i < len(b1); i++ {
+			if b1[i] != b2[i] {
+				return false
+			}
+		}
+	case ValueBuckets:
+		b2, ok := y.(ValueBuckets)
+		if !ok {
+			return false
+		}
+		if len(b1) != len(b2) {
+			return false
+		}
+		for i := 0; i < len(b1); i++ {
+			if b1[i] != b2[i] {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
 func newBucketPair(
 	htype histogramType,
 	durations []time.Duration,
