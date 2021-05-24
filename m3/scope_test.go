@@ -84,7 +84,7 @@ func TestScope(t *testing.T) {
 	require.NotNil(t, server.Service.getBatches()[0])
 
 	emittedTimers := server.Service.getBatches()[0].GetMetrics()
-	require.Equal(t, 6, len(emittedTimers))
+	require.Equal(t, 5, len(emittedTimers))
 	require.Equal(t, "honk.dazzle", emittedTimers[0].GetName())
 }
 
@@ -109,7 +109,7 @@ func TestScopeCounter(t *testing.T) {
 	require.NotNil(t, server.Service.getBatches()[0])
 
 	emittedTimers := server.Service.getBatches()[0].GetMetrics()
-	require.Equal(t, 6, len(emittedTimers))
+	require.Equal(t, 5, len(emittedTimers))
 	require.Equal(t, "honk.foobar", emittedTimers[0].GetName())
 }
 
@@ -134,7 +134,7 @@ func TestScopeGauge(t *testing.T) {
 	require.NotNil(t, server.Service.getBatches()[0])
 
 	emittedTimers := server.Service.getBatches()[0].GetMetrics()
-	require.Equal(t, 6, len(emittedTimers))
+	require.Equal(t, 5, len(emittedTimers))
 	require.Equal(t, "honk.foobaz", emittedTimers[0].GetName())
 }
 
