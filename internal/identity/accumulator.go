@@ -21,6 +21,9 @@
 package identity
 
 import (
+	"math"
+	"time"
+
 	"github.com/twmb/murmur3"
 )
 
@@ -49,17 +52,7 @@ func NewAccumulatorWithSeed(seed uint64) Accumulator {
 
 // AddString hashes str and folds it into the accumulator.
 func (a Accumulator) AddString(str string) Accumulator {
-	return a + (Accumulator(murmur3.StringSum64(str)) * Accumulator(_hashFold))
-}
-
-// AddStrings serially hashes and folds each of strs into the accumulator.
-//go:nosplit
-func (a Accumulator) AddStrings(strs ...string) Accumulator {
-	for _, str := range strs {
-		a += (Accumulator(murmur3.StringSum64(str)) * Accumulator(_hashFold))
-	}
-
-	return a
+	return a + Accumulator(murmur3.StringSum64(str)*_hashFold)
 }
 
 // AddUint64 folds u64 into the accumulator.
@@ -67,17 +60,72 @@ func (a Accumulator) AddUint64(u64 uint64) Accumulator {
 	return a + Accumulator(u64*_hashFold)
 }
 
-// AddUint64s serially folds each of u64s into the accumulator.
-//go:nosplit
-func (a Accumulator) AddUint64s(u64s ...uint64) Accumulator {
-	for _, u64 := range u64s {
-		a += Accumulator(u64 * _hashFold)
-	}
-
-	return a
-}
-
 // Value returns the accumulated value.
 func (a Accumulator) Value() uint64 {
 	return uint64(a)
+}
+
+// Durations returns the accumulated identity of durs.
+func Durations(durs []time.Duration) uint64 {
+	if len(durs) == 0 {
+		return 0
+	}
+
+	acc := NewAccumulator()
+
+	// n.b. Wrapping due to overflow is okay here, since those values cannot be
+	//      represented by int64.
+	for _, d := range durs {
+		acc = acc.AddUint64(uint64(d))
+	}
+
+	return acc.Value()
+}
+
+// Int64s returns the accumulated identity of i64s.
+func Int64s(i64s []int64) uint64 {
+	if len(i64s) == 0 {
+		return 0
+	}
+
+	acc := NewAccumulator()
+
+	// n.b. Wrapping due to overflow is okay here, since those values cannot be
+	//      represented by int64.
+	for _, i := range i64s {
+		acc = acc.AddUint64(uint64(i))
+	}
+
+	return acc.Value()
+}
+
+// Float64s returns the accumulated identity of f64s.
+func Float64s(f64s []float64) uint64 {
+	if len(f64s) == 0 {
+		return 0
+	}
+
+	// n.b. Wrapping due to overflow is okay here, since those values cannot be
+	//      represented by int64.
+	acc := NewAccumulator()
+
+	for _, f := range f64s {
+		acc = acc.AddUint64(math.Float64bits(f))
+	}
+
+	return acc.Value()
+}
+
+// StringStringMap returns the accumulated identity of m.
+func StringStringMap(m map[string]string) uint64 {
+	if len(m) == 0 {
+		return 0
+	}
+
+	acc := NewAccumulator()
+	for k, v := range m {
+		acc = acc.AddString(k + "=" + v)
+	}
+
+	return acc.Value()
 }

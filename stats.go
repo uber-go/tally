@@ -21,6 +21,7 @@
 package tally
 
 import (
+	"fmt"
 	"math"
 	"sort"
 	"sync"
@@ -263,15 +264,13 @@ type sampleCounter struct {
 }
 
 type histogram struct {
-	htype            histogramType
-	name             string
-	tags             map[string]string
-	reporter         StatsReporter
-	specification    Buckets
-	buckets          []histogramBucket
-	samples          []sampleCounter
-	lookupByValue    []float64
-	lookupByDuration []int
+	htype         histogramType
+	name          string
+	tags          map[string]string
+	reporter      StatsReporter
+	specification Buckets
+	buckets       []histogramBucket
+	samples       []sampleCounter
 }
 
 type histogramType int
@@ -290,31 +289,29 @@ func newHistogram(
 	cachedHistogram CachedHistogram,
 ) *histogram {
 	h := &histogram{
-		htype:            htype,
-		name:             name,
-		tags:             tags,
-		reporter:         reporter,
-		specification:    storage.buckets,
-		buckets:          storage.hbuckets,
-		samples:          make([]sampleCounter, len(storage.hbuckets)),
-		lookupByValue:    storage.lookupByValue,
-		lookupByDuration: storage.lookupByDuration,
+		htype:         htype,
+		name:          name,
+		tags:          tags,
+		reporter:      reporter,
+		specification: storage.buckets,
+		buckets:       storage.hbuckets,
+		samples:       make([]sampleCounter, len(storage.hbuckets)),
 	}
 
-	for i := range h.buckets {
+	for i := range h.samples {
 		h.samples[i].counter = newCounter(nil)
 
 		if cachedHistogram != nil {
 			switch htype {
 			case durationHistogramType:
 				h.samples[i].cachedBucket = cachedHistogram.DurationBucket(
-					h.buckets[i].durationLowerBound,
-					h.buckets[i].durationUpperBound,
+					durationLowerBound(storage.hbuckets, i),
+					storage.hbuckets[i].durationUpperBound,
 				)
 			case valueHistogramType:
 				h.samples[i].cachedBucket = cachedHistogram.ValueBucket(
-					h.buckets[i].valueLowerBound,
-					h.buckets[i].valueUpperBound,
+					valueLowerBound(storage.hbuckets, i),
+					storage.hbuckets[i].valueUpperBound,
 				)
 			}
 		}
@@ -336,7 +333,7 @@ func (h *histogram) report(name string, tags map[string]string, r StatsReporter)
 				name,
 				tags,
 				h.specification,
-				h.buckets[i].valueLowerBound,
+				valueLowerBound(h.buckets, i),
 				h.buckets[i].valueUpperBound,
 				samples,
 			)
@@ -345,7 +342,7 @@ func (h *histogram) report(name string, tags map[string]string, r StatsReporter)
 				name,
 				tags,
 				h.specification,
-				h.buckets[i].durationLowerBound,
+				durationLowerBound(h.buckets, i),
 				h.buckets[i].durationUpperBound,
 				samples,
 			)
@@ -378,7 +375,9 @@ func (h *histogram) RecordValue(value float64) {
 	// and emit directly to it. Since we use BucketPairs to derive
 	// buckets there will always be an inclusive bucket as
 	// we always have a math.MaxFloat64 bucket.
-	idx := sort.SearchFloat64s(h.lookupByValue, value)
+	idx := sort.Search(len(h.buckets), func(i int) bool {
+		return h.buckets[i].valueUpperBound >= value
+	})
 	h.samples[idx].counter.Inc(1)
 }
 
@@ -391,7 +390,9 @@ func (h *histogram) RecordDuration(value time.Duration) {
 	// and emit directly to it. Since we use BucketPairs to derive
 	// buckets there will always be an inclusive bucket as
 	// we always have a math.MaxInt64 bucket.
-	idx := sort.SearchInts(h.lookupByDuration, int(value))
+	idx := sort.Search(len(h.buckets), func(i int) bool {
+		return h.buckets[i].durationUpperBound >= value
+	})
 	h.samples[idx].counter.Inc(1)
 }
 
@@ -431,19 +432,29 @@ func (h *histogram) snapshotDurations() map[time.Duration]int64 {
 }
 
 type histogramBucket struct {
-	valueLowerBound      float64
 	valueUpperBound      float64
-	durationLowerBound   time.Duration
 	durationUpperBound   time.Duration
 	cachedValueBucket    CachedHistogramBucket
 	cachedDurationBucket CachedHistogramBucket
 }
 
+func durationLowerBound(buckets []histogramBucket, i int) time.Duration {
+	if i <= 0 {
+		return time.Duration(math.MinInt64)
+	}
+	return buckets[i-1].durationUpperBound
+}
+
+func valueLowerBound(buckets []histogramBucket, i int) float64 {
+	if i <= 0 {
+		return -math.MaxFloat64
+	}
+	return buckets[i-1].valueUpperBound
+}
+
 type bucketStorage struct {
-	buckets          Buckets
-	hbuckets         []histogramBucket
-	lookupByValue    []float64
-	lookupByDuration []int
+	buckets  Buckets
+	hbuckets []histogramBucket
 }
 
 func newBucketStorage(
@@ -452,35 +463,17 @@ func newBucketStorage(
 ) bucketStorage {
 	var (
 		pairs   = BucketPairs(buckets)
-		storage bucketStorage
+		storage = bucketStorage{
+			buckets:  buckets,
+			hbuckets: make([]histogramBucket, 0, len(pairs)),
+		}
 	)
 
-	storage.buckets = buckets
-	storage.hbuckets = make([]histogramBucket, 0, len(pairs))
-
-	switch htype {
-	case valueHistogramType:
-		storage.lookupByValue = make([]float64, 0, len(pairs))
-	case durationHistogramType:
-		storage.lookupByDuration = make([]int, 0, len(pairs))
-	}
-
 	for _, pair := range pairs {
-		bucket := histogramBucket{
-			valueLowerBound:    pair.LowerBoundValue(),
+		storage.hbuckets = append(storage.hbuckets, histogramBucket{
 			valueUpperBound:    pair.UpperBoundValue(),
-			durationLowerBound: pair.LowerBoundDuration(),
 			durationUpperBound: pair.UpperBoundDuration(),
-		}
-
-		switch htype {
-		case valueHistogramType:
-			storage.lookupByValue = append(storage.lookupByValue, bucket.valueUpperBound)
-		case durationHistogramType:
-			storage.lookupByDuration = append(storage.lookupByDuration, int(bucket.durationUpperBound))
-		}
-
-		storage.hbuckets = append(storage.hbuckets, bucket)
+		})
 	}
 
 	return storage
@@ -515,27 +508,6 @@ func (c *bucketCache) Get(
 		c.mtx.RUnlock()
 	}
 	return storage
-}
-
-// n.b. This function is used to uniquely identify a given set of buckets
-//      commutatively through hash folding, in order to do cache lookups and
-//      avoid allocating additional storage for data that is shared among all
-//      instances of a particular set of buckets.
-func getBucketsIdentity(buckets Buckets) uint64 {
-	acc := identity.NewAccumulator()
-
-	if dbuckets, ok := buckets.(DurationBuckets); ok {
-		for _, dur := range dbuckets {
-			acc = acc.AddUint64(uint64(dur))
-		}
-	} else {
-		vbuckets := buckets.(ValueBuckets)
-		for _, val := range vbuckets {
-			acc = acc.AddUint64(math.Float64bits(val))
-		}
-	}
-
-	return acc.Value()
 }
 
 // NullStatsReporter is an implementation of StatsReporter than simply does nothing.
@@ -573,3 +545,14 @@ func (r nullStatsReporter) Flush() {
 }
 
 type nullStatsReporter struct{}
+
+func getBucketsIdentity(buckets Buckets) uint64 {
+	switch b := buckets.(type) {
+	case DurationBuckets:
+		return identity.Durations(b.AsDurations())
+	case ValueBuckets:
+		return identity.Float64s(b.AsValues())
+	default:
+		panic(fmt.Sprintf("unexpected bucket type: %T", b))
+	}
+}

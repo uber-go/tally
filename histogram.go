@@ -72,7 +72,7 @@ func (v ValueBuckets) String() string {
 
 // AsValues implements Buckets.
 func (v ValueBuckets) AsValues() []float64 {
-	return []float64(v)
+	return v
 }
 
 // AsDurations implements Buckets and returns time.Duration
@@ -123,28 +123,27 @@ func (v DurationBuckets) AsValues() []float64 {
 
 // AsDurations implements Buckets.
 func (v DurationBuckets) AsDurations() []time.Duration {
-	return []time.Duration(v)
+	return v
 }
 
 func newBucketPair(
 	htype histogramType,
 	durations []time.Duration,
-	prevDuration time.Duration,
 	values []float64,
-	prevValue float64,
 	upperBoundIndex int,
+	prev BucketPair,
 ) bucketPair {
 	var pair bucketPair
 
 	switch htype {
 	case durationHistogramType:
 		pair = bucketPair{
-			lowerBoundDuration: prevDuration,
+			lowerBoundDuration: prev.UpperBoundDuration(),
 			upperBoundDuration: durations[upperBoundIndex],
 		}
 	case valueHistogramType:
 		pair = bucketPair{
-			lowerBoundValue: prevValue,
+			lowerBoundValue: prev.UpperBoundValue(),
 			upperBoundValue: values[upperBoundIndex],
 		}
 	default:
@@ -168,22 +167,20 @@ func BucketPairs(buckets Buckets) []BucketPair {
 	}
 
 	var (
-		values       []float64
-		durations    []time.Duration
-		prevDuration = _singleBucket.lowerBoundDuration
-		prevValue    = _singleBucket.lowerBoundValue
-		pairs        = make([]BucketPair, 0, buckets.Len()+2)
-		pair         bucketPair
+		values    []float64
+		durations []time.Duration
+		pairs     = make([]BucketPair, 0, buckets.Len()+2)
+		pair      bucketPair
 	)
 
 	switch htype {
 	case durationHistogramType:
 		durations = copyAndSortDurations(buckets.AsDurations())
-		pair.lowerBoundDuration = prevDuration
+		pair.lowerBoundDuration = _singleBucket.lowerBoundDuration
 		pair.upperBoundDuration = durations[0]
 	case valueHistogramType:
 		values = copyAndSortValues(buckets.AsValues())
-		pair.lowerBoundValue = prevValue
+		pair.lowerBoundValue = _singleBucket.lowerBoundValue
 		pair.upperBoundValue = values[0]
 	default:
 		// n.b. This branch will never be executed because htype is only ever
@@ -192,25 +189,22 @@ func BucketPairs(buckets Buckets) []BucketPair {
 	}
 
 	pairs = append(pairs, pair)
-	prevDuration = pairs[0].UpperBoundDuration()
-	prevValue = pairs[0].UpperBoundValue()
-
 	for i := 1; i < buckets.Len(); i++ {
 		pairs = append(
 			pairs,
-			newBucketPair(htype, durations, prevDuration, values, prevValue, i),
+			newBucketPair(htype, durations, values, i, pairs[i-1]),
 		)
-
-		prevValue = pairs[i].UpperBoundValue()
-		prevDuration = pairs[i].UpperBoundDuration()
 	}
 
-	pairs = append(pairs, bucketPair{
-		lowerBoundValue:    prevValue,
-		upperBoundValue:    _singleBucket.upperBoundValue,
-		lowerBoundDuration: prevDuration,
-		upperBoundDuration: _singleBucket.upperBoundDuration,
-	})
+	switch htype {
+	case durationHistogramType:
+		pair.lowerBoundDuration = pairs[len(pairs)-1].UpperBoundDuration()
+		pair.upperBoundDuration = _singleBucket.upperBoundDuration
+	case valueHistogramType:
+		pair.lowerBoundValue = pairs[len(pairs)-1].UpperBoundValue()
+		pair.upperBoundValue = _singleBucket.upperBoundValue
+	}
+	pairs = append(pairs, pair)
 
 	return pairs
 }
@@ -261,7 +255,7 @@ func LinearValueBuckets(start, width float64, n int) (ValueBuckets, error) {
 	for i := range buckets {
 		buckets[i] = start + (float64(i) * width)
 	}
-	return ValueBuckets(buckets), nil
+	return buckets, nil
 }
 
 // MustMakeLinearValueBuckets creates a set of linear value buckets
@@ -283,7 +277,7 @@ func LinearDurationBuckets(start, width time.Duration, n int) (DurationBuckets, 
 	for i := range buckets {
 		buckets[i] = start + (time.Duration(i) * width)
 	}
-	return DurationBuckets(buckets), nil
+	return buckets, nil
 }
 
 // MustMakeLinearDurationBuckets creates a set of linear duration buckets.
@@ -313,7 +307,7 @@ func ExponentialValueBuckets(start, factor float64, n int) (ValueBuckets, error)
 		buckets[i] = curr
 		curr *= factor
 	}
-	return ValueBuckets(buckets), nil
+	return buckets, nil
 }
 
 // MustMakeExponentialValueBuckets creates a set of exponential value buckets
@@ -343,7 +337,7 @@ func ExponentialDurationBuckets(start time.Duration, factor float64, n int) (Dur
 		buckets[i] = curr
 		curr = time.Duration(float64(curr) * factor)
 	}
-	return DurationBuckets(buckets), nil
+	return buckets, nil
 }
 
 // MustMakeExponentialDurationBuckets creates a set of exponential value buckets
