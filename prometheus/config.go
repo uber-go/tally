@@ -56,6 +56,12 @@ type Configuration struct {
 	// objectives to be used by the reporter.
 	DefaultSummaryObjectives []SummaryObjective `yaml:"defaultSummaryObjectives"`
 
+	// DisableProcessCollector disables the process reporter.
+	DisableProcessCollector bool `yaml:"disableProcessCollector"`
+
+	// DisableGoCollector disables the go reporter.
+	DisableGoCollector bool `yaml:"disableGoCollector"`
+
 	// OnError specifies what to do when an error either with listening
 	// on the specified listen address or registering a metric with the
 	// Prometheus. By default the registerer will panic.
@@ -139,6 +145,19 @@ func (c Configuration) NewReporter(
 		}
 		opts.DefaultSummaryObjectives = values
 	}
+
+	registerer := prom.NewRegistry()
+	if !c.DisableGoCollector {
+		if err := registerer.Register(prom.NewGoCollector()); err != nil {
+			return nil, err
+		}
+	}
+	if !c.DisableProcessCollector {
+		if err := registerer.Register(prom.NewProcessCollector(os.Getpid(), "")); err != nil {
+			return nil, err
+		}
+	}
+	opts.Registerer = registerer
 
 	reporter := NewReporter(opts)
 
