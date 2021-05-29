@@ -76,3 +76,47 @@ func TestCallFail(t *testing.T) {
 	require.Equal(t, 1, len(timers["test_call.latency+"].Values()))
 	assert.True(t, timers["test_call.latency+"].Values()[0] >= sleepFor)
 }
+
+func TestCallSuccessfulFail(t *testing.T) {
+	s := tally.NewTestScope("", nil)
+	filter := func(_ error) bool { return true }
+
+	expected := errors.New("an error")
+	call := NewCall(s, "test_call")
+	err := ExecWithFilter(call, func() error {
+		return expected
+	}, filter)
+	assert.NotNil(t, err)
+	assert.Equal(t, expected, err)
+
+	snapshot := s.Snapshot()
+	counters := snapshot.Counters()
+	timers := snapshot.Timers()
+
+	require.NotNil(t, counters["test_call+result_type=error"])
+	require.NotNil(t, timers["test_call.latency+"])
+
+	assert.Equal(t, int64(1), counters["test_call+result_type=success"].Value())
+}
+
+func TestCallFailFail(t *testing.T) {
+	s := tally.NewTestScope("", nil)
+	filter := func(_ error) bool { return false }
+
+	expected := errors.New("an error")
+	call := NewCall(s, "test_call")
+	err := ExecWithFilter(call, func() error {
+		return expected
+	}, filter)
+	assert.NotNil(t, err)
+	assert.Equal(t, expected, err)
+
+	snapshot := s.Snapshot()
+	counters := snapshot.Counters()
+	timers := snapshot.Timers()
+
+	require.NotNil(t, counters["test_call+result_type=error"])
+	require.NotNil(t, timers["test_call.latency+"])
+
+	assert.Equal(t, int64(1), counters["test_call+result_type=error"].Value())
+}

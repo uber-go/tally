@@ -23,6 +23,11 @@ package instrument
 // ExecFn is an executable function that can be instrumented with a Call.
 type ExecFn func() error
 
+// FilterFn takes in an error and, if the error does not actually indicate
+// a failure, returns true. If the error does actually indicate failure, the
+// function returns false. Can be used with the ExecWithFilter function.
+type FilterFn func(err error) bool
+
 // Call allows tracking the successes, errors, and timing of functions.
 type Call interface {
 	// Exec executes a function and records whether it succeeded or

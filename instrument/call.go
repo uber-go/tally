@@ -65,3 +65,20 @@ func (c *call) Exec(f ExecFn) error {
 	c.success.Inc(1)
 	return nil
 }
+
+// ExecWithFilter executes a function and records whether it succeeded or
+// failed, and the amount of time that it took. ExecWithFilter
+// will always return the error associted with the called function.
+// However, it will decide whether or not classify that error as
+// a success or failure based on the provided SuccessFilter.
+func ExecWithFilter(call Call, f ExecFn, success FilterFn) error {
+	var err error
+	call.Exec(func() error {
+		err = f()
+		if !success(err) {
+			return err
+		}
+		return nil
+	})
+	return err
+}
