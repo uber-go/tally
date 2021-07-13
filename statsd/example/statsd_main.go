@@ -21,6 +21,7 @@
 package main
 
 import (
+	"io"
 	"log"
 	"math/rand"
 	"time"
@@ -33,14 +34,13 @@ import (
 // To view statsd emitted metrics locally you can use
 // netcat with "nc 8125 -l -u"
 func main() {
-	statsdClientCfg := statsd.ClientConfig{
+	statter, err := statsd.NewClientWithConfig(&statsd.ClientConfig{
 		Address:       "127.0.0.1:8125",
 		Prefix:        "stats",
 		FlushInterval: 100 * time.Millisecond,
 		FlushBytes:    1440,
 		TagFormat:     statsd.InfixComma,
-	}
-	statter, err := statsd.NewClientWithConfig(&statsdClientCfg)
+	})
 	if err != nil {
 		log.Fatalf("could not create statsd client: %v", err)
 	}
@@ -53,7 +53,10 @@ func main() {
 		Tags:     map[string]string{},
 		Reporter: r,
 	}, 1*time.Second)
-	defer closer.Close()
+
+	defer func(closer io.Closer) {
+		_ = closer.Close()
+	}(closer)
 
 	counter := scope.Tagged(map[string]string{
 		"host": "local",

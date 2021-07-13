@@ -65,8 +65,13 @@ import (
 )
 
 func newScope() (tally.Scope, io.Closer) {
-	statter, _ := statsd.NewBufferedClient("127.0.0.1:8125",
-		"stats", 100*time.Millisecond, 1440)
+	statter, err := statsd.NewClientWithConfig(&statsd.ClientConfig{
+		Address:       "127.0.0.1:8125",
+		Prefix:        "stats",
+		FlushInterval: 100 * time.Millisecond,
+		FlushBytes:    1440,
+		TagFormat:     statsd.InfixComma,
+	})
 
 	reporter := tallystatsd.NewReporter(statter, tallystatsd.Options{
 		SampleRate: 1.0,
