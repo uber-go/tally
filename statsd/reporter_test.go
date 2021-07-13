@@ -29,5 +29,17 @@ import (
 func TestCapabilities(t *testing.T) {
 	r := NewReporter(nil, Options{})
 	assert.True(t, r.Capabilities().Reporting())
-	assert.False(t, r.Capabilities().Tagging())
+	assert.True(t, r.Capabilities().Tagging())
+}
+
+func TestGetStatsdTagPairs(t *testing.T) {
+	tags := map[string]string{
+		"K1": "V1",
+		"K2": "V2",
+	}
+	tagPairs := getStatsdTagPairs(tags)
+	assert.Equal(t, "K1", tagPairs[0][0])
+	assert.Equal(t, "V1", tagPairs[0][1])
+	assert.Equal(t, "K2", tagPairs[1][0])
+	assert.Equal(t, "V2", tagPairs[1][1])
 }

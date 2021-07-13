@@ -26,9 +26,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/uber-go/tally"
-
 	"github.com/cactus/go-statsd-client/statsd"
+	"github.com/uber-go/tally"
 )
 
 const (
@@ -74,15 +73,15 @@ func NewReporter(statsd statsd.Statter, opts Options) tally.StatsReporter {
 }
 
 func (r *cactusStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
-	r.statter.Inc(name, value, r.sampleRate)
+	r.statter.Inc(name, value, r.sampleRate, getStatsdTagPairs(tags)...)
 }
 
 func (r *cactusStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
-	r.statter.Gauge(name, int64(value), r.sampleRate)
+	r.statter.Gauge(name, int64(value), r.sampleRate, getStatsdTagPairs(tags)...)
 }
 
 func (r *cactusStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
-	r.statter.TimingDuration(name, interval, r.sampleRate)
+	r.statter.TimingDuration(name, interval, r.sampleRate, getStatsdTagPairs(tags)...)
 }
 
 func (r *cactusStatsReporter) ReportHistogramValueSamples(
@@ -97,7 +96,7 @@ func (r *cactusStatsReporter) ReportHistogramValueSamples(
 		fmt.Sprintf("%s.%s-%s", name,
 			r.valueBucketString(bucketLowerBound),
 			r.valueBucketString(bucketUpperBound)),
-		samples, r.sampleRate)
+		samples, r.sampleRate, getStatsdTagPairs(tags)...)
 }
 
 func (r *cactusStatsReporter) ReportHistogramDurationSamples(
@@ -112,7 +111,7 @@ func (r *cactusStatsReporter) ReportHistogramDurationSamples(
 		fmt.Sprintf("%s.%s-%s", name,
 			r.durationBucketString(bucketLowerBound),
 			r.durationBucketString(bucketUpperBound)),
-		samples, r.sampleRate)
+		samples, r.sampleRate, getStatsdTagPairs(tags)...)
 }
 
 func (r *cactusStatsReporter) valueBucketString(
@@ -148,9 +147,17 @@ func (r *cactusStatsReporter) Reporting() bool {
 }
 
 func (r *cactusStatsReporter) Tagging() bool {
-	return false
+	return true
 }
 
 func (r *cactusStatsReporter) Flush() {
 	// no-op
+}
+
+func getStatsdTagPairs(tags map[string]string) []statsd.Tag {
+	tagPairs := make([]statsd.Tag, 0, len(tags))
+	for k, v := range tags {
+		tagPairs = append(tagPairs, statsd.Tag{k, v})
+	}
+	return tagPairs
 }
