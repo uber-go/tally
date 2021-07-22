@@ -89,6 +89,9 @@ func NewTUDPServerTransport(hostPort string) (*TUDPTransport, error) {
 	if err != nil {
 		return nil, thrift.NewTTransportException(thrift.NOT_OPEN, err.Error())
 	}
+	if err := growRcvbuf(conn); err != nil {
+		return nil, err
+	}
 	return &TUDPTransport{
 		addr:        conn.LocalAddr(),
 		conn:        conn,
@@ -203,4 +206,18 @@ func (p *TUDPTransport) Flush() error {
 	_, err := p.conn.Write(p.writeBuf.Bytes())
 	p.writeBuf.Reset() // always reset the buffer, even in case of an error
 	return err
+}
+
+// sysconfRcvbufMax indicates the maximum value honored by SetReadBuffer.
+var sysconfRcvbufMax func() (int, error)
+
+func growRcvbuf(conn *net.UDPConn) error {
+	if sysconfRcvbufMax == nil {
+		return nil
+	}
+	n, err := sysconfRcvbufMax()
+	if err != nil {
+		return err
+	}
+	return conn.SetReadBuffer(n)
 }
