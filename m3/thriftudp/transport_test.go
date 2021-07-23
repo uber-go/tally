@@ -65,10 +65,10 @@ func TestNewTUDPClientTransport(t *testing.T) {
 
 func TestNewTUDPServerTransportWithListenConfig(t *testing.T) {
 	_, err := NewTUDPServerTransportWithListenConfig("fakeAddressAndPort", listenConfig)
-	require.NotNil(t, err)
+	require.Error(t, err)
 
 	trans, err := NewTUDPServerTransportWithListenConfig(localListenAddr.String(), listenConfig)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.True(t, trans.IsOpen())
 	require.Equal(t, ^uint64(0), trans.RemainingBytes())
 
@@ -78,10 +78,9 @@ func TestNewTUDPServerTransportWithListenConfig(t *testing.T) {
 		//close the second server if one got created
 		trans2.Close()
 	}
-	require.NotNil(t, err)
+	require.Error(t, err)
 
-	err = trans.Close()
-	require.Nil(t, err)
+	require.NoError(t, trans.Close())
 	require.False(t, trans.IsOpen())
 
 	//test if net.ListenConfig is used
@@ -105,10 +104,10 @@ func TestNewTUDPServerTransportWithListenConfig(t *testing.T) {
 
 func TestTUDPServerTransportIsOpen(t *testing.T) {
 	_, err := NewTUDPServerTransport("fakeAddressAndPort")
-	require.NotNil(t, err)
+	require.Error(t, err)
 
 	trans, err := NewTUDPServerTransport(localListenAddr.String())
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.True(t, trans.IsOpen())
 	require.Equal(t, ^uint64(0), trans.RemainingBytes())
 
@@ -117,7 +116,7 @@ func TestTUDPServerTransportIsOpen(t *testing.T) {
 	go func() {
 		time.Sleep(2 * time.Millisecond)
 		err = trans.Close()
-		require.Nil(t, err)
+		require.NoError(t, err)
 		wg.Done()
 	}()
 
@@ -135,75 +134,75 @@ func TestTUDPServerTransportIsOpen(t *testing.T) {
 
 func TestWriteRead(t *testing.T) {
 	server, err := NewTUDPServerTransport(localListenAddr.String())
-	require.Nil(t, err)
+	require.NoError(t, err)
 	defer server.Close()
 
 	client, err := NewTUDPClientTransport(server.Addr().String(), "")
-	require.Nil(t, err)
+	require.NoError(t, err)
 	defer client.Close()
 
 	n, err := client.Write([]byte("test"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, 4, n)
 	n, err = client.WriteString("string")
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, 6, n)
 	err = client.Flush()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	expected := []byte("teststring")
 	readBuf := make([]byte, 20)
 	n, err = server.Read(readBuf)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, len(expected), n)
 	require.Equal(t, expected, readBuf[0:n])
 }
 
 func TestWriteByteReadByte(t *testing.T) {
 	server, err := NewTUDPServerTransport(localListenAddr.String())
-	require.Nil(t, err)
+	require.NoError(t, err)
 	defer server.Close()
 
 	client, err := NewTUDPClientTransport(server.Addr().String(), "")
-	require.Nil(t, err)
+	require.NoError(t, err)
 	client.Open()
 	defer client.Close()
 
 	for _, b := range []byte("test") {
 		err := client.WriteByte(b)
-		require.Nil(t, err)
+		require.NoError(t, err)
 
 		err = client.Flush()
-		require.Nil(t, err)
+		require.NoError(t, err)
 	}
 
 	want := []byte("test")
 	for i := range want {
 		b, err := server.ReadByte()
-		require.Nil(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, want[i], b, "byte %v mismatch", i)
 	}
 }
 
 func TestReadByteEmptyPacket(t *testing.T) {
 	server, err := NewTUDPServerTransport(localListenAddr.String())
-	require.Nil(t, err)
+	require.NoError(t, err)
 	defer server.Close()
 
 	client, err := NewTUDPClientTransport(server.Addr().String(), "")
-	require.Nil(t, err)
+	require.NoError(t, err)
 	defer client.Close()
 
 	err = client.Flush()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	_, err = server.ReadByte()
-	require.NotNil(t, err)
+	require.Error(t, err)
 }
 
 func TestIndirectCloseError(t *testing.T) {
 	trans, err := NewTUDPServerTransport(localListenAddr.String())
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.True(t, trans.IsOpen())
 
 	//Close connection object directly
@@ -220,7 +219,7 @@ func TestIndirectCloseError(t *testing.T) {
 // It's questionable whether multiple calls to Close() should succeed or not.
 func TestDoubleCloseIsOK(t *testing.T) {
 	trans, err := NewTUDPServerTransport(localListenAddr.String())
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.True(t, trans.IsOpen())
 
 	conn := trans.Conn()
@@ -234,7 +233,7 @@ func TestDoubleCloseIsOK(t *testing.T) {
 
 func TestConnClosedReadWrite(t *testing.T) {
 	trans, err := NewTUDPServerTransport(localListenAddr.String())
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.True(t, trans.IsOpen())
 	trans.Close()
 	require.False(t, trans.IsOpen())
@@ -301,8 +300,8 @@ func TestFlushErrors(t *testing.T) {
 		require.NoError(t, err)
 		trans.conn.Close()
 
-		trans.Write([]byte{1, 2, 3, 4})
-		_ = trans.Flush()
+		_, err = trans.Write([]byte{1, 2, 3, 4})
+		require.NoError(t, err)
 		require.Error(t, trans.Flush(), "Flush with data should fail")
 	})
 }
@@ -319,8 +318,7 @@ func TestResetInFlush(t *testing.T) {
 
 	trans.conn.Close() // close the transport's connection via back door
 
-	err = trans.Flush()
-	require.NotNil(t, err, "should fail to write to closed connection")
+	require.NotNil(t,  trans.Flush(), "should fail to write to closed connection")
 	assert.Equal(t, 0, trans.writeBuf.Len(), "should reset the buffer")
 }
 
