@@ -71,8 +71,9 @@ const (
 	// with the histogram bucket bound values.
 	DefaultHistogramBucketTagPrecision = uint(6)
 
-	emitMetricBatchOverhead    = 19
-	minMetricBucketIDTagLength = 4
+	_emitMetricBatchOverhead    = 19
+	_minMetricBucketIDTagLength = 4
+	_timeResolution             = 100 * time.Millisecond
 )
 
 var (
@@ -251,7 +252,7 @@ func NewReporter(opts Options) (Reporter, error) {
 
 	var (
 		calc             = proto.Transport().(*customtransport.TCalcTransport)
-		numOverheadBytes = emitMetricBatchOverhead + calc.GetCount()
+		numOverheadBytes = _emitMetricBatchOverhead + calc.GetCount()
 		freeBytes        = opts.MaxPacketSizeBytes - numOverheadBytes
 	)
 	calc.ResetCount()
@@ -283,11 +284,9 @@ func NewReporter(opts Options) (Reporter, error) {
 		tagCache:        cache.NewTagCache(),
 	}
 
-	var (
-		internalTags = map[string]string{
-			"version": tally.Version,
-		}
-	)
+	internalTags := map[string]string{
+		"version": tally.Version,
+	}
 	r.batchSizeHistogram = r.AllocateHistogram("tally.internal.batch-size", internalTags, buckets)
 	r.numBatchesCounter = r.AllocateCounter("tally.internal.num-batches", internalTags)
 	r.numMetricsCounter = r.AllocateCounter("tally.internal.num-metrics", internalTags)
@@ -376,7 +375,7 @@ func (r *reporter) AllocateHistogram(
 		_, isDuration = buckets.(tally.DurationBuckets)
 		bucketIDLen   = int(math.Max(
 			float64(ndigits(buckets.Len())),
-			float64(minMetricBucketIDTagLength),
+			float64(_minMetricBucketIDTagLength),
 		))
 		bucketIDFmt           = "%0" + strconv.Itoa(bucketIDLen) + "d"
 		cachedValueBuckets    []cachedHistogramBucket
@@ -695,7 +694,7 @@ func (r *reporter) reportInternalMetrics() {
 func (r *reporter) timeLoop() {
 	for !r.done.Load() {
 		r.now.Store(time.Now().UnixNano())
-		time.Sleep(time.Millisecond)
+		time.Sleep(_timeResolution)
 	}
 }
 
