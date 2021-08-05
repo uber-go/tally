@@ -6,7 +6,7 @@ imports:
   subpackages:
   - quantile
 - name: github.com/cactus/go-statsd-client
-  version: 138b925ccdf617776955904ba7759fce64406cec
+  version: 7eb0950793aa9a679bc468eb1da9b5520f73b16f
   subpackages:
   - statsd
 - name: github.com/golang/protobuf
