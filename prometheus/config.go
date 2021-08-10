@@ -28,7 +28,7 @@ import (
 	"os"
 	"strings"
 
-	prom "github.com/m3db/prometheus_client_golang/prometheus"
+	prom "github.com/prometheus/client_golang/prometheus"
 )
 
 // Configuration is a configuration for a Prometheus reporter.
