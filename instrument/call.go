@@ -20,7 +20,9 @@
 
 package instrument
 
-import "github.com/uber-go/tally"
+import (
+	tally "github.com/uber-go/tally/v4"
+)
 
 const (
 	resultType        = "result_type"

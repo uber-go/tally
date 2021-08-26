@@ -24,7 +24,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
+	"github.com/uber-go/tally/v4/thirdparty/github.com/apache/thrift/lib/go/thrift"
 )
 
 // Make sure that TCalcTransport implements TRichTransport.

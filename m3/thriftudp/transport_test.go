@@ -50,7 +50,7 @@ func TestNewTUDPClientTransport(t *testing.T) {
 		require.True(t, trans.IsOpen())
 		require.NotNil(t, trans.Addr())
 
-		//Check address
+		// Check address
 		assert.True(t, strings.HasPrefix(trans.Addr().String(), "127.0.0.1:"), "address check")
 		require.Equal(t, "udp", trans.Addr().Network())
 
@@ -72,10 +72,10 @@ func TestNewTUDPServerTransportWithListenConfig(t *testing.T) {
 	require.True(t, trans.IsOpen())
 	require.Equal(t, ^uint64(0), trans.RemainingBytes())
 
-	//Ensure a second server can't be created on the same address
+	// Ensure a second server can't be created on the same address
 	trans2, err := NewTUDPServerTransportWithListenConfig(trans.Addr().String(), listenConfig)
 	if trans2 != nil {
-		//close the second server if one got created
+		// close the second server if one got created
 		trans2.Close()
 	}
 	require.Error(t, err)
@@ -83,8 +83,8 @@ func TestNewTUDPServerTransportWithListenConfig(t *testing.T) {
 	require.NoError(t, trans.Close())
 	require.False(t, trans.IsOpen())
 
-	//test if net.ListenConfig is used
-	var ch = make(chan struct{})
+	// test if net.ListenConfig is used
+	ch := make(chan struct{})
 	_, _ = NewTUDPServerTransportWithListenConfig(
 		localListenAddr.String(),
 		net.ListenConfig{
@@ -205,7 +205,7 @@ func TestIndirectCloseError(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, trans.IsOpen())
 
-	//Close connection object directly
+	// Close connection object directly
 	conn := trans.Conn()
 	require.NotNil(t, conn)
 	err = conn.Close()
@@ -261,7 +261,7 @@ func TestHugeWrite(t *testing.T) {
 		_, err = trans.Write(hugeMessage)
 		require.NoError(t, err)
 
-		//expect buffer to exceed max
+		// expect buffer to exceed max
 		_, err = trans.Write(hugeMessage)
 		require.Error(t, err)
 
@@ -279,7 +279,7 @@ func TestWriteByteLimit(t *testing.T) {
 		_, err = trans.Write(hugeMessage)
 		require.NoError(t, err)
 
-		//expect buffer to exceed max
+		// expect buffer to exceed max
 		err = trans.WriteByte('a')
 		require.Error(t, err)
 	})
@@ -290,12 +290,12 @@ func TestFlushErrors(t *testing.T) {
 		trans, err := NewTUDPClientTransport(addr, "")
 		require.NoError(t, err)
 
-		//flushing closed transport
+		// flushing closed transport
 		trans.Close()
 		err = trans.Flush()
 		require.Error(t, err)
 
-		//error when trying to write in flush
+		// error when trying to write in flush
 		trans, err = NewTUDPClientTransport(addr, "")
 		require.NoError(t, err)
 		trans.conn.Close()
@@ -318,7 +318,7 @@ func TestResetInFlush(t *testing.T) {
 
 	trans.conn.Close() // close the transport's connection via back door
 
-	require.NotNil(t,  trans.Flush(), "should fail to write to closed connection")
+	require.NotNil(t, trans.Flush(), "should fail to write to closed connection")
 	assert.Equal(t, 0, trans.writeBuf.Len(), "should reset the buffer")
 }
 

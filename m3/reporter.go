@@ -32,12 +32,12 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/uber-go/tally"
-	"github.com/uber-go/tally/internal/cache"
-	customtransport "github.com/uber-go/tally/m3/customtransports"
-	m3thrift "github.com/uber-go/tally/m3/thrift/v2"
-	"github.com/uber-go/tally/m3/thriftudp"
-	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
+	tally "github.com/uber-go/tally/v4"
+	"github.com/uber-go/tally/v4/internal/cache"
+	customtransport "github.com/uber-go/tally/v4/m3/customtransports"
+	m3thrift "github.com/uber-go/tally/v4/m3/thrift/v2"
+	"github.com/uber-go/tally/v4/m3/thriftudp"
+	"github.com/uber-go/tally/v4/thirdparty/github.com/apache/thrift/lib/go/thrift"
 	"go.uber.org/atomic"
 )
 

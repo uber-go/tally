@@ -26,21 +26,21 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-var (
-	mainFileFmt = `
+var mainFileFmt = `
 package main
 
 import (
 	"time"
 
-	"github.com/uber-go/tally"
-	"github.com/uber-go/tally/m3"
+	tally "github.com/uber-go/tally/v4"
+	"github.com/uber-go/tally/v4/m3"
 )
 
 func main() {
@@ -63,7 +63,6 @@ func main() {
 	scope.Timer("my-timer").Record(456 * time.Millisecond)
 }
 	`
-)
 
 // TestIntegrationProcessFlushOnExit tests whether data is correctly flushed
 // when the scope is closed for shortly lived programs
@@ -74,9 +73,12 @@ func TestIntegrationProcessFlushOnExit(t *testing.T) {
 }
 
 func testProcessFlushOnExit(t *testing.T, i int) {
-	dir, err := ioutil.TempDir("", "foo")
+	dir, err := os.MkdirTemp(".", "foo")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
+
+	dir, err = filepath.Abs(dir)
+	require.NoError(t, err)
 
 	var wg sync.WaitGroup
 	server := newFakeM3Server(t, &wg, true, Compact)
@@ -86,7 +88,7 @@ func testProcessFlushOnExit(t *testing.T, i int) {
 	mainFile := path.Join(dir, "main.go")
 	mainFileContents := fmt.Sprintf(mainFileFmt, server.Addr)
 
-	fileErr := ioutil.WriteFile(mainFile, []byte(mainFileContents), 0666)
+	fileErr := ioutil.WriteFile(mainFile, []byte(mainFileContents), 0o666)
 	require.NoError(t, fileErr)
 
 	binary := path.Join(dir, "m3testemit")

@@ -28,7 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/uber-go/tally/internal/identity"
+	"github.com/uber-go/tally/v4/internal/identity"
 )
 
 var (
@@ -519,10 +519,13 @@ var NullStatsReporter StatsReporter = nullStatsReporter{}
 
 func (r nullStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
 }
+
 func (r nullStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
 }
+
 func (r nullStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
 }
+
 func (r nullStatsReporter) ReportHistogramValueSamples(
 	name string,
 	tags map[string]string,
@@ -542,9 +545,11 @@ func (r nullStatsReporter) ReportHistogramDurationSamples(
 	samples int64,
 ) {
 }
+
 func (r nullStatsReporter) Capabilities() Capabilities {
 	return capabilitiesNone
 }
+
 func (r nullStatsReporter) Flush() {
 }
 

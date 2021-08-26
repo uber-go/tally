@@ -21,7 +21,7 @@ dependencies:
 	go install ./vendor/github.com/golang/lint/golint
 
 .PHONY: lint
-lint:
+lint: gomodtidy
 	@rm -rf lint.log
 	@echo "Checking formatting..."
 	@gofmt -d -s $(PKG_FILES) 2>&1 | grep -v '$(LINT_IGNORE)' | tee lint.log
@@ -34,6 +34,15 @@ lint:
 	@echo "Checking for license headers..."
 	@./check_license.sh | grep -v '$(LICENSE_IGNORE)' | tee -a lint.log
 	@[ ! -s lint.log ]
+
+.PHONY: gomodtidy
+gomodtidy: go.mod go.sum
+	go mod tidy
+	@if ! git diff --quiet $^; then \
+		echo "go mod tidy changed files:" && \
+		git status --porcelain $^ && \
+		false; \
+	fi
 
 .PHONY: test
 test:
