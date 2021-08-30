@@ -23,8 +23,8 @@ package cache
 import (
 	"sync"
 
-	"github.com/uber-go/tally/internal/identity"
-	m3thrift "github.com/uber-go/tally/m3/thrift/v2"
+	"github.com/uber-go/tally/v4/internal/identity"
+	m3thrift "github.com/uber-go/tally/v4/m3/thrift/v2"
 )
 
 // TagCache is an identity.Accumulator-based tag cache.

@@ -32,11 +32,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uber-go/tally"
-	customtransport "github.com/uber-go/tally/m3/customtransports"
-	m3thrift "github.com/uber-go/tally/m3/thrift/v2"
-	"github.com/uber-go/tally/m3/thriftudp"
-	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
+	tally "github.com/uber-go/tally/v4"
+	customtransport "github.com/uber-go/tally/v4/m3/customtransports"
+	m3thrift "github.com/uber-go/tally/v4/m3/thrift/v2"
+	"github.com/uber-go/tally/v4/m3/thriftudp"
+	"github.com/uber-go/tally/v4/thirdparty/github.com/apache/thrift/lib/go/thrift"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,8 +49,10 @@ const (
 	shortInterval = 10 * time.Millisecond
 )
 
-var localListenAddr = &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)}
-var defaultCommonTags = map[string]string{"env": "test", "host": "test"}
+var (
+	localListenAddr   = &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)}
+	defaultCommonTags = map[string]string{"env": "test", "host": "test"}
+)
 
 var protocols = []Protocol{Compact, Binary}
 

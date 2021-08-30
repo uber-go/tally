@@ -29,9 +29,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/uber-go/tally"
-	"github.com/uber-go/tally/m3"
-	m3thrift "github.com/uber-go/tally/m3/thrift/v1"
+	tally "github.com/uber-go/tally/v4"
+	"github.com/uber-go/tally/v4/m3"
+	m3thrift "github.com/uber-go/tally/v4/m3/thrift/v1"
 
 	validator "gopkg.in/validator.v2"
 	yaml "gopkg.in/yaml.v2"

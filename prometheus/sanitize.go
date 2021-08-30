@@ -21,24 +21,22 @@
 package prometheus
 
 import (
-	"github.com/uber-go/tally"
+	tally "github.com/uber-go/tally/v4"
 )
 
-var (
-	// DefaultSanitizerOpts are the options for the default Prometheus sanitizer.
-	DefaultSanitizerOpts = tally.SanitizeOptions{
-		NameCharacters: tally.ValidCharacters{
-			Ranges:     tally.AlphanumericRange,
-			Characters: tally.UnderscoreCharacters,
-		},
-		KeyCharacters: tally.ValidCharacters{
-			Ranges:     tally.AlphanumericRange,
-			Characters: tally.UnderscoreCharacters,
-		},
-		ValueCharacters: tally.ValidCharacters{
-			Ranges:     tally.AlphanumericRange,
-			Characters: tally.UnderscoreCharacters,
-		},
-		ReplacementCharacter: tally.DefaultReplacementCharacter,
-	}
-)
+// DefaultSanitizerOpts are the options for the default Prometheus sanitizer.
+var DefaultSanitizerOpts = tally.SanitizeOptions{
+	NameCharacters: tally.ValidCharacters{
+		Ranges:     tally.AlphanumericRange,
+		Characters: tally.UnderscoreCharacters,
+	},
+	KeyCharacters: tally.ValidCharacters{
+		Ranges:     tally.AlphanumericRange,
+		Characters: tally.UnderscoreCharacters,
+	},
+	ValueCharacters: tally.ValidCharacters{
+		Ranges:     tally.AlphanumericRange,
+		Characters: tally.UnderscoreCharacters,
+	},
+	ReplacementCharacter: tally.DefaultReplacementCharacter,
+}

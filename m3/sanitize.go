@@ -21,24 +21,22 @@
 package m3
 
 import (
-	"github.com/uber-go/tally"
+	tally "github.com/uber-go/tally/v4"
 )
 
-var (
-	// DefaultSanitizerOpts are the options for the default M3 sanitizer.
-	DefaultSanitizerOpts = tally.SanitizeOptions{
-		NameCharacters: tally.ValidCharacters{
-			Ranges:     tally.AlphanumericRange,
-			Characters: tally.UnderscoreDashDotCharacters,
-		},
-		KeyCharacters: tally.ValidCharacters{
-			Ranges:     tally.AlphanumericRange,
-			Characters: tally.UnderscoreDashCharacters,
-		},
-		ValueCharacters: tally.ValidCharacters{
-			Ranges:     tally.AlphanumericRange,
-			Characters: tally.UnderscoreDashDotCharacters,
-		},
-		ReplacementCharacter: tally.DefaultReplacementCharacter,
-	}
-)
+// DefaultSanitizerOpts are the options for the default M3 sanitizer.
+var DefaultSanitizerOpts = tally.SanitizeOptions{
+	NameCharacters: tally.ValidCharacters{
+		Ranges:     tally.AlphanumericRange,
+		Characters: tally.UnderscoreDashDotCharacters,
+	},
+	KeyCharacters: tally.ValidCharacters{
+		Ranges:     tally.AlphanumericRange,
+		Characters: tally.UnderscoreDashCharacters,
+	},
+	ValueCharacters: tally.ValidCharacters{
+		Ranges:     tally.AlphanumericRange,
+		Characters: tally.UnderscoreDashDotCharacters,
+	},
+	ReplacementCharacter: tally.DefaultReplacementCharacter,
+}

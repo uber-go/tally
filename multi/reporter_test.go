@@ -24,10 +24,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uber-go/tally"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	tally "github.com/uber-go/tally/v4"
 )
 
 func TestMultiReporter(t *testing.T) {
@@ -254,8 +253,10 @@ func (r *capturingStatsReporter) ReportHistogramValueSamples(
 	bucketUpperBound float64,
 	samples int64,
 ) {
-	elem := capturedHistogramValueSamples{name, tags,
-		bucketLowerBound, bucketUpperBound, samples}
+	elem := capturedHistogramValueSamples{
+		name, tags,
+		bucketLowerBound, bucketUpperBound, samples,
+	}
 	r.histogramValueSamples = append(r.histogramValueSamples, elem)
 }
 
@@ -267,8 +268,10 @@ func (r *capturingStatsReporter) ReportHistogramDurationSamples(
 	bucketUpperBound time.Duration,
 	samples int64,
 ) {
-	elem := capturedHistogramDurationSamples{name, tags,
-		bucketLowerBound, bucketUpperBound, samples}
+	elem := capturedHistogramDurationSamples{
+		name, tags,
+		bucketLowerBound, bucketUpperBound, samples,
+	}
 	r.histogramDurationSamples = append(r.histogramDurationSamples, elem)
 }
 

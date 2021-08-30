@@ -27,10 +27,9 @@ import (
 
 	prom "github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
-	"github.com/uber-go/tally"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	tally "github.com/uber-go/tally/v4"
 )
 
 // NB(r): If a test is failing, you can debug what is being
