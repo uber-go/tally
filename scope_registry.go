@@ -95,11 +95,12 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 	}
 	r.mu.RUnlock()
 
+	tags = parent.copyAndSanitizeMap(tags)
+	key := scopeRegistryKey(prefix, parent.tags, tags)
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	tags = parent.copyAndSanitizeMap(tags)
-	key := scopeRegistryKey(prefix, parent.tags, tags)
 	if s, ok := r.lockedLookup(key); ok {
 		if _, ok = r.lockedLookup(preSanitizeKey); !ok {
 			r.subscopes[preSanitizeKey] = s
