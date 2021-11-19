@@ -86,10 +86,10 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		return NoopScope.(*scope)
 	}
 
-	key := scopeRegistryKey(prefix, parent.tags, tags)
+	preSanitizeKey := scopeRegistryKey(prefix, parent.tags, tags)
 
 	r.mu.RLock()
-	if s, ok := r.lockedLookup(key); ok {
+	if s, ok := r.lockedLookup(preSanitizeKey); ok {
 		r.mu.RUnlock()
 		return s
 	}
@@ -98,7 +98,12 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	tags = parent.copyAndSanitizeMap(tags)
+	key := scopeRegistryKey(prefix, parent.tags, tags)
 	if s, ok := r.lockedLookup(key); ok {
+		if _, ok = r.lockedLookup(preSanitizeKey); !ok {
+			r.subscopes[preSanitizeKey] = s
+		}
 		return s
 	}
 
@@ -127,6 +132,9 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		done:            make(chan struct{}),
 	}
 	r.subscopes[key] = subscope
+	if _, ok := r.lockedLookup(preSanitizeKey); !ok {
+		r.subscopes[preSanitizeKey] = subscope
+	}
 	return subscope
 }
 
