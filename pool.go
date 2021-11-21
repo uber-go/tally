@@ -27,10 +27,23 @@ type ObjectPool struct {
 	alloc  func() interface{}
 }
 
+// StringSlicePool is a specialization ObjectPool for []string to reduce allocation
+// that happens with interface{} as return type for Get()
+type StringSlicePool struct {
+	values chan []string
+	alloc  func() []string
+}
+
 // NewObjectPool creates a new pool.
 func NewObjectPool(size int) *ObjectPool {
 	return &ObjectPool{
 		values: make(chan interface{}, size),
+	}
+}
+
+func NewStringSlicePool(size int) *StringSlicePool {
+	return &StringSlicePool{
+		values: make(chan []string, size),
 	}
 }
 
@@ -56,6 +69,34 @@ func (p *ObjectPool) Get() interface{} {
 
 // Put puts an object back to the pool.
 func (p *ObjectPool) Put(obj interface{}) {
+	select {
+	case p.values <- obj:
+	default:
+	}
+}
+
+// Init initializes the string slice pool.
+func (p *StringSlicePool) Init(alloc func() []string) {
+	p.alloc = alloc
+
+	for i := 0; i < cap(p.values); i++ {
+		p.values <- p.alloc()
+	}
+}
+
+// Get gets a string slice from the pool.
+func (p *StringSlicePool) Get() []string {
+	var v []string
+	select {
+	case v = <-p.values:
+	default:
+		v = p.alloc()
+	}
+	return v
+}
+
+// Put releases a string slice back to the pool.
+func (p *StringSlicePool) Put(obj []string) {
 	select {
 	case p.values <- obj:
 	default:

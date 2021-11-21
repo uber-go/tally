@@ -23,6 +23,7 @@ package tally
 import (
 	"bytes"
 	"sort"
+	"unsafe"
 )
 
 const (
@@ -38,7 +39,28 @@ var (
 
 type keyGenerationPool struct {
 	bufferPool  *ObjectPool
-	stringsPool *ObjectPool
+	stringsPool *StringSlicePool
+}
+
+// key helps to reduce allocations when the Tagged scope is already cached
+// key is a struct to reduce allocation that would happen with interface as interface escapes to heap
+type key struct {
+	bufferPool *ObjectPool
+	buffer     *bytes.Buffer
+}
+
+func (k key) CastAsString() string {
+	b := k.buffer.Bytes()
+	return *(*string)(unsafe.Pointer(&b))
+}
+
+func (k key) CopyAsString() string {
+	return k.buffer.String()
+}
+
+func (k key) Release() {
+	k.buffer.Reset()
+	k.bufferPool.Put(k.buffer)
 }
 
 // KeyForStringMap generates a unique key for a map string set combination.
@@ -57,17 +79,14 @@ func KeyForPrefixedStringMap(
 	return keyForPrefixedStringMaps(prefix, stringMap)
 }
 
-// keyForPrefixedStringMaps generates a unique key for a prefix and a series
-// of maps containing tags.
-//
-// If a key occurs in multiple maps, keys on the right take precedence.
-func keyForPrefixedStringMaps(prefix string, maps ...map[string]string) string {
-	keys := keyGenPool.stringsPool.Get().([]string)
+func keyForPrefixedStringMapsAsKey(prefix string, maps ...map[string]string) key {
+	keys := keyGenPool.stringsPool.Get()
 	for _, m := range maps {
 		for k := range m {
 			keys = append(keys, k)
 		}
 	}
+	// 1 allocation as sort.Interface escapes to heap
 	sort.Strings(keys)
 
 	buf := keyGenPool.bufferPool.Get().(*bytes.Buffer)
@@ -101,9 +120,21 @@ func keyForPrefixedStringMaps(prefix string, maps ...map[string]string) string {
 		}
 	}
 
-	key := buf.String()
-	keyGenPool.release(buf, keys)
-	return key
+	keyGenPool.release(keys)
+	return key{
+		bufferPool: keyGenPool.bufferPool,
+		buffer: buf,
+	}
+}
+
+// keyForPrefixedStringMaps generates a unique key for a prefix and a series
+// of maps containing tags.
+//
+// If a key occurs in multiple maps, keys on the right take precedence.
+func keyForPrefixedStringMaps(prefix string, maps ...map[string]string) string {
+	key := keyForPrefixedStringMapsAsKey(prefix, maps...)
+	defer key.Release()
+	return key.CopyAsString()
 }
 
 func newKeyGenerationPool(size, blen, slen int) *keyGenerationPool {
@@ -112,8 +143,8 @@ func newKeyGenerationPool(size, blen, slen int) *keyGenerationPool {
 		return bytes.NewBuffer(make([]byte, 0, blen))
 	})
 
-	s := NewObjectPool(size)
-	s.Init(func() interface{} {
+	s := NewStringSlicePool(size)
+	s.Init(func() []string {
 		return make([]string, 0, slen)
 	})
 
@@ -123,10 +154,7 @@ func newKeyGenerationPool(size, blen, slen int) *keyGenerationPool {
 	}
 }
 
-func (s *keyGenerationPool) release(b *bytes.Buffer, strs []string) {
-	b.Reset()
-	s.bufferPool.Put(b)
-
+func (s *keyGenerationPool) release(strs []string) {
 	for i := range strs {
 		strs[i] = nilString
 	}
