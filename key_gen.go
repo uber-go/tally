@@ -35,7 +35,7 @@ const (
 
 var (
 	nilString  = ""
-	bufferPool = &sync.Pool{
+	bufferPool = sync.Pool{
 		New: func() interface{} {
 			return bytes.NewBuffer(make([]byte, 0, 1024))
 		},
@@ -51,8 +51,7 @@ var (
 // key helps to reduce allocations when the Tagged scope is already cached
 // key is a struct to reduce allocation that would happen with interface as interface escapes to heap
 type key struct {
-	bufferPool *sync.Pool
-	buffer     *bytes.Buffer
+	buffer *bytes.Buffer
 }
 
 func (k key) CastAsString() string {
@@ -66,7 +65,7 @@ func (k key) CopyAsString() string {
 
 func (k key) Release() {
 	k.buffer.Reset()
-	k.bufferPool.Put(k.buffer)
+	bufferPool.Put(k.buffer)
 }
 
 // KeyForStringMap generates a unique key for a map string set combination.
@@ -127,10 +126,7 @@ func keyForPrefixedStringMapsAsKey(prefix string, maps ...map[string]string) key
 	}
 
 	release(keys)
-	return key{
-		bufferPool: bufferPool,
-		buffer:     buf,
-	}
+	return key{buf}
 }
 
 // keyForPrefixedStringMaps generates a unique key for a prefix and a series
