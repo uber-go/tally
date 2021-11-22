@@ -123,7 +123,7 @@ func keyForPrefixedStringMapsAsKey(prefix string, maps ...map[string]string) key
 	keyGenPool.release(keys)
 	return key{
 		bufferPool: keyGenPool.bufferPool,
-		buffer: buf,
+		buffer:     buf,
 	}
 }
 
