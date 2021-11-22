@@ -23,6 +23,7 @@ package tally
 import (
 	"bytes"
 	"sort"
+	"sync"
 	"unsafe"
 )
 
@@ -33,19 +34,24 @@ const (
 )
 
 var (
-	keyGenPool = newKeyGenerationPool(1024, 1024, 32)
 	nilString  = ""
+	bufferPool = &sync.Pool{
+		New: func() interface{} {
+			return bytes.NewBuffer(make([]byte, 0, 1024))
+		},
+	}
+	stringsPool = sync.Pool{
+		New: func() interface{} {
+			ss := make([]string, 0, 32)
+			return &ss
+		},
+	}
 )
-
-type keyGenerationPool struct {
-	bufferPool  *ObjectPool
-	stringsPool *StringSlicePool
-}
 
 // key helps to reduce allocations when the Tagged scope is already cached
 // key is a struct to reduce allocation that would happen with interface as interface escapes to heap
 type key struct {
-	bufferPool *ObjectPool
+	bufferPool *sync.Pool
 	buffer     *bytes.Buffer
 }
 
@@ -80,16 +86,16 @@ func KeyForPrefixedStringMap(
 }
 
 func keyForPrefixedStringMapsAsKey(prefix string, maps ...map[string]string) key {
-	keys := keyGenPool.stringsPool.Get()
+	keys := stringsPool.Get().(*[]string)
 	for _, m := range maps {
 		for k := range m {
-			keys = append(keys, k)
+			*keys = append(*keys, k)
 		}
 	}
 	// 1 allocation as sort.Interface escapes to heap
-	sort.Strings(keys)
+	sort.Strings(*keys)
 
-	buf := keyGenPool.bufferPool.Get().(*bytes.Buffer)
+	buf := bufferPool.Get().(*bytes.Buffer)
 
 	if prefix != nilString {
 		buf.WriteString(prefix)
@@ -97,7 +103,7 @@ func keyForPrefixedStringMapsAsKey(prefix string, maps ...map[string]string) key
 	}
 
 	var lastKey string // last key written to the buffer
-	for _, k := range keys {
+	for _, k := range *keys {
 		if len(lastKey) > 0 {
 			if k == lastKey {
 				// Already wrote this key.
@@ -120,9 +126,9 @@ func keyForPrefixedStringMapsAsKey(prefix string, maps ...map[string]string) key
 		}
 	}
 
-	keyGenPool.release(keys)
+	release(keys)
 	return key{
-		bufferPool: keyGenPool.bufferPool,
+		bufferPool: bufferPool,
 		buffer:     buf,
 	}
 }
@@ -137,26 +143,10 @@ func keyForPrefixedStringMaps(prefix string, maps ...map[string]string) string {
 	return key.CopyAsString()
 }
 
-func newKeyGenerationPool(size, blen, slen int) *keyGenerationPool {
-	b := NewObjectPool(size)
-	b.Init(func() interface{} {
-		return bytes.NewBuffer(make([]byte, 0, blen))
-	})
-
-	s := NewStringSlicePool(size)
-	s.Init(func() []string {
-		return make([]string, 0, slen)
-	})
-
-	return &keyGenerationPool{
-		bufferPool:  b,
-		stringsPool: s,
+func release(strs *[]string) {
+	for i := range *strs {
+		(*strs)[i] = nilString
 	}
-}
-
-func (s *keyGenerationPool) release(strs []string) {
-	for i := range strs {
-		strs[i] = nilString
-	}
-	s.stringsPool.Put(strs[:0])
+	*strs = (*strs)[:0]
+	stringsPool.Put(strs)
 }
