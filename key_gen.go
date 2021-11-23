@@ -39,28 +39,7 @@ var (
 			return &ss
 		},
 	}
-	sorterPool = sync.Pool{
-		New: func() interface{} {
-			return &stringsSorter{}
-		},
-	}
 )
-
-type stringsSorter struct {
-	data *sort.StringSlice
-}
-
-func (s stringsSorter) Len() int {
-	return s.data.Len()
-}
-
-func (s stringsSorter) Less(i, j int) bool {
-	return s.data.Less(i, j)
-}
-
-func (s stringsSorter) Swap(i, j int) {
-	s.data.Swap(i, j)
-}
 
 // KeyForStringMap generates a unique key for a map string set combination.
 func KeyForStringMap(
@@ -86,7 +65,8 @@ func keyForPrefixedStringMapsAsKey(buf []byte, prefix string, maps ...map[string
 		}
 	}
 
-	sortKeys(keys)
+	// using a pointer to implementation of sort.Interface does not perform an alloc
+	sort.Sort((*sort.StringSlice)(keys))
 
 	if prefix != nilString {
 		buf = append(buf, prefix...)
@@ -135,12 +115,4 @@ func release(strs *[]string) {
 	}
 	*strs = (*strs)[:0]
 	stringsPool.Put(strs)
-}
-
-func sortKeys(keys *[]string) {
-	s := sorterPool.Get().(*stringsSorter)
-	s.data = (*sort.StringSlice)(keys)
-	sort.Sort(s)
-	s.data = nil
-	sorterPool.Put(s)
 }
