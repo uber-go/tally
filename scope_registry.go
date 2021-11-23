@@ -89,12 +89,17 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 
 	buf := keyForPrefixedStringMapsAsKey(make([]byte, 0, 128), prefix, parent.tags, tags)
 	r.mu.RLock()
+	// buf is stack allocated and casting it to a string for lookup from the cache
+	// as the memory layout of []byte is a superset of string the below casting is safe and does not do any alloc
+	// However it cannot be used outside of the stack; a heap allocation is needed if that string needs to be stored
+	// in the map as a key
 	if s, ok := r.lockedLookup(*(*string)(unsafe.Pointer(&buf))); ok {
 		r.mu.RUnlock()
 		return s
 	}
 	r.mu.RUnlock()
 
+	// heap allocating the buf as a string to keep the key in the subscopes map
 	preSanitizeKey := string(buf)
 	tags = parent.copyAndSanitizeMap(tags)
 	key := scopeRegistryKey(prefix, parent.tags, tags)

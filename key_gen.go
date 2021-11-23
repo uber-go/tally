@@ -20,25 +20,11 @@
 
 package tally
 
-import (
-	"sort"
-	"sync"
-)
-
 const (
 	prefixSplitter  = '+'
 	keyPairSplitter = ','
 	keyNameSplitter = '='
-)
-
-var (
-	nilString   = ""
-	stringsPool = sync.Pool{
-		New: func() interface{} {
-			ss := make([]string, 0, 32)
-			return &ss
-		},
-	}
+	nilString       = ""
 )
 
 // KeyForStringMap generates a unique key for a map string set combination.
@@ -58,15 +44,15 @@ func KeyForPrefixedStringMap(
 }
 
 func keyForPrefixedStringMapsAsKey(buf []byte, prefix string, maps ...map[string]string) []byte {
-	keys := stringsPool.Get().(*[]string)
+	// stack allocated
+	keys := make([]string, 0, 32)
 	for _, m := range maps {
 		for k := range m {
-			*keys = append(*keys, k)
+			keys = append(keys, k)
 		}
 	}
 
-	// using a pointer to implementation of sort.Interface does not perform an alloc
-	sort.Sort((*sort.StringSlice)(keys))
+	insertionSort(keys)
 
 	if prefix != nilString {
 		buf = append(buf, prefix...)
@@ -74,7 +60,7 @@ func keyForPrefixedStringMapsAsKey(buf []byte, prefix string, maps ...map[string
 	}
 
 	var lastKey string // last key written to the buffer
-	for _, k := range *keys {
+	for _, k := range keys {
 		if len(lastKey) > 0 {
 			if k == lastKey {
 				// Already wrote this key.
@@ -97,7 +83,6 @@ func keyForPrefixedStringMapsAsKey(buf []byte, prefix string, maps ...map[string
 		}
 	}
 
-	release(keys)
 	return buf
 }
 
@@ -109,10 +94,11 @@ func keyForPrefixedStringMaps(prefix string, maps ...map[string]string) string {
 	return string(keyForPrefixedStringMapsAsKey(make([]byte, 0, 128), prefix, maps...))
 }
 
-func release(strs *[]string) {
-	for i := range *strs {
-		(*strs)[i] = nilString
+func insertionSort(keys []string) {
+	n := len(keys)
+	for i := 1; i < n; i++ {
+		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
+			keys[j], keys[j-1] = keys[j-1], keys[j]
+		}
 	}
-	*strs = (*strs)[:0]
-	stringsPool.Put(strs)
 }
