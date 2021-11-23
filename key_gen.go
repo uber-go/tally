@@ -21,10 +21,8 @@
 package tally
 
 import (
-	"bytes"
 	"sort"
 	"sync"
-	"unsafe"
 )
 
 const (
@@ -34,12 +32,7 @@ const (
 )
 
 var (
-	nilString  = ""
-	bufferPool = sync.Pool{
-		New: func() interface{} {
-			return bytes.NewBuffer(make([]byte, 0, 1024))
-		},
-	}
+	nilString   = ""
 	stringsPool = sync.Pool{
 		New: func() interface{} {
 			ss := make([]string, 0, 32)
@@ -47,26 +40,6 @@ var (
 		},
 	}
 )
-
-// key helps to reduce allocations when the Tagged scope is already cached
-// key is a struct to reduce allocation that would happen with interface as interface escapes to heap
-type key struct {
-	buffer *bytes.Buffer
-}
-
-func (k key) CastAsString() string {
-	b := k.buffer.Bytes()
-	return *(*string)(unsafe.Pointer(&b))
-}
-
-func (k key) CopyAsString() string {
-	return k.buffer.String()
-}
-
-func (k key) Release() {
-	k.buffer.Reset()
-	bufferPool.Put(k.buffer)
-}
 
 // KeyForStringMap generates a unique key for a map string set combination.
 func KeyForStringMap(
@@ -84,7 +57,7 @@ func KeyForPrefixedStringMap(
 	return keyForPrefixedStringMaps(prefix, stringMap)
 }
 
-func keyForPrefixedStringMapsAsKey(prefix string, maps ...map[string]string) key {
+func keyForPrefixedStringMapsAsKey(buf []byte, prefix string, maps ...map[string]string) []byte {
 	keys := stringsPool.Get().(*[]string)
 	for _, m := range maps {
 		for k := range m {
@@ -94,11 +67,9 @@ func keyForPrefixedStringMapsAsKey(prefix string, maps ...map[string]string) key
 	// 1 allocation as sort.Interface escapes to heap
 	sort.Strings(*keys)
 
-	buf := bufferPool.Get().(*bytes.Buffer)
-
 	if prefix != nilString {
-		buf.WriteString(prefix)
-		buf.WriteByte(prefixSplitter)
+		buf = append(buf, prefix...)
+		buf = append(buf, prefixSplitter)
 	}
 
 	var lastKey string // last key written to the buffer
@@ -108,25 +79,25 @@ func keyForPrefixedStringMapsAsKey(prefix string, maps ...map[string]string) key
 				// Already wrote this key.
 				continue
 			}
-			buf.WriteByte(keyPairSplitter)
+			buf = append(buf, keyPairSplitter)
 		}
 		lastKey = k
 
-		buf.WriteString(k)
-		buf.WriteByte(keyNameSplitter)
+		buf = append(buf, k...)
+		buf = append(buf, keyNameSplitter)
 
 		// Find and write the value for this key. Rightmost map takes
 		// precedence.
 		for j := len(maps) - 1; j >= 0; j-- {
 			if v, ok := maps[j][k]; ok {
-				buf.WriteString(v)
+				buf = append(buf, v...)
 				break
 			}
 		}
 	}
 
 	release(keys)
-	return key{buf}
+	return buf
 }
 
 // keyForPrefixedStringMaps generates a unique key for a prefix and a series
@@ -134,9 +105,7 @@ func keyForPrefixedStringMapsAsKey(prefix string, maps ...map[string]string) key
 //
 // If a key occurs in multiple maps, keys on the right take precedence.
 func keyForPrefixedStringMaps(prefix string, maps ...map[string]string) string {
-	key := keyForPrefixedStringMapsAsKey(prefix, maps...)
-	defer key.Release()
-	return key.CopyAsString()
+	return string(keyForPrefixedStringMapsAsKey(make([]byte, 0, 128), prefix, maps...))
 }
 
 func release(strs *[]string) {
