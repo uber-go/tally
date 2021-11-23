@@ -42,7 +42,9 @@ func KeyForPrefixedStringMap(
 ) string {
 	return keyForPrefixedStringMaps(prefix, stringMap)
 }
-
+// keyForPrefixedStringMapsAsKey writes a key using the prefix and the tags in a canonical form to
+// the given input byte slice and returns a reference to the byte slice. Callers of this method can
+// use a stack allocated byte slice to remove heap allocation.
 func keyForPrefixedStringMapsAsKey(buf []byte, prefix string, maps ...map[string]string) []byte {
 	// stack allocated
 	keys := make([]string, 0, 32)
