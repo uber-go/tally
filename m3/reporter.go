@@ -61,7 +61,7 @@ const (
 	// DefaultMaxQueueSize is the default M3 reporter queue size.
 	DefaultMaxQueueSize = 4096
 	// DefaultMaxPacketSize is the default M3 reporter max packet size.
-	DefaultMaxPacketSize = int32(1440)
+	DefaultMaxPacketSize = int32(32768)
 	// DefaultHistogramBucketIDName is the default histogram bucket ID tag name
 	DefaultHistogramBucketIDName = "bucketid"
 	// DefaultHistogramBucketName is the default histogram bucket name tag name
