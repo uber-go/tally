@@ -93,7 +93,7 @@ func keyForPrefixedStringMapsAsKey(buf []byte, prefix string, maps ...map[string
 //
 // If a key occurs in multiple maps, keys on the right take precedence.
 func keyForPrefixedStringMaps(prefix string, maps ...map[string]string) string {
-	return string(keyForPrefixedStringMapsAsKey(make([]byte, 0, 128), prefix, maps...))
+	return string(keyForPrefixedStringMapsAsKey(make([]byte, 0, 256), prefix, maps...))
 }
 
 func insertionSort(keys []string) {
