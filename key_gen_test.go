@@ -21,6 +21,8 @@
 package tally
 
 import (
+	"math/rand"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -77,4 +79,23 @@ func TestKeyForPrefixedStringMaps(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestInsertionSort(t *testing.T) {
+	chars := []byte("abcdefghijklmnopqrstuvwxyz")
+	n := len(chars)
+	var expected []string
+	var actual []string
+	for i := 0; i < 12; i++ {
+		s := rand.Intn(20) + 5
+		var key []byte
+		for j := 0; j < s; j++ {
+			key = append(key, chars[rand.Intn(n)])
+		}
+		expected = append(expected, string(key))
+		actual = append(actual, string(key))
+	}
+	sort.Strings(expected)
+	insertionSort(actual)
+	assert.Equal(t, expected, actual)
 }
