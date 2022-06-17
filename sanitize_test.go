@@ -58,3 +58,11 @@ func TestSanitizeTestCases(t *testing.T) {
 		require.Equal(t, tc.output, fn(tc.input))
 	}
 }
+
+func BenchmarkSanitizeFn(b *testing.B) {
+	sanitize := newTestSanitizer()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = sanitize("foo bar")
+	}
+}
