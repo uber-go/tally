@@ -195,9 +195,7 @@ func (t *timer) RecordStopwatch(stopwatchStart time.Time) {
 func (t *timer) snapshot() []time.Duration {
 	t.unreported.RLock()
 	snap := make([]time.Duration, len(t.unreported.values))
-	for i := range t.unreported.values {
-		snap[i] = t.unreported.values[i]
-	}
+	copy(snap, t.unreported.values)
 	t.unreported.RUnlock()
 	return snap
 }

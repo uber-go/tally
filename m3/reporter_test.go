@@ -643,12 +643,9 @@ func (f *fakeM3Server) Packets() [][]byte {
 	f.packets.Lock()
 	defer f.packets.Unlock()
 
-	copy := make([][]byte, len(f.packets.values))
-	for i, packet := range f.packets.values {
-		copy[i] = packet
-	}
-
-	return copy
+	packets := make([][]byte, len(f.packets.values))
+	copy(packets, f.packets.values)
+	return packets
 }
 
 func newFakeM3Service(wg *sync.WaitGroup, countBatches bool) *fakeM3Service {
