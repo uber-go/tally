@@ -33,8 +33,13 @@ import (
 // To view statsd emitted metrics locally you can use
 // netcat with "nc 8125 -l -u"
 func main() {
-	statter, err := statsd.NewBufferedClient("127.0.0.1:8125",
-		"stats", 100*time.Millisecond, 1440)
+	statter, err := statsd.NewClientWithConfig(&statsd.ClientConfig{
+		Address:       "127.0.0.1:8125",
+		Prefix:        "stats",
+		UseBuffered:   true,
+		FlushInterval: 100 * time.Millisecond,
+		FlushBytes:    1440,
+	})
 	if err != nil {
 		log.Fatalf("could not create statsd client: %v", err)
 	}
