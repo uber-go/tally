@@ -48,7 +48,6 @@ func NewCall(scope tally.Scope, name string) Call {
 }
 
 type call struct {
-	scope   tally.Scope
 	success tally.Counter
 	err     tally.Counter
 	timing  tally.Timer

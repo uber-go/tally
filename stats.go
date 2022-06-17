@@ -430,10 +430,8 @@ func (h *histogram) snapshotDurations() map[time.Duration]int64 {
 }
 
 type histogramBucket struct {
-	valueUpperBound      float64
-	durationUpperBound   time.Duration
-	cachedValueBucket    CachedHistogramBucket
-	cachedDurationBucket CachedHistogramBucket
+	valueUpperBound    float64
+	durationUpperBound time.Duration
 }
 
 func durationLowerBound(buckets []histogramBucket, i int) time.Duration {

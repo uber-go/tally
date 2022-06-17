@@ -101,8 +101,6 @@ type testStatsReporter struct {
 	tg sync.WaitGroup
 	hg sync.WaitGroup
 
-	scope Scope
-
 	counters   map[string]*testIntValue
 	gauges     map[string]*testFloatValue
 	timers     map[string]*testIntValue
