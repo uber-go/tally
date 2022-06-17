@@ -9,6 +9,7 @@ MODULES = . ./tools
 
 LINT_IGNORE = m3/thrift\|thirdparty
 LICENSE_IGNORE = m3/thrift\|thirdparty
+STATICCHECK_IGNORE = m3/thrift\|thirdparty\|m3/resource_pool.go:.*releaseProto is unused
 
 GOLINT = $(GOBIN)/golint
 STATICCHECK = $(GOBIN)/staticcheck
@@ -35,7 +36,7 @@ $(GOLINT): tools/go.mod
 staticcheck: $(STATICCHECK)
 	@echo "Checking staticcheck..."
 	@$(eval LOG := $(shell mktemp -t log.XXXXX))
-	@$(STATICCHECK) ./... | grep -v '$(LINT_IGNORE)' > $(LOG) || true
+	@$(STATICCHECK) ./... | grep -v '$(STATICCHECK_IGNORE)' > $(LOG) || true
 	@[ ! -s "$(LOG)" ] || \
 		(echo "staticcheck failed:" | \
 		cat - $(LOG) && false)
