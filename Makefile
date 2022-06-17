@@ -11,12 +11,13 @@ LINT_IGNORE = m3/thrift\|thirdparty
 LICENSE_IGNORE = m3/thrift\|thirdparty
 
 GOLINT = $(GOBIN)/golint
+STATICCHECK = $(GOBIN)/staticcheck
 
 .PHONY: all
 all: lint test
 
 .PHONY: lint
-lint: gofmt golint gomodtidy license
+lint: gofmt golint gomodtidy staticcheck license
 
 .PHONY: golint
 golint: $(GOLINT)
@@ -29,6 +30,18 @@ golint: $(GOLINT)
 
 $(GOLINT): tools/go.mod
 	cd tools && go install golang.org/x/lint/golint
+
+.PHONY: staticcheck
+staticcheck: $(STATICCHECK)
+	@echo "Checking staticcheck..."
+	@$(eval LOG := $(shell mktemp -t log.XXXXX))
+	@$(STATICCHECK) ./... | grep -v '$(LINT_IGNORE)' > $(LOG) || true
+	@[ ! -s "$(LOG)" ] || \
+		(echo "staticcheck failed:" | \
+		cat - $(LOG) && false)
+
+$(STATICCHECK):
+	cd tools && go install honnef.co/go/tools/cmd/staticcheck
 
 .PHONY: gofmt
 gofmt:
