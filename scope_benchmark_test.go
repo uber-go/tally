@@ -185,6 +185,7 @@ func benchmarkScopeReportingN(b *testing.B, numElems int) {
 		ids = append(ids, id)
 		s.Counter(id)
 	}
+	_ = ids
 	b.ResetTimer()
 
 	for n := 0; n < b.N; n++ {
