@@ -258,9 +258,8 @@ func (r multiBaseReporters) Flush() {
 }
 
 type capabilities struct {
-	reporting  bool
-	tagging    bool
-	histograms bool
+	reporting bool
+	tagging   bool
 }
 
 func (c *capabilities) Reporting() bool {
