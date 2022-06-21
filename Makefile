@@ -9,7 +9,7 @@ MODULES = . ./tools
 
 LINT_IGNORE = m3/thrift\|thirdparty
 LICENSE_IGNORE = m3/thrift\|thirdparty
-STATICCHECK_IGNORE = m3/thrift\|thirdparty\|m3/resource_pool.go:.*releaseProto is unused
+STATICCHECK_IGNORE = m3/thrift\|thirdparty\|m3/resource_pool.go:.*releaseProto is unused\|m3/reporter.go:.* argument should be pointer-like to avoid allocations
 
 GOLINT = $(GOBIN)/golint
 STATICCHECK = $(GOBIN)/staticcheck
