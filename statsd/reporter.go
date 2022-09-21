@@ -23,10 +23,11 @@ package statsd
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"time"
 
-	"github.com/cactus/go-statsd-client/statsd"
+	statsd "github.com/cactus/go-statsd-client/v5/statsd"
 	tally "github.com/uber-go/tally/v4"
 )
 
@@ -73,15 +74,15 @@ func NewReporter(statsd statsd.Statter, opts Options) tally.StatsReporter {
 }
 
 func (r *cactusStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
-	r.statter.Inc(name, value, r.sampleRate)
+	r.statter.Inc(name, value, r.sampleRate, convertTags(tags)...)
 }
 
 func (r *cactusStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
-	r.statter.Gauge(name, int64(value), r.sampleRate)
+	r.statter.Gauge(name, int64(value), r.sampleRate, convertTags(tags)...)
 }
 
 func (r *cactusStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
-	r.statter.TimingDuration(name, interval, r.sampleRate)
+	r.statter.TimingDuration(name, interval, r.sampleRate, convertTags(tags)...)
 }
 
 func (r *cactusStatsReporter) ReportHistogramValueSamples(
@@ -96,7 +97,7 @@ func (r *cactusStatsReporter) ReportHistogramValueSamples(
 		fmt.Sprintf("%s.%s-%s", name,
 			r.valueBucketString(bucketLowerBound),
 			r.valueBucketString(bucketUpperBound)),
-		samples, r.sampleRate)
+		samples, r.sampleRate, convertTags(tags)...)
 }
 
 func (r *cactusStatsReporter) ReportHistogramDurationSamples(
@@ -111,7 +112,7 @@ func (r *cactusStatsReporter) ReportHistogramDurationSamples(
 		fmt.Sprintf("%s.%s-%s", name,
 			r.durationBucketString(bucketLowerBound),
 			r.durationBucketString(bucketUpperBound)),
-		samples, r.sampleRate)
+		samples, r.sampleRate, convertTags(tags)...)
 }
 
 func (r *cactusStatsReporter) valueBucketString(
@@ -152,4 +153,19 @@ func (r *cactusStatsReporter) Tagging() bool {
 
 func (r *cactusStatsReporter) Flush() {
 	// no-op
+}
+
+func convertTags(tags map[string]string) []statsd.Tag {
+	var keys []string
+	for k := range tags {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var statsdTags []statsd.Tag
+	for _, tk := range keys {
+		statsdTags = append(statsdTags, statsd.Tag{tk, tags[tk]})
+	}
+
+	return statsdTags
 }
