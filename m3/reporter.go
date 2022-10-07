@@ -696,9 +696,9 @@ func (r *reporter) timeLoop() {
 		r.now.Store(time.Now().UnixNano())
 		select {
 		case <-time.After(_timeResolution):
-		    break
+			break
 		case <-donech:
-		    return
+			return
 		}
 	}
 }
