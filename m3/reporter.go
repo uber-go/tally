@@ -697,7 +697,7 @@ func (r *reporter) timeLoop() {
 		select {
 		case <-time.After(_timeResolution):
 			break
-		case <-donech:
+		case <-r.donech:
 			return
 		}
 	}
