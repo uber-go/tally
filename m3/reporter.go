@@ -116,7 +116,6 @@ type reporter struct {
 	commonTags      []m3thrift.MetricTag
 	done            atomic.Bool
 	donech          chan struct{}
-	timeLoopDoneCh  chan struct{}
 	freeBytes       int32
 	metCh           chan sizedMetric
 	now             atomic.Int64
@@ -277,7 +276,6 @@ func NewReporter(opts Options) (Reporter, error) {
 		client:          client,
 		commonTags:      tags,
 		donech:          make(chan struct{}),
-		timeloopdonech:  make(chan struct{}),
 		freeBytes:       freeBytes,
 		metCh:           make(chan sizedMetric, opts.MaxQueueSize),
 		overheadBytes:   numOverheadBytes,
@@ -551,7 +549,6 @@ func (r *reporter) Close() (err error) {
 
 	close(r.donech)
 	close(r.metCh)
-	close(r.timeloopdonech)
 	r.wg.Wait()
 
 	return nil
@@ -699,9 +696,9 @@ func (r *reporter) timeLoop() {
 		r.now.Store(time.Now().UnixNano())
 		select {
 		case <-time.After(_timeResolution):
-			break
-		case <-timeLoopDoneCh:
-			return
+		    break
+		case <-doneCh:
+		    return
 		}
 	}
 }
