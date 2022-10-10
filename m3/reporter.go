@@ -707,9 +707,15 @@ func (r *reporter) reportInternalMetrics() {
 }
 
 func (r *reporter) timeLoop() {
+	t := time.NewTicker(_timeResolution)
+	defer t.Stop()
 	for !r.done.Load() {
 		r.now.Store(time.Now().UnixNano())
-		time.Sleep(_timeResolution)
+		select {
+		case <-t.C:
+		case <-r.donech:
+			return
+		}
 	}
 }
 
