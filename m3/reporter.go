@@ -32,7 +32,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	tally "github.com/uber-go/tally/v4"
+	"github.com/uber-go/tally/v4"
 	"github.com/uber-go/tally/v4/internal/cache"
 	customtransport "github.com/uber-go/tally/v4/m3/customtransports"
 	m3thrift "github.com/uber-go/tally/v4/m3/thrift/v2"
@@ -106,25 +106,25 @@ type Reporter interface {
 // via either thrift compact or binary protocol in batch UDP packets.
 type reporter struct {
 	bucketIDTagName string
-	bucketTagName  string
-	bucketValFmt   string
-	buckets        []tally.BucketPair
-	calc           *customtransport.TCalcTransport
-	calcLock       sync.Mutex
-	calcProto      thrift.TProtocol
-	client         *m3thrift.M3Client
-	commonTags     []m3thrift.MetricTag
-	done           atomic.Bool
-	donech         chan struct{}
-	freeBytes      int32
-	metCh          chan sizedMetric
-	now            atomic.Int64
-	overheadBytes  int32
-	pending        atomic.Uint64
-	resourcePool   *resourcePool
-	stringInterner *cache.StringInterner
-	tagCache       *cache.TagCache
-	wg             sync.WaitGroup
+	bucketTagName   string
+	bucketValFmt    string
+	buckets         []tally.BucketPair
+	calc            *customtransport.TCalcTransport
+	calcLock        sync.Mutex
+	calcProto       thrift.TProtocol
+	client          *m3thrift.M3Client
+	commonTags      []m3thrift.MetricTag
+	done            atomic.Bool
+	donech          chan struct{}
+	freeBytes       int32
+	metCh           chan sizedMetric
+	now             atomic.Int64
+	overheadBytes   int32
+	pending         atomic.Uint64
+	resourcePool    *resourcePool
+	stringInterner  *cache.StringInterner
+	tagCache        *cache.TagCache
+	wg              sync.WaitGroup
 
 	batchSizeHistogram       tally.CachedHistogram
 	numBatches               atomic.Int64
