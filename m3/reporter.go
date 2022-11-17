@@ -32,7 +32,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/uber-go/tally/v4"
+	tally "github.com/uber-go/tally/v4"
 	"github.com/uber-go/tally/v4/internal/cache"
 	customtransport "github.com/uber-go/tally/v4/m3/customtransports"
 	m3thrift "github.com/uber-go/tally/v4/m3/thrift/v2"
@@ -126,14 +126,14 @@ type reporter struct {
 	tagCache        *cache.TagCache
 	wg              sync.WaitGroup
 
-	batchSizeHistogram       tally.CachedHistogram
-	numBatches               atomic.Int64
-	numBatchesCounter        tally.CachedCount
-	numMetrics               atomic.Int64
-	numMetricsCounter        tally.CachedCount
-	numWriteErrors           atomic.Int64
-	numWriteErrorsCounter    tally.CachedCount
-	numTagCardinalityCounter tally.CachedCount
+	batchSizeHistogram    tally.CachedHistogram
+	numBatches            atomic.Int64
+	numBatchesCounter     tally.CachedCount
+	numMetrics            atomic.Int64
+	numMetricsCounter     tally.CachedCount
+	numWriteErrors        atomic.Int64
+	numWriteErrorsCounter tally.CachedCount
+	numTagCacheCounter    tally.CachedCount
 }
 
 // Options is a set of options for the M3 reporter.
@@ -227,12 +227,10 @@ func NewReporter(opts Options) (Reporter, error) {
 	}
 
 	for k, v := range tagm {
-		tags = append(
-			tags, m3thrift.MetricTag{
-				Name:  k,
-				Value: v,
-			},
-		)
+		tags = append(tags, m3thrift.MetricTag{
+			Name:  k,
+			Value: v,
+		})
 	}
 
 	// Calculate size of common tags
@@ -264,12 +262,10 @@ func NewReporter(opts Options) (Reporter, error) {
 		return nil, errCommonTagSize
 	}
 
-	buckets := tally.ValueBuckets(
-		append(
-			[]float64{0.0},
-			tally.MustMakeExponentialValueBuckets(2.0, 2.0, 11)...,
-		),
-	)
+	buckets := tally.ValueBuckets(append(
+		[]float64{0.0},
+		tally.MustMakeExponentialValueBuckets(2.0, 2.0, 11)...,
+	))
 
 	r := &reporter{
 		buckets:         tally.BucketPairs(buckets),
@@ -296,8 +292,7 @@ func NewReporter(opts Options) (Reporter, error) {
 	r.numBatchesCounter = r.AllocateCounter("tally.internal.num-batches", internalTags)
 	r.numMetricsCounter = r.AllocateCounter("tally.internal.num-metrics", internalTags)
 	r.numWriteErrorsCounter = r.AllocateCounter("tally.internal.num-write-errors", internalTags)
-	r.numTagCardinalityCounter = r.AllocateCounter("tally.internal.tag-cardinality", internalTags)
-
+	r.numTagCacheCounter = r.AllocateCounter("tally.internal.num-tag-cache", internalTags)
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
@@ -379,12 +374,10 @@ func (r *reporter) AllocateHistogram(
 ) tally.CachedHistogram {
 	var (
 		_, isDuration = buckets.(tally.DurationBuckets)
-		bucketIDLen   = int(
-			math.Max(
-				float64(ndigits(buckets.Len())),
-				float64(_minMetricBucketIDTagLength),
-			),
-		)
+		bucketIDLen   = int(math.Max(
+			float64(ndigits(buckets.Len())),
+			float64(_minMetricBucketIDTagLength),
+		))
 		bucketIDFmt           = "%0" + strconv.Itoa(bucketIDLen) + "d"
 		cachedValueBuckets    []cachedHistogramBucket
 		cachedDurationBuckets []cachedHistogramBucket
@@ -639,12 +632,10 @@ func (r *reporter) flush(mets []m3thrift.Metric) []m3thrift.Metric {
 
 	r.numBatches.Inc()
 
-	err := r.client.EmitMetricBatchV2(
-		m3thrift.MetricBatch{
-			Metrics:    mets,
-			CommonTags: r.commonTags,
-		},
-	)
+	err := r.client.EmitMetricBatchV2(m3thrift.MetricBatch{
+		Metrics:    mets,
+		CommonTags: r.commonTags,
+	})
 	if err != nil {
 		r.numWriteErrors.Inc()
 	}
@@ -665,12 +656,10 @@ func (r *reporter) convertTags(tags map[string]string) []m3thrift.MetricTag {
 	if !ok {
 		mtags = r.resourcePool.getMetricTagSlice()
 		for k, v := range tags {
-			mtags = append(
-				mtags, m3thrift.MetricTag{
-					Name:  r.stringInterner.Intern(k),
-					Value: r.stringInterner.Intern(v),
-				},
-			)
+			mtags = append(mtags, m3thrift.MetricTag{
+				Name:  r.stringInterner.Intern(k),
+				Value: r.stringInterner.Intern(v),
+			})
 		}
 		mtags = r.tagCache.Set(key, mtags)
 	}
@@ -686,11 +675,9 @@ func (r *reporter) reportInternalMetrics() {
 		batchSize   = float64(metrics) / float64(batches)
 	)
 
-	bucket := sort.Search(
-		len(r.buckets), func(i int) bool {
-			return r.buckets[i].UpperBoundValue() >= batchSize
-		},
-	)
+	bucket := sort.Search(len(r.buckets), func(i int) bool {
+		return r.buckets[i].UpperBoundValue() >= batchSize
+	})
 
 	var value float64
 	if bucket < len(r.buckets) {
@@ -703,7 +690,7 @@ func (r *reporter) reportInternalMetrics() {
 	r.numBatchesCounter.ReportCount(batches)
 	r.numMetricsCounter.ReportCount(metrics)
 	r.numWriteErrorsCounter.ReportCount(writeErrors)
-	r.numTagCardinalityCounter.ReportCount(int64(r.tagCache.Len()))
+	r.numTagCacheCounter.ReportCount(int64(r.tagCache.Len()))
 }
 
 func (r *reporter) timeLoop() {
@@ -760,11 +747,9 @@ func (h cachedHistogram) ValueBucket(
 ) tally.CachedHistogramBucket {
 	var (
 		n   = len(h.cachedValueBuckets)
-		idx = sort.Search(
-			n, func(i int) bool {
-				return h.cachedValueBuckets[i].valueUpperBound >= bucketUpperBound
-			},
-		)
+		idx = sort.Search(n, func(i int) bool {
+			return h.cachedValueBuckets[i].valueUpperBound >= bucketUpperBound
+		})
 	)
 
 	if idx == n {
@@ -781,12 +766,10 @@ func (h cachedHistogram) ValueBucket(
 		rep      = cm.reporter
 	)
 
-	return reportSamplesFunc(
-		func(value int64) {
-			m.Value.Count = value
-			rep.reportCopyMetric(m, size, bucket, bucketID)
-		},
-	)
+	return reportSamplesFunc(func(value int64) {
+		m.Value.Count = value
+		rep.reportCopyMetric(m, size, bucket, bucketID)
+	})
 }
 
 func (h cachedHistogram) DurationBucket(
@@ -795,11 +778,9 @@ func (h cachedHistogram) DurationBucket(
 ) tally.CachedHistogramBucket {
 	var (
 		n   = len(h.cachedDurationBuckets)
-		idx = sort.Search(
-			n, func(i int) bool {
-				return h.cachedDurationBuckets[i].durationUpperBound >= bucketUpperBound
-			},
-		)
+		idx = sort.Search(n, func(i int) bool {
+			return h.cachedDurationBuckets[i].durationUpperBound >= bucketUpperBound
+		})
 	)
 
 	if idx == n {
@@ -816,12 +797,10 @@ func (h cachedHistogram) DurationBucket(
 		rep      = cm.reporter
 	)
 
-	return reportSamplesFunc(
-		func(value int64) {
-			m.Value.Count = value
-			rep.reportCopyMetric(m, size, bucket, bucketID)
-		},
-	)
+	return reportSamplesFunc(func(value int64) {
+		m.Value.Count = value
+		rep.reportCopyMetric(m, size, bucket, bucketID)
+	})
 }
 
 type cachedHistogramBucket struct {

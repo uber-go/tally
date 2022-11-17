@@ -52,7 +52,7 @@ const (
 var (
 	localListenAddr   = &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)}
 	defaultCommonTags = map[string]string{"env": "test", "host": "test"}
-	internalMetrics   = 5 // Additional metrics the reporter sends in a batch - USE THIS IN TESTS, NOT A MAGIC NUMBER.
+	const internalMetrics   = 5 // Additional metrics the reporter sends in a batch - use this, not a magic number.
 )
 
 var protocols = []Protocol{Compact, Binary}
