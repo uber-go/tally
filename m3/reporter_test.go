@@ -52,10 +52,10 @@ const (
 var (
 	localListenAddr   = &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)}
 	defaultCommonTags = map[string]string{"env": "test", "host": "test"}
-	const internalMetrics   = 5 // Additional metrics the reporter sends in a batch - use this, not a magic number.
 )
 
 var protocols = []Protocol{Compact, Binary}
+const internalMetrics   = 5 // Additional metrics the reporter sends in a batch - use this, not a magic number.
 
 // TestReporter tests the reporter works as expected with both compact and binary protocols
 func TestReporter(t *testing.T) {
