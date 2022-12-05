@@ -1,4 +1,4 @@
-// Copyright (c) 2021 Uber Technologies, Inc.
+// Copyright (c) 2022 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -576,6 +576,60 @@ func TestHistogramSharedBucketMetrics(t *testing.T) {
 	}
 
 	require.Equal(t, 0, len(unseen), fmt.Sprintf("%v", unseen))
+}
+
+func TestConcurrentUpdates(t *testing.T) {
+	var (
+		r                = newTestStatsReporter()
+		wg               = &sync.WaitGroup{}
+		workerCount      = 20
+		scopeCount       = 4
+		countersPerScope = 4
+		counterIncrs     = 5000
+		rs               = newRootScope(
+			ScopeOptions{
+				Prefix:         "",
+				Tags:           nil,
+				CachedReporter: r,
+			}, 0,
+		)
+		scopes   = []Scope{rs}
+		counters []Counter
+	)
+
+	// Instantiate Subscopes.
+	for i := 1; i < scopeCount; i++ {
+		scopes = append(scopes, rs.SubScope(fmt.Sprintf("subscope_%d", i)))
+	}
+
+	// Instantiate Counters.
+	for sNum, s := range scopes {
+		for cNum := 0; cNum < countersPerScope; cNum++ {
+			counters = append(counters, s.Counter(fmt.Sprintf("scope_%d_counter_%d", sNum, cNum)))
+		}
+	}
+
+	// Instantiate workers.
+	r.cg.Add(scopeCount * countersPerScope)
+	for worker := 0; worker < workerCount; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Counter should have counterIncrs * workerCount.
+			for i := 0; i < counterIncrs*len(counters); i++ {
+				counters[i%len(counters)].Inc(1)
+			}
+		}()
+	}
+
+	wg.Wait()
+	rs.reportRegistry()
+	r.WaitAll()
+
+	wantVal := int64(workerCount * counterIncrs)
+	for _, gotCounter := range r.getCounters() {
+		assert.Equal(t, gotCounter.val, wantVal)
+	}
 }
 
 func TestCounterSanitized(t *testing.T) {
