@@ -23,6 +23,7 @@ package tally
 import (
 	"fmt"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -137,6 +138,80 @@ func BenchmarkScopeTaggedNoCachedSubscopes(b *testing.B) {
 			"qux": values[n],
 		})
 	}
+}
+
+func BenchmarkScopeTaggedNoCachedSubscopesParallel(b *testing.B) {
+	root, _ := NewRootScope(ScopeOptions{
+		Prefix:   "funkytown",
+		Reporter: NullStatsReporter,
+		Tags: map[string]string{
+			"style":     "funky",
+			"hair":      "wavy",
+			"jefferson": "starship",
+		},
+	}, 0)
+
+	b.ResetTimer()
+
+	index := int64(0)
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			n := atomic.AddInt64(&index, 1)
+			value := strconv.Itoa(int(n))
+
+			// Validated that the compiler is not optimizing this with a cpu profiler.
+			// Check https://github.com/uber-go/tally/pull/184 for more details
+			root.Tagged(map[string]string{
+				"foo": value,
+				"baz": value,
+				"qux": value,
+			})
+		}
+	})
+}
+
+func BenchmarkScopeTaggedNoCachedSubscopesParallelPercentageCached(b *testing.B) {
+	percentageCached := int64(5)
+	root, _ := NewRootScope(ScopeOptions{
+		Prefix:   "funkytown",
+		Reporter: NullStatsReporter,
+		Tags: map[string]string{
+			"style":     "funky",
+			"hair":      "wavy",
+			"jefferson": "starship",
+		},
+	}, 0)
+
+	cachedMap := map[string]string{
+		"foo": "any",
+		"baz": "any",
+		"qux": "any",
+	}
+	root.Tagged(cachedMap)
+
+	b.ResetTimer()
+
+	index := int64(-1)
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			n := atomic.AddInt64(&index, 1)
+
+			if (n % 100) < percentageCached {
+				root.Tagged(cachedMap)
+				continue
+			}
+
+			value := strconv.Itoa(int(n))
+
+			// Validated that the compiler is not optimizing this with a cpu profiler.
+			// Check https://github.com/uber-go/tally/pull/184 for more details
+			root.Tagged(map[string]string{
+				"foo": value,
+				"baz": value,
+				"qux": value,
+			})
+		}
+	})
 }
 
 func BenchmarkNameGenerationNoPrefix(b *testing.B) {
