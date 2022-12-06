@@ -62,10 +62,6 @@ func newScopeRegistryWithShardCount(root *scope, shardCount uint) *scopeRegistry
 	return r
 }
 
-func newScopeRegistry(root *scope) *scopeRegistry {
-	return newScopeRegistryWithShardCount(root, uint(runtime.GOMAXPROCS(-1)))
-}
-
 func (r *scopeRegistry) Report(reporter StatsReporter) {
 	defer r.purgeIfRootClosed()
 
