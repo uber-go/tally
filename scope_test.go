@@ -517,9 +517,9 @@ func TestHistogramSharedBucketMetrics(t *testing.T) {
 	var (
 		r     = newTestStatsReporter()
 		scope = newRootScope(ScopeOptions{
-			Prefix:         "",
-			Tags:           nil,
-			CachedReporter: r,
+			Prefix:              "",
+			Tags:                nil,
+			CachedReporter:      r,
 			skipInternalMetrics: true,
 		}, 0)
 		builder = func(s Scope) func(map[string]string) {
@@ -589,9 +589,9 @@ func TestConcurrentUpdates(t *testing.T) {
 		counterIncrs     = 5000
 		rs               = newRootScope(
 			ScopeOptions{
-				Prefix:         "",
-				Tags:           nil,
-				CachedReporter: r,
+				Prefix:              "",
+				Tags:                nil,
+				CachedReporter:      r,
 				skipInternalMetrics: true,
 			}, 0,
 		)
