@@ -388,7 +388,7 @@ func TestWriteReportLoop(t *testing.T) {
 
 func TestCachedReportLoop(t *testing.T) {
 	r := newTestStatsReporter()
-	s, closer := NewRootScope(ScopeOptions{CachedReporter: r}, 10)
+	s, closer := NewRootScope(ScopeOptions{CachedReporter: r, skipInternalMetrics: true}, 10)
 	defer closer.Close()
 
 	r.cg.Add(1)
@@ -520,6 +520,7 @@ func TestHistogramSharedBucketMetrics(t *testing.T) {
 			Prefix:         "",
 			Tags:           nil,
 			CachedReporter: r,
+			skipInternalMetrics: true,
 		}, 0)
 		builder = func(s Scope) func(map[string]string) {
 			buckets := MustMakeLinearValueBuckets(10, 10, 3)
@@ -591,6 +592,7 @@ func TestConcurrentUpdates(t *testing.T) {
 				Prefix:         "",
 				Tags:           nil,
 				CachedReporter: r,
+				skipInternalMetrics: true,
 			}, 0,
 		)
 		scopes   = []Scope{rs}
@@ -694,7 +696,7 @@ func TestCounterSanitized(t *testing.T) {
 func TestCachedReporter(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, closer := NewRootScope(ScopeOptions{CachedReporter: r}, 0)
+	root, closer := NewRootScope(ScopeOptions{CachedReporter: r, skipInternalMetrics: true}, 0)
 	defer closer.Close()
 
 	s := root.(*scope)
