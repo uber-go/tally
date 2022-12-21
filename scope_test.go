@@ -636,8 +636,8 @@ func TestCounterSanitized(t *testing.T) {
 	r := newTestStatsReporter()
 
 	root, closer := NewRootScope(ScopeOptions{
-		Reporter:        r,
-		SanitizeOptions: &alphanumericSanitizerOpts,
+		Reporter:            r,
+		SanitizeOptions:     &alphanumericSanitizerOpts,
 		skipInternalMetrics: true,
 	}, 0)
 	defer closer.Close()
@@ -1018,10 +1018,10 @@ func TestTaggedSanitizedSubScope(t *testing.T) {
 
 	ts := map[string]string{"env": "test:env"}
 	root, closer := NewRootScope(ScopeOptions{
-		Prefix:          "foo",
-		Tags:            ts,
-		Reporter:        r,
-		SanitizeOptions: &alphanumericSanitizerOpts,
+		Prefix:              "foo",
+		Tags:                ts,
+		Reporter:            r,
+		SanitizeOptions:     &alphanumericSanitizerOpts,
 		skipInternalMetrics: true,
 	}, 0)
 	defer closer.Close()
@@ -1156,7 +1156,7 @@ func TestScopeDefaultBuckets(t *testing.T) {
 			90 * time.Millisecond,
 			120 * time.Millisecond,
 		},
-		Reporter: r,
+		Reporter:            r,
 		skipInternalMetrics: true,
 	}, 0)
 	defer closer.Close()
