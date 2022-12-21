@@ -34,10 +34,10 @@ var (
 	scopeRegistryKey = keyForPrefixedStringMaps
 
 	// Metrics related.
-	internalTags = map[string]string{"version": Version}
-	internalTagsPrefix = "tally-internal-metrics"
-	counterCardinalityName = "tally.internal.counter-cardinality"
-	gaugeCardinalityName = "tally.internal.gauge-cardinality"
+	internalTags             = map[string]string{"version": Version}
+	internalTagsPrefix       = "tally-internal-metrics"
+	counterCardinalityName   = "tally.internal.counter-cardinality"
+	gaugeCardinalityName     = "tally.internal.gauge-cardinality"
 	histogramCardinalityName = "tally.internal.histogram-cardinality"
 )
 
@@ -61,9 +61,9 @@ func newScopeRegistryWithShardCount(root *scope, shardCount uint, skipInternalMe
 	}
 
 	r := &scopeRegistry{
-		root:      root,
-		subscopes: make([]*scopeBucket, shardCount),
-		seed:      maphash.MakeSeed(),
+		root:                root,
+		subscopes:           make([]*scopeBucket, shardCount),
+		seed:                maphash.MakeSeed(),
 		skipInternalMetrics: skipInternalMetrics,
 	}
 	for i := uint(0); i < shardCount; i++ {
@@ -229,15 +229,15 @@ func (r *scopeRegistry) removeWithRLock(subscopeBucket *scopeBucket, key string)
 
 // Records internal Metrics' cardinalities.
 func (r *scopeRegistry) reportInternalMetrics() {
-	if r.skipInternalMetrics{
+	if r.skipInternalMetrics {
 		return
 	}
 
 	counters, gauges, histograms := atomic.Int64{}, atomic.Int64{}, atomic.Int64{}
 	rootCounters, rootGauges, rootHistograms := atomic.Int64{}, atomic.Int64{}, atomic.Int64{}
-	r.ForEachScope(func(ss *scope){
+	r.ForEachScope(func(ss *scope) {
 		counterSliceLen, gaugeSliceLen, histogramSliceLen := int64(len(ss.countersSlice)), int64(len(ss.gaugesSlice)), int64(len(ss.histogramsSlice))
-		if ss.root {	// Root scope is referenced across all buckets.
+		if ss.root { // Root scope is referenced across all buckets.
 			rootCounters.Store(counterSliceLen)
 			rootGauges.Store(gaugeSliceLen)
 			rootHistograms.Store(histogramSliceLen)
