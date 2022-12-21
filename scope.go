@@ -1,4 +1,4 @@
-// Copyright (c) 2021 Uber Technologies, Inc.
+// Copyright (c) 2022 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -95,14 +95,15 @@ type scope struct {
 
 // ScopeOptions is a set of options to construct a scope.
 type ScopeOptions struct {
-	Tags               map[string]string
-	Prefix             string
-	Reporter           StatsReporter
-	CachedReporter     CachedStatsReporter
-	Separator          string
-	DefaultBuckets     Buckets
-	SanitizeOptions    *SanitizeOptions
-	registryShardCount uint
+	Tags                  map[string]string
+	Prefix                string
+	Reporter              StatsReporter
+	CachedReporter        CachedStatsReporter
+	Separator             string
+	DefaultBuckets        Buckets
+	SanitizeOptions       *SanitizeOptions
+	registryShardCount    uint
+	skipInternalMetrics   bool
 }
 
 // NewRootScope creates a new root Scope with a set of options and
@@ -172,7 +173,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 	s.tags = s.copyAndSanitizeMap(opts.Tags)
 
 	// Register the root scope
-	s.registry = newScopeRegistryWithShardCount(s, opts.registryShardCount)
+	s.registry = newScopeRegistryWithShardCount(s, opts.registryShardCount, opts.skipInternalMetrics)
 
 	if interval > 0 {
 		s.wg.Add(1)

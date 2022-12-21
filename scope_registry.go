@@ -1,4 +1,4 @@
-// Copyright (c) 2021 Uber Technologies, Inc.
+// Copyright (c) 2022 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,18 +22,32 @@ package tally
 
 import (
 	"hash/maphash"
+	"log"
 	"runtime"
 	"sync"
 	"unsafe"
+
+	"go.uber.org/atomic"
 )
 
-var scopeRegistryKey = keyForPrefixedStringMaps
+var (
+	scopeRegistryKey = keyForPrefixedStringMaps
+
+	// Metrics related.
+	internalTags = map[string]string{"version": Version}
+	internalTagsPrefix = "tally-internal-metrics"
+	counterCardinalityName = "tally.internal.counter-cardinality"
+	gaugeCardinalityName = "tally.internal.gauge-cardinality"
+	histogramCardinalityName = "tally.internal.histogram-cardinality"
+)
 
 type scopeRegistry struct {
 	seed maphash.Seed
 	root *scope
 	// We need a subscope per GOPROC so that we can take advantage of all the cpu available to the application.
 	subscopes []*scopeBucket
+	// Toggles internal metrics reporting.
+	skipInternalMetrics bool
 }
 
 type scopeBucket struct {
@@ -41,7 +55,7 @@ type scopeBucket struct {
 	s  map[string]*scope
 }
 
-func newScopeRegistryWithShardCount(root *scope, shardCount uint) *scopeRegistry {
+func newScopeRegistryWithShardCount(root *scope, shardCount uint, skipInternalMetrics bool) *scopeRegistry {
 	if shardCount == 0 {
 		shardCount = uint(runtime.GOMAXPROCS(-1))
 	}
@@ -50,20 +64,20 @@ func newScopeRegistryWithShardCount(root *scope, shardCount uint) *scopeRegistry
 		root:      root,
 		subscopes: make([]*scopeBucket, shardCount),
 		seed:      maphash.MakeSeed(),
+		skipInternalMetrics: skipInternalMetrics,
 	}
-
 	for i := uint(0); i < shardCount; i++ {
 		r.subscopes[i] = &scopeBucket{
 			s: make(map[string]*scope),
 		}
 		r.subscopes[i].s[scopeRegistryKey(root.prefix, root.tags)] = root
 	}
-
 	return r
 }
 
 func (r *scopeRegistry) Report(reporter StatsReporter) {
 	defer r.purgeIfRootClosed()
+	r.reportInternalMetrics()
 
 	for _, subscopeBucket := range r.subscopes {
 		subscopeBucket.mu.RLock()
@@ -83,6 +97,7 @@ func (r *scopeRegistry) Report(reporter StatsReporter) {
 
 func (r *scopeRegistry) CachedReport() {
 	defer r.purgeIfRootClosed()
+	r.reportInternalMetrics()
 
 	for _, subscopeBucket := range r.subscopes {
 		subscopeBucket.mu.RLock()
@@ -210,4 +225,46 @@ func (r *scopeRegistry) removeWithRLock(subscopeBucket *scopeBucket, key string)
 	subscopeBucket.mu.Lock()
 	defer subscopeBucket.mu.Unlock()
 	delete(subscopeBucket.s, key)
+}
+
+// Records internal Metrics' cardinalities.
+func (r *scopeRegistry) reportInternalMetrics() {
+	if r.skipInternalMetrics{
+		return
+	}
+
+	counters, gauges, histograms := atomic.Int64{}, atomic.Int64{}, atomic.Int64{}
+	rootCounters, rootGauges, rootHistograms := atomic.Int64{}, atomic.Int64{}, atomic.Int64{}
+	r.ForEachScope(func(ss *scope){
+		counterSliceLen, gaugeSliceLen, histogramSliceLen := int64(len(ss.countersSlice)), int64(len(ss.gaugesSlice)), int64(len(ss.histogramsSlice))
+		if ss.root {	// Root scope is referenced across all buckets.
+			rootCounters.Store(counterSliceLen)
+			rootGauges.Store(gaugeSliceLen)
+			rootHistograms.Store(histogramSliceLen)
+			return
+		}
+		counters.Add(counterSliceLen)
+		gauges.Add(gaugeSliceLen)
+		histograms.Add(histogramSliceLen)
+	})
+
+	counters.Add(rootCounters.Load())
+	gauges.Add(rootGauges.Load())
+	histograms.Add(rootHistograms.Load())
+	log.Printf("counters: %v, gauges: %v, histograms: %v\n", counters.Load(), gauges.Load(), histograms.Load())
+
+	if r.root.reporter != nil && r.root.reporter != NullStatsReporter {
+		r.root.reporter.ReportCounter(counterCardinalityName, internalTags, counters.Load())
+		r.root.reporter.ReportCounter(gaugeCardinalityName, internalTags, gauges.Load())
+		r.root.reporter.ReportCounter(histogramCardinalityName, internalTags, histograms.Load())
+	}
+
+	if r.root.cachedReporter != nil {
+		numCounters := r.root.cachedReporter.AllocateCounter(counterCardinalityName, internalTags)
+		numGauges := r.root.cachedReporter.AllocateCounter(gaugeCardinalityName, internalTags)
+		numHistograms := r.root.cachedReporter.AllocateCounter(histogramCardinalityName, internalTags)
+		numCounters.ReportCount(counters.Load())
+		numGauges.ReportCount(gauges.Load())
+		numHistograms.ReportCount(histograms.Load())
+	}
 }
