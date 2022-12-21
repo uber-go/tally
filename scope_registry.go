@@ -35,7 +35,6 @@ var (
 
 	// Metrics related.
 	internalTags             = map[string]string{"version": Version}
-	internalTagsPrefix       = "tally-internal-metrics"
 	counterCardinalityName   = "tally.internal.counter-cardinality"
 	gaugeCardinalityName     = "tally.internal.gauge-cardinality"
 	histogramCardinalityName = "tally.internal.histogram-cardinality"
