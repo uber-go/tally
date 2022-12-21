@@ -56,7 +56,8 @@ var (
 
 var protocols = []Protocol{Compact, Binary}
 
-const internalMetrics = 5 // Additional metrics the reporter sends in a batch - use this, not a magic number.
+const internalMetrics = 5    // Additional metrics the reporter sends in a batch - use this, not a magic number.
+const cardinalityMetrics = 3 // Additional metrics emitted by the scope registry.
 
 // TestReporter tests the reporter works as expected with both compact and binary protocols
 func TestReporter(t *testing.T) {

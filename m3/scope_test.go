@@ -83,7 +83,7 @@ func TestScope(t *testing.T) {
 	require.NotNil(t, server.Service.getBatches()[0])
 
 	emittedTimers := server.Service.getBatches()[0].GetMetrics()
-	require.Equal(t, internalMetrics+1, len(emittedTimers))
+	require.Equal(t, internalMetrics+cardinalityMetrics+1, len(emittedTimers))
 	require.Equal(t, "honk.dazzle", emittedTimers[0].GetName())
 }
 
@@ -107,9 +107,9 @@ func TestScopeCounter(t *testing.T) {
 	require.Equal(t, 1, len(server.Service.getBatches()))
 	require.NotNil(t, server.Service.getBatches()[0])
 
-	emittedTimers := server.Service.getBatches()[0].GetMetrics()
-	require.Equal(t, internalMetrics+1, len(emittedTimers))
-	require.Equal(t, "honk.foobar", emittedTimers[0].GetName())
+	emittedMetrics := server.Service.getBatches()[0].GetMetrics()
+	require.Equal(t, internalMetrics+cardinalityMetrics+1, len(emittedMetrics))
+	require.Equal(t, "honk.foobar", emittedMetrics[cardinalityMetrics].GetName())
 }
 
 // TestScopeGauge tests that scope works as expected
@@ -132,9 +132,9 @@ func TestScopeGauge(t *testing.T) {
 	require.Equal(t, 1, len(server.Service.getBatches()))
 	require.NotNil(t, server.Service.getBatches()[0])
 
-	emittedTimers := server.Service.getBatches()[0].GetMetrics()
-	require.Equal(t, internalMetrics+1, len(emittedTimers))
-	require.Equal(t, "honk.foobaz", emittedTimers[0].GetName())
+	emittedMetrics := server.Service.getBatches()[0].GetMetrics()
+	require.Equal(t, internalMetrics+cardinalityMetrics+1, len(emittedMetrics))
+	require.Equal(t, "honk.foobaz", emittedMetrics[cardinalityMetrics].GetName())
 }
 
 func BenchmarkScopeReportTimer(b *testing.B) {
