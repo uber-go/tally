@@ -119,7 +119,7 @@ func TestReporter(t *testing.T) {
 
 		// Validate metrics
 		emittedCounters := batches[0].GetMetrics()
-		require.Equal(t, 6, len(emittedCounters))
+		require.Equal(t, internalMetrics+1, len(emittedCounters))
 		emittedTimers := batches[1].GetMetrics()
 		require.Equal(t, internalMetrics+1, len(emittedTimers))
 
