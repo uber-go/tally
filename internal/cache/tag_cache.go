@@ -67,6 +67,13 @@ func (c *TagCache) Set(key uint64, tslice []m3thrift.MetricTag) []m3thrift.Metri
 	return tslice
 }
 
+// Len returns the size of the cache,
+func (c *TagCache) Len() int {
+	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+	return len(c.entries)
+}
+
 // TagMapKey generates a new key based on tags.
 func TagMapKey(tags map[string]string) uint64 {
 	return identity.StringStringMap(tags)

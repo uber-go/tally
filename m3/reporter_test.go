@@ -56,6 +56,9 @@ var (
 
 var protocols = []Protocol{Compact, Binary}
 
+const internalMetrics = 5    // Additional metrics the reporter sends in a batch - use this, not a magic number.
+const cardinalityMetrics = 3 // Additional metrics emitted by the scope registry.
+
 // TestReporter tests the reporter works as expected with both compact and binary protocols
 func TestReporter(t *testing.T) {
 	for _, protocol := range protocols {
@@ -116,9 +119,9 @@ func TestReporter(t *testing.T) {
 
 		// Validate metrics
 		emittedCounters := batches[0].GetMetrics()
-		require.Equal(t, 5, len(emittedCounters))
+		require.Equal(t, internalMetrics+1, len(emittedCounters))
 		emittedTimers := batches[1].GetMetrics()
-		require.Equal(t, 5, len(emittedTimers))
+		require.Equal(t, internalMetrics+1, len(emittedTimers))
 
 		emittedCounter, emittedTimer := emittedCounters[0], emittedTimers[0]
 		if emittedCounter.GetName() == "my-timer" {
@@ -512,13 +515,13 @@ func TestReporterResetTagsAfterReturnToPool(t *testing.T) {
 	c1 := r.AllocateCounter("counterWithTags", tags)
 
 	// Report the counter with tags to take the last slot.
-	wg.Add(5)
+	wg.Add(internalMetrics + 1)
 	c1.ReportCount(1)
 	r.Flush()
 	wg.Wait()
 
 	// Empty flush to ensure the copied metric is released.
-	wg.Add(4)
+	wg.Add(internalMetrics)
 	r.Flush()
 	for {
 		rep := r.(*reporter)
@@ -533,7 +536,7 @@ func TestReporterResetTagsAfterReturnToPool(t *testing.T) {
 	c2 := r.AllocateCounter("counterWithNoTags", nil)
 
 	// Report the counter with no tags.
-	wg.Add(5)
+	wg.Add(internalMetrics + 1)
 	c2.ReportCount(1)
 	r.Flush()
 	wg.Wait()
@@ -541,7 +544,7 @@ func TestReporterResetTagsAfterReturnToPool(t *testing.T) {
 	// Verify that first reported counter has tags and the second
 	// reported counter has no tags.
 	metrics := server.Service.getMetrics()
-	require.Equal(t, 14, len(metrics)) // 2 test metrics, 4x3 internal metrics
+	require.Equal(t, 2+3*internalMetrics, len(metrics)) // 2 test metrics, 3 rounds of internal metrics
 
 	var filtered []m3thrift.Metric
 	for _, metric := range metrics {
