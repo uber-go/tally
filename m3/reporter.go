@@ -133,6 +133,7 @@ type reporter struct {
 	numMetricsCounter     tally.CachedCount
 	numWriteErrors        atomic.Int64
 	numWriteErrorsCounter tally.CachedCount
+	numTagCacheCounter    tally.CachedCount
 }
 
 // Options is a set of options for the M3 reporter.
@@ -291,7 +292,7 @@ func NewReporter(opts Options) (Reporter, error) {
 	r.numBatchesCounter = r.AllocateCounter("tally.internal.num-batches", internalTags)
 	r.numMetricsCounter = r.AllocateCounter("tally.internal.num-metrics", internalTags)
 	r.numWriteErrorsCounter = r.AllocateCounter("tally.internal.num-write-errors", internalTags)
-
+	r.numTagCacheCounter = r.AllocateCounter("tally.internal.num-tag-cache", internalTags)
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
@@ -689,6 +690,7 @@ func (r *reporter) reportInternalMetrics() {
 	r.numBatchesCounter.ReportCount(batches)
 	r.numMetricsCounter.ReportCount(metrics)
 	r.numWriteErrorsCounter.ReportCount(writeErrors)
+	r.numTagCacheCounter.ReportCount(int64(r.tagCache.Len()))
 }
 
 func (r *reporter) timeLoop() {
