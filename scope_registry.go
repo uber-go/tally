@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Uber Technologies, Inc.
+// Copyright (c) 2023 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,9 +35,9 @@ var (
 
 	// Metrics related.
 	internalTags             = map[string]string{"version": Version}
-	counterCardinalityName   = "tally.internal.counter-cardinality"
-	gaugeCardinalityName     = "tally.internal.gauge-cardinality"
-	histogramCardinalityName = "tally.internal.histogram-cardinality"
+	counterCardinalityName   = "tally-internal-counter-cardinality"
+	gaugeCardinalityName     = "tally-internal-gauge-cardinality"
+	histogramCardinalityName = "tally-internal-histogram-cardinality"
 )
 
 type scopeRegistry struct {
@@ -46,7 +46,7 @@ type scopeRegistry struct {
 	// We need a subscope per GOPROC so that we can take advantage of all the cpu available to the application.
 	subscopes []*scopeBucket
 	// Toggles internal metrics reporting.
-	skipInternalMetrics bool
+	internalMetricsOption InternalMetricOption
 }
 
 type scopeBucket struct {
@@ -54,16 +54,20 @@ type scopeBucket struct {
 	s  map[string]*scope
 }
 
-func newScopeRegistryWithShardCount(root *scope, shardCount uint, skipInternalMetrics bool) *scopeRegistry {
+func newScopeRegistryWithShardCount(
+	root *scope,
+	shardCount uint,
+	internalMetricsOption InternalMetricOption,
+) *scopeRegistry {
 	if shardCount == 0 {
 		shardCount = uint(runtime.GOMAXPROCS(-1))
 	}
 
 	r := &scopeRegistry{
-		root:                root,
-		subscopes:           make([]*scopeBucket, shardCount),
-		seed:                maphash.MakeSeed(),
-		skipInternalMetrics: skipInternalMetrics,
+		root:                  root,
+		subscopes:             make([]*scopeBucket, shardCount),
+		seed:                  maphash.MakeSeed(),
+		internalMetricsOption: internalMetricsOption,
 	}
 	for i := uint(0); i < shardCount; i++ {
 		r.subscopes[i] = &scopeBucket{
@@ -228,7 +232,7 @@ func (r *scopeRegistry) removeWithRLock(subscopeBucket *scopeBucket, key string)
 
 // Records internal Metrics' cardinalities.
 func (r *scopeRegistry) reportInternalMetrics() {
-	if r.skipInternalMetrics {
+	if r.internalMetricsOption != SendInternalMetrics {
 		return
 	}
 
