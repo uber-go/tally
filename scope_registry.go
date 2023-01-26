@@ -35,9 +35,9 @@ var (
 
 	// Metrics related.
 	internalTags             = map[string]string{"version": Version}
-	counterCardinalityName   = "tally-internal-counter-cardinality"
-	gaugeCardinalityName     = "tally-internal-gauge-cardinality"
-	histogramCardinalityName = "tally-internal-histogram-cardinality"
+	counterCardinalityName   = "tally_internal_counter_cardinality"
+	gaugeCardinalityName     = "tally_internal_gauge_cardinality"
+	histogramCardinalityName = "tally_internal_histogram_cardinality"
 )
 
 type scopeRegistry struct {
@@ -238,18 +238,20 @@ func (r *scopeRegistry) reportInternalMetrics() {
 
 	counters, gauges, histograms := atomic.Int64{}, atomic.Int64{}, atomic.Int64{}
 	rootCounters, rootGauges, rootHistograms := atomic.Int64{}, atomic.Int64{}, atomic.Int64{}
-	r.ForEachScope(func(ss *scope) {
-		counterSliceLen, gaugeSliceLen, histogramSliceLen := int64(len(ss.countersSlice)), int64(len(ss.gaugesSlice)), int64(len(ss.histogramsSlice))
-		if ss.root { // Root scope is referenced across all buckets.
-			rootCounters.Store(counterSliceLen)
-			rootGauges.Store(gaugeSliceLen)
-			rootHistograms.Store(histogramSliceLen)
-			return
-		}
-		counters.Add(counterSliceLen)
-		gauges.Add(gaugeSliceLen)
-		histograms.Add(histogramSliceLen)
-	})
+	r.ForEachScope(
+		func(ss *scope) {
+			counterSliceLen, gaugeSliceLen, histogramSliceLen := int64(len(ss.countersSlice)), int64(len(ss.gaugesSlice)), int64(len(ss.histogramsSlice))
+			if ss.root { // Root scope is referenced across all buckets.
+				rootCounters.Store(counterSliceLen)
+				rootGauges.Store(gaugeSliceLen)
+				rootHistograms.Store(histogramSliceLen)
+				return
+			}
+			counters.Add(counterSliceLen)
+			gauges.Add(gaugeSliceLen)
+			histograms.Add(histogramSliceLen)
+		},
+	)
 
 	counters.Add(rootCounters.Load())
 	gauges.Add(rootGauges.Load())
@@ -257,15 +259,21 @@ func (r *scopeRegistry) reportInternalMetrics() {
 	log.Printf("counters: %v, gauges: %v, histograms: %v\n", counters.Load(), gauges.Load(), histograms.Load())
 
 	if r.root.reporter != nil {
-		r.root.reporter.ReportCounter(counterCardinalityName, internalTags, counters.Load())
-		r.root.reporter.ReportCounter(gaugeCardinalityName, internalTags, gauges.Load())
-		r.root.reporter.ReportCounter(histogramCardinalityName, internalTags, histograms.Load())
+		r.root.reporter.ReportCounter(r.root.sanitizer.Name(counterCardinalityName), internalTags, counters.Load())
+		r.root.reporter.ReportCounter(r.root.sanitizer.Name(gaugeCardinalityName), internalTags, gauges.Load())
+		r.root.reporter.ReportCounter(r.root.sanitizer.Name(histogramCardinalityName), internalTags, histograms.Load())
 	}
 
 	if r.root.cachedReporter != nil {
-		numCounters := r.root.cachedReporter.AllocateCounter(counterCardinalityName, internalTags)
-		numGauges := r.root.cachedReporter.AllocateCounter(gaugeCardinalityName, internalTags)
-		numHistograms := r.root.cachedReporter.AllocateCounter(histogramCardinalityName, internalTags)
+		numCounters := r.root.cachedReporter.AllocateCounter(
+			r.root.sanitizer.Name(counterCardinalityName), internalTags,
+		)
+		numGauges := r.root.cachedReporter.AllocateCounter(
+			r.root.sanitizer.Name(gaugeCardinalityName), internalTags,
+		)
+		numHistograms := r.root.cachedReporter.AllocateCounter(
+			r.root.sanitizer.Name(histogramCardinalityName), internalTags,
+		)
 		numCounters.ReportCount(counters.Load())
 		numGauges.ReportCount(gauges.Load())
 		numHistograms.ReportCount(histograms.Load())

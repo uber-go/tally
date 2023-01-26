@@ -520,14 +520,12 @@ func TestWriteOnce(t *testing.T) {
 func TestHistogramSharedBucketMetrics(t *testing.T) {
 	var (
 		r     = newTestStatsReporter()
-		scope = newRootScope(
-			ScopeOptions{
-				Prefix:                "",
-				Tags:                  nil,
-				CachedReporter:        r,
-				internalMetricsOption: OmitInternalMetrics,
-			}, 0,
-		)
+		scope = newRootScope(ScopeOptions{
+			Prefix:                "",
+			Tags:                  nil,
+			CachedReporter:        r,
+			internalMetricsOption: OmitInternalMetrics,
+		}, 0)
 		builder = func(s Scope) func(map[string]string) {
 			buckets := MustMakeLinearValueBuckets(10, 10, 3)
 			return func(tags map[string]string) {
@@ -645,13 +643,11 @@ func TestConcurrentUpdates(t *testing.T) {
 func TestCounterSanitized(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, closer := NewRootScope(
-		ScopeOptions{
-			Reporter:              r,
-			SanitizeOptions:       &alphanumericSanitizerOpts,
-			internalMetricsOption: OmitInternalMetrics,
-		}, 0,
-	)
+	root, closer := NewRootScope(ScopeOptions{
+		Reporter:              r,
+		SanitizeOptions:       &alphanumericSanitizerOpts,
+		internalMetricsOption: OmitInternalMetrics,
+	}, 0)
 	defer closer.Close()
 
 	s := root.(*scope)
@@ -1045,15 +1041,13 @@ func TestTaggedSanitizedSubScope(t *testing.T) {
 	r := newTestStatsReporter()
 
 	ts := map[string]string{"env": "test:env"}
-	root, closer := NewRootScope(
-		ScopeOptions{
-			Prefix:                "foo",
-			Tags:                  ts,
-			Reporter:              r,
-			SanitizeOptions:       &alphanumericSanitizerOpts,
-			internalMetricsOption: OmitInternalMetrics,
-		}, 0,
-	)
+	root, closer := NewRootScope(ScopeOptions{
+		Prefix:                "foo",
+		Tags:                  ts,
+		Reporter:              r,
+		SanitizeOptions:       &alphanumericSanitizerOpts,
+		internalMetricsOption: OmitInternalMetrics,
+	}, 0)
 	defer closer.Close()
 	s := root.(*scope)
 
@@ -1194,19 +1188,17 @@ func TestNilTagMerge(t *testing.T) {
 func TestScopeDefaultBuckets(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, closer := NewRootScope(
-		ScopeOptions{
-			DefaultBuckets: DurationBuckets{
-				0 * time.Millisecond,
-				30 * time.Millisecond,
-				60 * time.Millisecond,
-				90 * time.Millisecond,
-				120 * time.Millisecond,
-			},
-			Reporter:              r,
-			internalMetricsOption: OmitInternalMetrics,
-		}, 0,
-	)
+	root, closer := NewRootScope(ScopeOptions{
+		DefaultBuckets: DurationBuckets{
+			0 * time.Millisecond,
+			30 * time.Millisecond,
+			60 * time.Millisecond,
+			90 * time.Millisecond,
+			120 * time.Millisecond,
+		},
+		Reporter:              r,
+		internalMetricsOption: OmitInternalMetrics,
+	}, 0)
 	defer closer.Close()
 
 	s := root.(*scope)
