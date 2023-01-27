@@ -28,11 +28,15 @@ import (
 	"go.uber.org/atomic"
 )
 
+// InternalMetricOption is used to configure internal metrics.
 type InternalMetricOption int
 
 const (
+	// Unset is the "no-op" config, which turns off internal metrics.
 	Unset InternalMetricOption = iota
+	// SendInternalMetrics turns on internal metrics submission.
 	SendInternalMetrics
+	// OmitInternalMetrics turns off internal metrics submission.
 	OmitInternalMetrics
 
 	_defaultInitialSliceSize = 16
