@@ -45,8 +45,11 @@ type scopeRegistry struct {
 	root *scope
 	// We need a subscope per GOPROC so that we can take advantage of all the cpu available to the application.
 	subscopes []*scopeBucket
-	// Toggles internal metrics reporting.
-	internalMetricsOption InternalMetricOption
+	// Internal metrics related.
+	internalMetricsOption             InternalMetricOption
+	sanitizedCounterCardinalityName   string
+	sanitizedGaugeCardinalityName     string
+	sanitizedHistogramCardinalityName string
 }
 
 type scopeBucket struct {
@@ -64,10 +67,13 @@ func newScopeRegistryWithShardCount(
 	}
 
 	r := &scopeRegistry{
-		root:                  root,
-		subscopes:             make([]*scopeBucket, shardCount),
-		seed:                  maphash.MakeSeed(),
-		internalMetricsOption: internalMetricsOption,
+		root:                              root,
+		subscopes:                         make([]*scopeBucket, shardCount),
+		seed:                              maphash.MakeSeed(),
+		internalMetricsOption:             internalMetricsOption,
+		sanitizedCounterCardinalityName:   root.sanitizer.Name(counterCardinalityName),
+		sanitizedGaugeCardinalityName:     root.sanitizer.Name(gaugeCardinalityName),
+		sanitizedHistogramCardinalityName: root.sanitizer.Name(histogramCardinalityName),
 	}
 	for i := uint(0); i < shardCount; i++ {
 		r.subscopes[i] = &scopeBucket{
@@ -259,21 +265,15 @@ func (r *scopeRegistry) reportInternalMetrics() {
 	log.Printf("counters: %v, gauges: %v, histograms: %v\n", counters.Load(), gauges.Load(), histograms.Load())
 
 	if r.root.reporter != nil {
-		r.root.reporter.ReportCounter(r.root.sanitizer.Name(counterCardinalityName), internalTags, counters.Load())
-		r.root.reporter.ReportCounter(r.root.sanitizer.Name(gaugeCardinalityName), internalTags, gauges.Load())
-		r.root.reporter.ReportCounter(r.root.sanitizer.Name(histogramCardinalityName), internalTags, histograms.Load())
+		r.root.reporter.ReportCounter(r.sanitizedCounterCardinalityName, internalTags, counters.Load())
+		r.root.reporter.ReportCounter(r.sanitizedGaugeCardinalityName, internalTags, gauges.Load())
+		r.root.reporter.ReportCounter(r.sanitizedHistogramCardinalityName, internalTags, histograms.Load())
 	}
 
 	if r.root.cachedReporter != nil {
-		numCounters := r.root.cachedReporter.AllocateCounter(
-			r.root.sanitizer.Name(counterCardinalityName), internalTags,
-		)
-		numGauges := r.root.cachedReporter.AllocateCounter(
-			r.root.sanitizer.Name(gaugeCardinalityName), internalTags,
-		)
-		numHistograms := r.root.cachedReporter.AllocateCounter(
-			r.root.sanitizer.Name(histogramCardinalityName), internalTags,
-		)
+		numCounters := r.root.cachedReporter.AllocateCounter(r.sanitizedCounterCardinalityName, internalTags)
+		numGauges := r.root.cachedReporter.AllocateCounter(r.sanitizedGaugeCardinalityName, internalTags)
+		numHistograms := r.root.cachedReporter.AllocateCounter(r.sanitizedHistogramCardinalityName, internalTags)
 		numCounters.ReportCount(counters.Load())
 		numGauges.ReportCount(gauges.Load())
 		numHistograms.ReportCount(histograms.Load())
