@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Uber Technologies, Inc.
+// Copyright (c) 2023 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,9 +35,9 @@ var (
 
 	// Metrics related.
 	internalTags             = map[string]string{"version": Version}
-	counterCardinalityName   = "tally.internal.counter-cardinality"
-	gaugeCardinalityName     = "tally.internal.gauge-cardinality"
-	histogramCardinalityName = "tally.internal.histogram-cardinality"
+	counterCardinalityName   = "tally_internal_counter_cardinality"
+	gaugeCardinalityName     = "tally_internal_gauge_cardinality"
+	histogramCardinalityName = "tally_internal_histogram_cardinality"
 )
 
 type scopeRegistry struct {
@@ -45,8 +45,11 @@ type scopeRegistry struct {
 	root *scope
 	// We need a subscope per GOPROC so that we can take advantage of all the cpu available to the application.
 	subscopes []*scopeBucket
-	// Toggles internal metrics reporting.
-	skipInternalMetrics bool
+	// Internal metrics related.
+	internalMetricsOption             InternalMetricOption
+	sanitizedCounterCardinalityName   string
+	sanitizedGaugeCardinalityName     string
+	sanitizedHistogramCardinalityName string
 }
 
 type scopeBucket struct {
@@ -54,16 +57,23 @@ type scopeBucket struct {
 	s  map[string]*scope
 }
 
-func newScopeRegistryWithShardCount(root *scope, shardCount uint, skipInternalMetrics bool) *scopeRegistry {
+func newScopeRegistryWithShardCount(
+	root *scope,
+	shardCount uint,
+	internalMetricsOption InternalMetricOption,
+) *scopeRegistry {
 	if shardCount == 0 {
 		shardCount = uint(runtime.GOMAXPROCS(-1))
 	}
 
 	r := &scopeRegistry{
-		root:                root,
-		subscopes:           make([]*scopeBucket, shardCount),
-		seed:                maphash.MakeSeed(),
-		skipInternalMetrics: skipInternalMetrics,
+		root:                              root,
+		subscopes:                         make([]*scopeBucket, shardCount),
+		seed:                              maphash.MakeSeed(),
+		internalMetricsOption:             internalMetricsOption,
+		sanitizedCounterCardinalityName:   root.sanitizer.Name(counterCardinalityName),
+		sanitizedGaugeCardinalityName:     root.sanitizer.Name(gaugeCardinalityName),
+		sanitizedHistogramCardinalityName: root.sanitizer.Name(histogramCardinalityName),
 	}
 	for i := uint(0); i < shardCount; i++ {
 		r.subscopes[i] = &scopeBucket{
@@ -228,24 +238,26 @@ func (r *scopeRegistry) removeWithRLock(subscopeBucket *scopeBucket, key string)
 
 // Records internal Metrics' cardinalities.
 func (r *scopeRegistry) reportInternalMetrics() {
-	if r.skipInternalMetrics {
+	if r.internalMetricsOption != SendInternalMetrics {
 		return
 	}
 
 	counters, gauges, histograms := atomic.Int64{}, atomic.Int64{}, atomic.Int64{}
 	rootCounters, rootGauges, rootHistograms := atomic.Int64{}, atomic.Int64{}, atomic.Int64{}
-	r.ForEachScope(func(ss *scope) {
-		counterSliceLen, gaugeSliceLen, histogramSliceLen := int64(len(ss.countersSlice)), int64(len(ss.gaugesSlice)), int64(len(ss.histogramsSlice))
-		if ss.root { // Root scope is referenced across all buckets.
-			rootCounters.Store(counterSliceLen)
-			rootGauges.Store(gaugeSliceLen)
-			rootHistograms.Store(histogramSliceLen)
-			return
-		}
-		counters.Add(counterSliceLen)
-		gauges.Add(gaugeSliceLen)
-		histograms.Add(histogramSliceLen)
-	})
+	r.ForEachScope(
+		func(ss *scope) {
+			counterSliceLen, gaugeSliceLen, histogramSliceLen := int64(len(ss.countersSlice)), int64(len(ss.gaugesSlice)), int64(len(ss.histogramsSlice))
+			if ss.root { // Root scope is referenced across all buckets.
+				rootCounters.Store(counterSliceLen)
+				rootGauges.Store(gaugeSliceLen)
+				rootHistograms.Store(histogramSliceLen)
+				return
+			}
+			counters.Add(counterSliceLen)
+			gauges.Add(gaugeSliceLen)
+			histograms.Add(histogramSliceLen)
+		},
+	)
 
 	counters.Add(rootCounters.Load())
 	gauges.Add(rootGauges.Load())
@@ -253,15 +265,15 @@ func (r *scopeRegistry) reportInternalMetrics() {
 	log.Printf("counters: %v, gauges: %v, histograms: %v\n", counters.Load(), gauges.Load(), histograms.Load())
 
 	if r.root.reporter != nil {
-		r.root.reporter.ReportCounter(counterCardinalityName, internalTags, counters.Load())
-		r.root.reporter.ReportCounter(gaugeCardinalityName, internalTags, gauges.Load())
-		r.root.reporter.ReportCounter(histogramCardinalityName, internalTags, histograms.Load())
+		r.root.reporter.ReportCounter(r.sanitizedCounterCardinalityName, internalTags, counters.Load())
+		r.root.reporter.ReportCounter(r.sanitizedGaugeCardinalityName, internalTags, gauges.Load())
+		r.root.reporter.ReportCounter(r.sanitizedHistogramCardinalityName, internalTags, histograms.Load())
 	}
 
 	if r.root.cachedReporter != nil {
-		numCounters := r.root.cachedReporter.AllocateCounter(counterCardinalityName, internalTags)
-		numGauges := r.root.cachedReporter.AllocateCounter(gaugeCardinalityName, internalTags)
-		numHistograms := r.root.cachedReporter.AllocateCounter(histogramCardinalityName, internalTags)
+		numCounters := r.root.cachedReporter.AllocateCounter(r.sanitizedCounterCardinalityName, internalTags)
+		numGauges := r.root.cachedReporter.AllocateCounter(r.sanitizedGaugeCardinalityName, internalTags)
+		numHistograms := r.root.cachedReporter.AllocateCounter(r.sanitizedHistogramCardinalityName, internalTags)
 		numCounters.ReportCount(counters.Load())
 		numGauges.ReportCount(gauges.Load())
 		numHistograms.ReportCount(histograms.Load())
