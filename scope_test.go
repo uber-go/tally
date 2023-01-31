@@ -1,4 +1,4 @@
-// Copyright (c) 2021 Uber Technologies, Inc.
+// Copyright (c) 2023 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -290,8 +290,10 @@ type testStatsReporterCachedHistogramValueBucket struct {
 }
 
 func (b testStatsReporterCachedHistogramValueBucket) ReportSamples(v int64) {
-	b.histogram.r.ReportHistogramValueSamples(b.histogram.name, b.histogram.tags,
-		b.histogram.buckets, b.bucketLowerBound, b.bucketUpperBound, v)
+	b.histogram.r.ReportHistogramValueSamples(
+		b.histogram.name, b.histogram.tags,
+		b.histogram.buckets, b.bucketLowerBound, b.bucketUpperBound, v,
+	)
 }
 
 type testStatsReporterCachedHistogramDurationBucket struct {
@@ -301,8 +303,10 @@ type testStatsReporterCachedHistogramDurationBucket struct {
 }
 
 func (b testStatsReporterCachedHistogramDurationBucket) ReportSamples(v int64) {
-	b.histogram.r.ReportHistogramDurationSamples(b.histogram.name, b.histogram.tags,
-		b.histogram.buckets, b.bucketLowerBound, b.bucketUpperBound, v)
+	b.histogram.r.ReportHistogramDurationSamples(
+		b.histogram.name, b.histogram.tags,
+		b.histogram.buckets, b.bucketLowerBound, b.bucketUpperBound, v,
+	)
 }
 
 func (r *testStatsReporter) ReportHistogramValueSamples(
@@ -353,7 +357,7 @@ func (r *testStatsReporter) Flush() {
 
 func TestWriteTimerImmediately(t *testing.T) {
 	r := newTestStatsReporter()
-	s, closer := NewRootScope(ScopeOptions{Reporter: r, skipInternalMetrics: true}, 0)
+	s, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, 0)
 	defer closer.Close()
 	r.tg.Add(1)
 	s.Timer("ticky").Record(time.Millisecond * 175)
@@ -362,7 +366,7 @@ func TestWriteTimerImmediately(t *testing.T) {
 
 func TestWriteTimerClosureImmediately(t *testing.T) {
 	r := newTestStatsReporter()
-	s, closer := NewRootScope(ScopeOptions{Reporter: r, skipInternalMetrics: true}, 0)
+	s, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, 0)
 	defer closer.Close()
 	r.tg.Add(1)
 	tm := s.Timer("ticky")
@@ -372,7 +376,7 @@ func TestWriteTimerClosureImmediately(t *testing.T) {
 
 func TestWriteReportLoop(t *testing.T) {
 	r := newTestStatsReporter()
-	s, closer := NewRootScope(ScopeOptions{Reporter: r, skipInternalMetrics: true}, 10)
+	s, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, 10)
 	defer closer.Close()
 
 	r.cg.Add(1)
@@ -390,7 +394,7 @@ func TestWriteReportLoop(t *testing.T) {
 
 func TestCachedReportLoop(t *testing.T) {
 	r := newTestStatsReporter()
-	s, closer := NewRootScope(ScopeOptions{CachedReporter: r, skipInternalMetrics: true}, 10)
+	s, closer := NewRootScope(ScopeOptions{CachedReporter: r, MetricsOption: OmitInternalMetrics}, 10)
 	defer closer.Close()
 
 	r.cg.Add(1)
@@ -408,9 +412,9 @@ func TestCachedReportLoop(t *testing.T) {
 func testReportLoopFlushOnce(t *testing.T, cached bool) {
 	r := newTestStatsReporter()
 
-	scopeOpts := ScopeOptions{CachedReporter: r, skipInternalMetrics: true}
+	scopeOpts := ScopeOptions{CachedReporter: r, MetricsOption: OmitInternalMetrics}
 	if !cached {
-		scopeOpts = ScopeOptions{Reporter: r, skipInternalMetrics: true}
+		scopeOpts = ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}
 	}
 
 	s, closer := NewRootScope(scopeOpts, 10*time.Minute)
@@ -448,7 +452,7 @@ func TestReporterFlushOnce(t *testing.T) {
 func TestWriteOnce(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, closer := NewRootScope(ScopeOptions{Reporter: r, skipInternalMetrics: true}, 0)
+	root, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, 0)
 	defer closer.Close()
 
 	s := root.(*scope)
@@ -519,10 +523,10 @@ func TestHistogramSharedBucketMetrics(t *testing.T) {
 	var (
 		r     = newTestStatsReporter()
 		scope = newRootScope(ScopeOptions{
-			Prefix:              "",
-			Tags:                nil,
-			CachedReporter:      r,
-			skipInternalMetrics: true,
+			Prefix:         "",
+			Tags:           nil,
+			CachedReporter: r,
+			MetricsOption:  OmitInternalMetrics,
 		}, 0)
 		builder = func(s Scope) func(map[string]string) {
 			buckets := MustMakeLinearValueBuckets(10, 10, 3)
@@ -545,9 +549,11 @@ func TestHistogramSharedBucketMetrics(t *testing.T) {
 			defer wg.Done()
 
 			val := strconv.Itoa(i % 4)
-			record(map[string]string{
-				"key": val,
-			})
+			record(
+				map[string]string{
+					"key": val,
+				},
+			)
 
 			time.Sleep(time.Duration(rand.Float64() * float64(time.Second)))
 		}()
@@ -591,10 +597,10 @@ func TestConcurrentUpdates(t *testing.T) {
 		counterIncrs     = 5000
 		rs               = newRootScope(
 			ScopeOptions{
-				Prefix:              "",
-				Tags:                nil,
-				CachedReporter:      r,
-				skipInternalMetrics: true,
+				Prefix:         "",
+				Tags:           nil,
+				CachedReporter: r,
+				MetricsOption:  OmitInternalMetrics,
 			}, 0,
 		)
 		scopes   = []Scope{rs}
@@ -640,9 +646,9 @@ func TestCounterSanitized(t *testing.T) {
 	r := newTestStatsReporter()
 
 	root, closer := NewRootScope(ScopeOptions{
-		Reporter:            r,
-		SanitizeOptions:     &alphanumericSanitizerOpts,
-		skipInternalMetrics: true,
+		Reporter:        r,
+		SanitizeOptions: &alphanumericSanitizerOpts,
+		MetricsOption:   OmitInternalMetrics,
 	}, 0)
 	defer closer.Close()
 
@@ -698,7 +704,7 @@ func TestCounterSanitized(t *testing.T) {
 func TestCachedReporter(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, closer := NewRootScope(ScopeOptions{CachedReporter: r, skipInternalMetrics: true}, 0)
+	root, closer := NewRootScope(ScopeOptions{CachedReporter: r, MetricsOption: OmitInternalMetrics}, 0)
 	defer closer.Close()
 
 	s := root.(*scope)
@@ -735,7 +741,7 @@ func TestCachedReporter(t *testing.T) {
 func TestRootScopeWithoutPrefix(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, closer := NewRootScope(ScopeOptions{Reporter: r, skipInternalMetrics: true}, 0)
+	root, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, 0)
 	defer closer.Close()
 
 	s := root.(*scope)
@@ -769,7 +775,9 @@ func TestRootScopeWithoutPrefix(t *testing.T) {
 func TestRootScopeWithPrefix(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, closer := NewRootScope(ScopeOptions{Prefix: "foo", Reporter: r, skipInternalMetrics: true}, 0)
+	root, closer := NewRootScope(
+		ScopeOptions{Prefix: "foo", Reporter: r, MetricsOption: OmitInternalMetrics}, 0,
+	)
 	defer closer.Close()
 
 	s := root.(*scope)
@@ -803,7 +811,11 @@ func TestRootScopeWithPrefix(t *testing.T) {
 func TestRootScopeWithDifferentSeparator(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, closer := NewRootScope(ScopeOptions{Prefix: "foo", Separator: "_", Reporter: r, skipInternalMetrics: true}, 0)
+	root, closer := NewRootScope(
+		ScopeOptions{
+			Prefix: "foo", Separator: "_", Reporter: r, MetricsOption: OmitInternalMetrics,
+		}, 0,
+	)
 	defer closer.Close()
 
 	s := root.(*scope)
@@ -837,7 +849,9 @@ func TestRootScopeWithDifferentSeparator(t *testing.T) {
 func TestSubScope(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, closer := NewRootScope(ScopeOptions{Prefix: "foo", Reporter: r, skipInternalMetrics: true}, 0)
+	root, closer := NewRootScope(
+		ScopeOptions{Prefix: "foo", Reporter: r, MetricsOption: OmitInternalMetrics}, 0,
+	)
 	defer closer.Close()
 
 	tags := map[string]string{"foo": "bar"}
@@ -879,7 +893,7 @@ func TestSubScope(t *testing.T) {
 func TestSubScopeClose(t *testing.T) {
 	r := newTestStatsReporter()
 
-	rs, closer := NewRootScope(ScopeOptions{Prefix: "foo", Reporter: r, skipInternalMetrics: true}, 0)
+	rs, closer := NewRootScope(ScopeOptions{Prefix: "foo", Reporter: r, MetricsOption: OmitInternalMetrics}, 0)
 	// defer closer.Close()
 	_ = closer
 
@@ -970,7 +984,11 @@ func TestTaggedSubScope(t *testing.T) {
 	r := newTestStatsReporter()
 
 	ts := map[string]string{"env": "test"}
-	root, closer := NewRootScope(ScopeOptions{Prefix: "foo", Tags: ts, Reporter: r, skipInternalMetrics: true}, 0)
+	root, closer := NewRootScope(
+		ScopeOptions{
+			Prefix: "foo", Tags: ts, Reporter: r, MetricsOption: OmitInternalMetrics,
+		}, 0,
+	)
 	defer closer.Close()
 
 	s := root.(*scope)
@@ -1002,19 +1020,23 @@ func TestTaggedSubScope(t *testing.T) {
 	assert.EqualValues(t, ts, counters["foo.beep"].tags)
 
 	assert.EqualValues(t, 1, counters["foo.boop"].val)
-	assert.EqualValues(t, map[string]string{
-		"env":     "test",
-		"service": "test",
-	}, counters["foo.boop"].tags)
+	assert.EqualValues(
+		t, map[string]string{
+			"env":     "test",
+			"service": "test",
+		}, counters["foo.boop"].tags,
+	)
 
 	assert.EqualValues(t, 1, histograms["foo.baz"].valueSamples[50.0])
 	assert.EqualValues(t, ts, histograms["foo.baz"].tags)
 
 	assert.EqualValues(t, 1, histograms["foo.bar"].valueSamples[50.0])
-	assert.EqualValues(t, map[string]string{
-		"env":     "test",
-		"service": "test",
-	}, histograms["foo.bar"].tags)
+	assert.EqualValues(
+		t, map[string]string{
+			"env":     "test",
+			"service": "test",
+		}, histograms["foo.bar"].tags,
+	)
 }
 
 func TestTaggedSanitizedSubScope(t *testing.T) {
@@ -1022,11 +1044,11 @@ func TestTaggedSanitizedSubScope(t *testing.T) {
 
 	ts := map[string]string{"env": "test:env"}
 	root, closer := NewRootScope(ScopeOptions{
-		Prefix:              "foo",
-		Tags:                ts,
-		Reporter:            r,
-		SanitizeOptions:     &alphanumericSanitizerOpts,
-		skipInternalMetrics: true,
+		Prefix:          "foo",
+		Tags:            ts,
+		Reporter:        r,
+		SanitizeOptions: &alphanumericSanitizerOpts,
+		MetricsOption:   OmitInternalMetrics,
 	}, 0)
 	defer closer.Close()
 	s := root.(*scope)
@@ -1042,10 +1064,12 @@ func TestTaggedSanitizedSubScope(t *testing.T) {
 
 	counters := r.getCounters()
 	assert.EqualValues(t, 1, counters["foo_beep"].val)
-	assert.EqualValues(t, map[string]string{
-		"env":     "test_env",
-		"service": "test_service",
-	}, counters["foo_beep"].tags)
+	assert.EqualValues(
+		t, map[string]string{
+			"env":     "test_env",
+			"service": "test_service",
+		}, counters["foo_beep"].tags,
+	)
 }
 
 func TestTaggedExistingReturnsSameScope(t *testing.T) {
@@ -1055,7 +1079,11 @@ func TestTaggedExistingReturnsSameScope(t *testing.T) {
 		nil,
 		{"env": "test"},
 	} {
-		root, closer := NewRootScope(ScopeOptions{Prefix: "foo", Tags: initialTags, Reporter: r, skipInternalMetrics: true}, 0)
+		root, closer := NewRootScope(
+			ScopeOptions{
+				Prefix: "foo", Tags: initialTags, Reporter: r, MetricsOption: OmitInternalMetrics,
+			}, 0,
+		)
 		defer closer.Close()
 
 		rootScope := root.(*scope)
@@ -1087,52 +1115,62 @@ func TestSnapshot(t *testing.T) {
 
 	// Should be able to call Snapshot any number of times and get same result.
 	for i := 0; i < 3; i++ {
-		t.Run(fmt.Sprintf("attempt %d", i), func(t *testing.T) {
-			snap := s.Snapshot()
-			counters, gauges, timers, histograms :=
-				snap.Counters(), snap.Gauges(), snap.Timers(), snap.Histograms()
+		t.Run(
+			fmt.Sprintf("attempt %d", i), func(t *testing.T) {
+				snap := s.Snapshot()
+				counters, gauges, timers, histograms :=
+					snap.Counters(), snap.Gauges(), snap.Timers(), snap.Histograms()
 
-			assert.EqualValues(t, 1, counters["foo.beep+env=test"].Value())
-			assert.EqualValues(t, commonTags, counters["foo.beep+env=test"].Tags())
+				assert.EqualValues(t, 1, counters["foo.beep+env=test"].Value())
+				assert.EqualValues(t, commonTags, counters["foo.beep+env=test"].Tags())
 
-			assert.EqualValues(t, 2, gauges["foo.bzzt+env=test"].Value())
-			assert.EqualValues(t, commonTags, gauges["foo.bzzt+env=test"].Tags())
+				assert.EqualValues(t, 2, gauges["foo.bzzt+env=test"].Value())
+				assert.EqualValues(t, commonTags, gauges["foo.bzzt+env=test"].Tags())
 
-			assert.EqualValues(t, []time.Duration{
-				1 * time.Second,
-				2 * time.Second,
-			}, timers["foo.brrr+env=test"].Values())
-			assert.EqualValues(t, commonTags, timers["foo.brrr+env=test"].Tags())
+				assert.EqualValues(
+					t, []time.Duration{
+						1 * time.Second,
+						2 * time.Second,
+					}, timers["foo.brrr+env=test"].Values(),
+				)
+				assert.EqualValues(t, commonTags, timers["foo.brrr+env=test"].Tags())
 
-			assert.EqualValues(t, map[float64]int64{
-				0:               0,
-				2:               1,
-				4:               0,
-				math.MaxFloat64: 1,
-			}, histograms["foo.fizz+env=test"].Values())
-			assert.EqualValues(t, map[time.Duration]int64(nil), histograms["foo.fizz+env=test"].Durations())
-			assert.EqualValues(t, commonTags, histograms["foo.fizz+env=test"].Tags())
+				assert.EqualValues(
+					t, map[float64]int64{
+						0:               0,
+						2:               1,
+						4:               0,
+						math.MaxFloat64: 1,
+					}, histograms["foo.fizz+env=test"].Values(),
+				)
+				assert.EqualValues(t, map[time.Duration]int64(nil), histograms["foo.fizz+env=test"].Durations())
+				assert.EqualValues(t, commonTags, histograms["foo.fizz+env=test"].Tags())
 
-			assert.EqualValues(t, map[float64]int64(nil), histograms["foo.buzz+env=test"].Values())
-			assert.EqualValues(t, map[time.Duration]int64{
-				time.Second * 2: 1,
-				time.Second * 4: 0,
-				math.MaxInt64:   0,
-			}, histograms["foo.buzz+env=test"].Durations())
-			assert.EqualValues(t, commonTags, histograms["foo.buzz+env=test"].Tags())
+				assert.EqualValues(t, map[float64]int64(nil), histograms["foo.buzz+env=test"].Values())
+				assert.EqualValues(
+					t, map[time.Duration]int64{
+						time.Second * 2: 1,
+						time.Second * 4: 0,
+						math.MaxInt64:   0,
+					}, histograms["foo.buzz+env=test"].Durations(),
+				)
+				assert.EqualValues(t, commonTags, histograms["foo.buzz+env=test"].Tags())
 
-			assert.EqualValues(t, 1, counters["foo.boop+env=test,service=test"].Value())
-			assert.EqualValues(t, map[string]string{
-				"env":     "test",
-				"service": "test",
-			}, counters["foo.boop+env=test,service=test"].Tags())
-		})
+				assert.EqualValues(t, 1, counters["foo.boop+env=test,service=test"].Value())
+				assert.EqualValues(
+					t, map[string]string{
+						"env":     "test",
+						"service": "test",
+					}, counters["foo.boop+env=test,service=test"].Tags(),
+				)
+			},
+		)
 	}
 }
 
 func TestCapabilities(t *testing.T) {
 	r := newTestStatsReporter()
-	s, closer := NewRootScope(ScopeOptions{Reporter: r, skipInternalMetrics: true}, 0)
+	s, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, 0)
 	defer closer.Close()
 	assert.True(t, s.Capabilities().Reporting())
 	assert.False(t, s.Capabilities().Tagging())
@@ -1160,8 +1198,8 @@ func TestScopeDefaultBuckets(t *testing.T) {
 			90 * time.Millisecond,
 			120 * time.Millisecond,
 		},
-		Reporter:            r,
-		skipInternalMetrics: true,
+		Reporter:      r,
+		MetricsOption: OmitInternalMetrics,
 	}, 0)
 	defer closer.Close()
 
@@ -1192,7 +1230,7 @@ func newTestMets(scope Scope) testMets {
 func TestReturnByValue(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, closer := NewRootScope(ScopeOptions{Reporter: r, skipInternalMetrics: true}, 0)
+	root, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, 0)
 	defer closer.Close()
 
 	s := root.(*scope)
@@ -1209,7 +1247,7 @@ func TestReturnByValue(t *testing.T) {
 
 func TestScopeAvoidReportLoopRunOnClose(t *testing.T) {
 	r := newTestStatsReporter()
-	root, closer := NewRootScope(ScopeOptions{Reporter: r, skipInternalMetrics: true}, 0)
+	root, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, 0)
 
 	s := root.(*scope)
 	s.reportLoopRun()
@@ -1224,7 +1262,7 @@ func TestScopeAvoidReportLoopRunOnClose(t *testing.T) {
 
 func TestScopeFlushOnClose(t *testing.T) {
 	r := newTestStatsReporter()
-	root, closer := NewRootScope(ScopeOptions{Reporter: r, skipInternalMetrics: true}, time.Hour)
+	root, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, time.Hour)
 
 	r.cg.Add(1)
 	root.Counter("foo").Inc(1)

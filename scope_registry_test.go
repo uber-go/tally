@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Uber Technologies, Inc.
+// Copyright (c) 2023 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -55,7 +55,7 @@ func TestVerifyCachedTaggedScopesAlloc(t *testing.T) {
 
 func TestNewTestStatsReporterOneScope(t *testing.T) {
 	r := newTestStatsReporter()
-	root, closer := NewRootScope(ScopeOptions{Reporter: r, skipInternalMetrics: false}, 0)
+	root, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: SendInternalMetrics}, 0)
 	s := root.(*scope)
 
 	numFakeCounters := 3
@@ -101,7 +101,7 @@ func TestNewTestStatsReporterOneScope(t *testing.T) {
 
 func TestNewTestStatsReporterManyScopes(t *testing.T) {
 	r := newTestStatsReporter()
-	root, closer := NewRootScope(ScopeOptions{Reporter: r, skipInternalMetrics: false}, 0)
+	root, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: SendInternalMetrics}, 0)
 	wantCounters, wantGauges, wantHistograms := int64(3), int64(2), int64(1)
 
 	s := root.(*scope)
