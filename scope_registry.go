@@ -22,7 +22,6 @@ package tally
 
 import (
 	"hash/maphash"
-	"log"
 	"runtime"
 	"sync"
 	"unsafe"
