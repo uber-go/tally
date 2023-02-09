@@ -262,7 +262,6 @@ func (r *scopeRegistry) reportInternalMetrics() {
 	counters.Add(rootCounters.Load())
 	gauges.Add(rootGauges.Load())
 	histograms.Add(rootHistograms.Load())
-	log.Printf("counters: %v, gauges: %v, histograms: %v\n", counters.Load(), gauges.Load(), histograms.Load())
 
 	if r.root.reporter != nil {
 		r.root.reporter.ReportCounter(r.sanitizedCounterCardinalityName, internalTags, counters.Load())
