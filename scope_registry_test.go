@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -139,4 +140,22 @@ func TestNewTestStatsReporterManyScopes(t *testing.T) {
 		t, wantHistograms, r.counters[histogramCardinalityName].val, "expected %d counters, got %d histograms",
 		wantHistograms, r.counters[histogramCardinalityName].val,
 	)
+}
+
+func TestForEachScope(t *testing.T) {
+	scope := NewTestScope("", nil)
+	go func() {
+		for {
+			hello := scope.Tagged(map[string]string{"a": "b"}).Counter("hello")
+			hello.Inc(1)
+		}
+	}()
+	var val CounterSnapshot
+	for {
+		val = scope.Snapshot().Counters()["hello+a=b"]
+		if val != nil {
+			break
+		}
+	}
+	require.NotNil(t, val)
 }
