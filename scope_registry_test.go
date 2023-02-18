@@ -25,7 +25,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -142,20 +141,28 @@ func TestNewTestStatsReporterManyScopes(t *testing.T) {
 	)
 }
 
-func TestForEachScope(t *testing.T) {
-	scope := NewTestScope("", nil)
+func TestForEachScopeConcurrent(t *testing.T) {
+	root := newRootScope(ScopeOptions{Prefix: "", Tags: nil}, 0)
 	go func() {
 		for {
-			hello := scope.Tagged(map[string]string{"a": "b"}).Counter("hello")
+			hello := root.Tagged(map[string]string{"a": "b"}).Counter("hello")
 			hello.Inc(1)
 		}
 	}()
-	var val CounterSnapshot
+
+	var c Counter = nil
 	for {
-		val = scope.Snapshot().Counters()["hello+a=b"]
-		if val != nil {
+		// Keep poking at the subscopes until the counter is written.
+		root.registry.ForEachScope(
+			func(ss *scope) {
+				ss.cm.RLock()
+				if ss.counters["hello"] != nil {
+					c = ss.counters["hello"]
+				}
+				ss.cm.RUnlock()
+			})
+		if c != nil {
 			break
 		}
 	}
-	require.NotNil(t, val)
 }
