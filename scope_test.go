@@ -1101,7 +1101,6 @@ func TestSnapshot(t *testing.T) {
 	commonTags := map[string]string{"env": "test"}
 	s := NewTestScope("foo", map[string]string{"env": "test"})
 	child := s.Tagged(map[string]string{"service": "test"})
-
 	s.Counter("beep").Inc(1)
 	s.Gauge("bzzt").Update(2)
 	s.Timer("brrr").Record(1 * time.Second)
@@ -1164,6 +1163,24 @@ func TestSnapshot(t *testing.T) {
 			},
 		)
 	}
+}
+
+func TestSnapshotConcurrent(t *testing.T) {
+	scope := NewTestScope("", nil)
+	go func() {
+		for {
+			hello := scope.Tagged(map[string]string{"a": "b"}).Counter("hello")
+			hello.Inc(1)
+		}
+	}()
+	var val CounterSnapshot
+	for {
+		val = scope.Snapshot().Counters()["hello+a=b"]
+		if val != nil {
+			break
+		}
+	}
+	require.NotNil(t, val)
 }
 
 func TestCapabilities(t *testing.T) {
