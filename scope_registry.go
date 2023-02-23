@@ -125,11 +125,11 @@ func (r *scopeRegistry) CachedReport() {
 
 func (r *scopeRegistry) ForEachScope(f func(*scope)) {
 	for _, subscopeBucket := range r.subscopes {
+		subscopeBucket.mu.RLock()
 		for _, s := range subscopeBucket.s {
-			subscopeBucket.mu.RLock()
 			f(s)
-			subscopeBucket.mu.RUnlock()
 		}
+		subscopeBucket.mu.RUnlock()
 	}
 }
 

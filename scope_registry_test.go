@@ -140,3 +140,29 @@ func TestNewTestStatsReporterManyScopes(t *testing.T) {
 		wantHistograms, r.counters[histogramCardinalityName].val,
 	)
 }
+
+func TestForEachScopeConcurrent(t *testing.T) {
+	root := newRootScope(ScopeOptions{Prefix: "", Tags: nil}, 0)
+	go func() {
+		for {
+			hello := root.Tagged(map[string]string{"a": "b"}).Counter("hello")
+			hello.Inc(1)
+		}
+	}()
+
+	var c Counter = nil
+	for {
+		// Keep poking at the subscopes until the counter is written.
+		root.registry.ForEachScope(
+			func(ss *scope) {
+				ss.cm.RLock()
+				if ss.counters["hello"] != nil {
+					c = ss.counters["hello"]
+				}
+				ss.cm.RUnlock()
+			})
+		if c != nil {
+			break
+		}
+	}
+}
