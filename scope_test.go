@@ -33,6 +33,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
 
 var (
@@ -351,6 +352,10 @@ func (r *testStatsReporter) Capabilities() Capabilities {
 
 func (r *testStatsReporter) Flush() {
 	atomic.AddInt32(&r.flushes, 1)
+}
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
 }
 
 func TestWriteTimerImmediately(t *testing.T) {
@@ -1167,16 +1172,23 @@ func TestSnapshot(t *testing.T) {
 
 func TestSnapshotConcurrent(t *testing.T) {
 	scope := NewTestScope("", nil)
+	quit := make(chan bool)
 	go func() {
 		for {
-			hello := scope.Tagged(map[string]string{"a": "b"}).Counter("hello")
-			hello.Inc(1)
+			select {
+			case <-quit:
+				return
+			default:
+				hello := scope.Tagged(map[string]string{"a": "b"}).Counter("hello")
+				hello.Inc(1)
+			}
 		}
 	}()
 	var val CounterSnapshot
 	for {
 		val = scope.Snapshot().Counters()["hello+a=b"]
 		if val != nil {
+			quit <- true
 			break
 		}
 	}
