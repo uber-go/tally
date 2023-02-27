@@ -142,9 +142,14 @@ func TestNewTestStatsReporterManyScopes(t *testing.T) {
 }
 
 func TestForEachScopeConcurrent(t *testing.T) {
-	root := newRootScope(ScopeOptions{Prefix: "", Tags: nil}, 0)
-	quit := make(chan bool)
+	var (
+		root = newRootScope(ScopeOptions{Prefix: "", Tags: nil}, 0)
+		quit = make(chan struct{})
+		done = make(chan struct{})
+	)
+
 	go func() {
+		defer close(done)
 		for {
 			select {
 			case <-quit:
@@ -169,8 +174,10 @@ func TestForEachScopeConcurrent(t *testing.T) {
 			},
 		)
 		if c != nil {
-			quit <- true
+			quit <- struct{}{}
 			break
 		}
 	}
+
+	<-done
 }

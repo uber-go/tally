@@ -1171,9 +1171,14 @@ func TestSnapshot(t *testing.T) {
 }
 
 func TestSnapshotConcurrent(t *testing.T) {
-	scope := NewTestScope("", nil)
-	quit := make(chan bool)
+	var (
+		scope = NewTestScope("", nil)
+		quit  = make(chan struct{})
+		done  = make(chan struct{})
+	)
+
 	go func() {
+		defer close(done)
 		for {
 			select {
 			case <-quit:
@@ -1188,11 +1193,13 @@ func TestSnapshotConcurrent(t *testing.T) {
 	for {
 		val = scope.Snapshot().Counters()["hello+a=b"]
 		if val != nil {
-			quit <- true
+			quit <- struct{}{}
 			break
 		}
 	}
 	require.NotNil(t, val)
+
+	<-done
 }
 
 func TestCapabilities(t *testing.T) {
