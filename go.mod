@@ -7,9 +7,10 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.11.0
 	github.com/prometheus/client_model v0.2.0
-	github.com/stretchr/testify v1.4.0
+	github.com/stretchr/testify v1.8.0
 	github.com/twmb/murmur3 v1.1.5
 	go.uber.org/atomic v1.7.0
+	go.uber.org/goleak v1.2.1
 	gopkg.in/validator.v2 v2.0.0-20200605151824-2b28d334fa05
 	gopkg.in/yaml.v2 v2.4.0
 )
