@@ -142,11 +142,22 @@ func TestNewTestStatsReporterManyScopes(t *testing.T) {
 }
 
 func TestForEachScopeConcurrent(t *testing.T) {
-	root := newRootScope(ScopeOptions{Prefix: "", Tags: nil}, 0)
+	var (
+		root = newRootScope(ScopeOptions{Prefix: "", Tags: nil}, 0)
+		quit = make(chan struct{})
+		done = make(chan struct{})
+	)
+
 	go func() {
+		defer close(done)
 		for {
-			hello := root.Tagged(map[string]string{"a": "b"}).Counter("hello")
-			hello.Inc(1)
+			select {
+			case <-quit:
+				return
+			default:
+				hello := root.Tagged(map[string]string{"a": "b"}).Counter("hello")
+				hello.Inc(1)
+			}
 		}
 	}()
 
@@ -160,9 +171,13 @@ func TestForEachScopeConcurrent(t *testing.T) {
 					c = ss.counters["hello"]
 				}
 				ss.cm.RUnlock()
-			})
+			},
+		)
 		if c != nil {
+			quit <- struct{}{}
 			break
 		}
 	}
+
+	<-done
 }

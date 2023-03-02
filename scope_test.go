@@ -33,7 +33,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 var (
 	// alphanumericSanitizerOpts is the options to create a sanitizer which uses
@@ -1168,21 +1173,35 @@ func TestSnapshot(t *testing.T) {
 }
 
 func TestSnapshotConcurrent(t *testing.T) {
-	scope := NewTestScope("", nil)
+	var (
+		scope = NewTestScope("", nil)
+		quit  = make(chan struct{})
+		done  = make(chan struct{})
+	)
+
 	go func() {
+		defer close(done)
 		for {
-			hello := scope.Tagged(map[string]string{"a": "b"}).Counter("hello")
-			hello.Inc(1)
+			select {
+			case <-quit:
+				return
+			default:
+				hello := scope.Tagged(map[string]string{"a": "b"}).Counter("hello")
+				hello.Inc(1)
+			}
 		}
 	}()
 	var val CounterSnapshot
 	for {
 		val = scope.Snapshot().Counters()["hello+a=b"]
 		if val != nil {
+			quit <- struct{}{}
 			break
 		}
 	}
 	require.NotNil(t, val)
+
+	<-done
 }
 
 func TestCapabilities(t *testing.T) {
