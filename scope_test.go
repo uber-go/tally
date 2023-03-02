@@ -36,6 +36,10 @@ import (
 	"go.uber.org/goleak"
 )
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
+
 var (
 	// alphanumericSanitizerOpts is the options to create a sanitizer which uses
 	// the alphanumeric SanitizeFn.
@@ -352,10 +356,6 @@ func (r *testStatsReporter) Capabilities() Capabilities {
 
 func (r *testStatsReporter) Flush() {
 	atomic.AddInt32(&r.flushes, 1)
-}
-
-func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m)
 }
 
 func TestWriteTimerImmediately(t *testing.T) {
