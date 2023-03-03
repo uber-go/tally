@@ -58,15 +58,20 @@ Use the inbuilt statsd reporter:
 ```go
 import (
 	"io"
-	"github.com/cactus/go-statsd-client/statsd"
+	"github.com/cactus/go-statsd-client/v5/statsd"
 	"github.com/uber-go/tally"
 	tallystatsd "github.com/uber-go/tally/statsd"
 	// ...
 )
 
 func newScope() (tally.Scope, io.Closer) {
-	statter, _ := statsd.NewBufferedClient("127.0.0.1:8125",
-		"stats", 100*time.Millisecond, 1440)
+	statter, _ := statsd.NewClientWithConfig(&statsd.ClientConfig{
+		Address:       "127.0.0.1:8125",
+		Prefix:        "stats",
+		UseBuffered:   true,
+		FlushInterval: 100 * time.Millisecond,
+		FlushBytes:    1440,
+	})
 
 	reporter := tallystatsd.NewReporter(statter, tallystatsd.Options{
 		SampleRate: 1.0,
