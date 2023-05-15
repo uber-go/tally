@@ -188,8 +188,8 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 	if interval > 0 {
 		s.wg.Add(1)
 		go func() {
-			defer s.wg.Done()
 			s.reportLoop(interval)
+			s.wg.Done()
 		}()
 	}
 
@@ -281,9 +281,9 @@ func (s *scope) Counter(name string) Counter {
 	}
 
 	s.cm.Lock()
-	defer s.cm.Unlock()
 
 	if c, ok := s.counters[name]; ok {
+		s.cm.Unlock()
 		return c
 	}
 
@@ -299,14 +299,14 @@ func (s *scope) Counter(name string) Counter {
 	s.counters[name] = c
 	s.countersSlice = append(s.countersSlice, c)
 
+	s.cm.Unlock()
 	return c
 }
 
 func (s *scope) counter(sanitizedName string) (Counter, bool) {
 	s.cm.RLock()
-	defer s.cm.RUnlock()
-
 	c, ok := s.counters[sanitizedName]
+	s.cm.RUnlock()
 	return c, ok
 }
 
@@ -317,9 +317,9 @@ func (s *scope) Gauge(name string) Gauge {
 	}
 
 	s.gm.Lock()
-	defer s.gm.Unlock()
 
 	if g, ok := s.gauges[name]; ok {
+		s.gm.Unlock()
 		return g
 	}
 
@@ -334,14 +334,14 @@ func (s *scope) Gauge(name string) Gauge {
 	s.gauges[name] = g
 	s.gaugesSlice = append(s.gaugesSlice, g)
 
+	s.gm.Unlock()
 	return g
 }
 
 func (s *scope) gauge(name string) (Gauge, bool) {
 	s.gm.RLock()
-	defer s.gm.RUnlock()
-
 	g, ok := s.gauges[name]
+	s.gm.RUnlock()
 	return g, ok
 }
 
@@ -352,9 +352,9 @@ func (s *scope) Timer(name string) Timer {
 	}
 
 	s.tm.Lock()
-	defer s.tm.Unlock()
 
 	if t, ok := s.timers[name]; ok {
+		s.tm.Unlock()
 		return t
 	}
 
@@ -370,14 +370,14 @@ func (s *scope) Timer(name string) Timer {
 	)
 	s.timers[name] = t
 
+	s.tm.Unlock()
 	return t
 }
 
 func (s *scope) timer(sanitizedName string) (Timer, bool) {
 	s.tm.RLock()
-	defer s.tm.RUnlock()
-
 	t, ok := s.timers[sanitizedName]
+	s.tm.RUnlock()
 	return t, ok
 }
 
@@ -397,9 +397,9 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 	}
 
 	s.hm.Lock()
-	defer s.hm.Unlock()
 
 	if h, ok := s.histograms[name]; ok {
+		s.hm.Unlock()
 		return h
 	}
 
@@ -421,14 +421,14 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 	s.histograms[name] = h
 	s.histogramsSlice = append(s.histogramsSlice, h)
 
+	s.hm.Unlock()
 	return h
 }
 
 func (s *scope) histogram(sanitizedName string) (Histogram, bool) {
 	s.hm.RLock()
-	defer s.hm.RUnlock()
-
 	h, ok := s.histograms[sanitizedName]
+	s.hm.RUnlock()
 	return h, ok
 }
 
@@ -536,10 +536,6 @@ func (s *scope) clearMetrics() {
 	s.gm.Lock()
 	s.tm.Lock()
 	s.hm.Lock()
-	defer s.cm.Unlock()
-	defer s.gm.Unlock()
-	defer s.tm.Unlock()
-	defer s.hm.Unlock()
 
 	for k := range s.counters {
 		delete(s.counters, k)
@@ -559,6 +555,11 @@ func (s *scope) clearMetrics() {
 		delete(s.histograms, k)
 	}
 	s.histogramsSlice = nil
+
+	s.hm.Unlock()
+	s.tm.Unlock()
+	s.gm.Unlock()
+	s.cm.Unlock()
 }
 
 // NB(prateek): We assume concatenation of sanitized inputs is
