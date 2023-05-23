@@ -1147,6 +1147,8 @@ func TestSnapshot(t *testing.T) {
 				)
 				assert.EqualValues(t, map[time.Duration]int64(nil), histograms["foo.fizz+env=test"].Durations())
 				assert.EqualValues(t, commonTags, histograms["foo.fizz+env=test"].Tags())
+				assert.Equal(t, histograms["foo.fizz+env=test"].NumValues(), int64(2))
+				fmt.Println(histograms["foo.fizz+env=test"].NumDurations())
 
 				assert.EqualValues(t, map[float64]int64(nil), histograms["foo.buzz+env=test"].Values())
 				assert.EqualValues(
