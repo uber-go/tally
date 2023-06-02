@@ -96,24 +96,27 @@ type scope struct {
 	// nb: deliberately skipping timersSlice as we report timers immediately,
 	// no buffering is involved.
 
-	bucketCache *bucketCache
-	closed      atomic.Bool
-	done        chan struct{}
-	wg          sync.WaitGroup
-	root        bool
+	bucketCache   *bucketCache
+	closed        atomic.Bool
+	done          chan struct{}
+	wg            sync.WaitGroup
+	root          bool
+	reportOnClose bool
 }
 
 // ScopeOptions is a set of options to construct a scope.
 type ScopeOptions struct {
-	Tags               map[string]string
-	Prefix             string
-	Reporter           StatsReporter
-	CachedReporter     CachedStatsReporter
-	Separator          string
-	DefaultBuckets     Buckets
-	SanitizeOptions    *SanitizeOptions
+	Tags                  map[string]string
+	Prefix                string
+	Reporter              StatsReporter
+	CachedReporter        CachedStatsReporter
+	Separator             string
+	DefaultBuckets        Buckets
+	SanitizeOptions       *SanitizeOptions
+	MetricsOption         InternalMetricOption
+	ReportOnSubscopeClose bool
+
 	registryShardCount uint
-	MetricsOption      InternalMetricOption
 }
 
 // NewRootScope creates a new root Scope with a set of options and
@@ -176,6 +179,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		separator:       sanitizer.Name(opts.Separator),
 		timers:          make(map[string]*timer),
 		root:            true,
+		reportOnClose:   opts.ReportOnSubscopeClose,
 	}
 
 	// NB(r): Take a copy of the tags on creation
