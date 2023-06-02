@@ -156,7 +156,9 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		unsanitizedKey = *(*string)(unsafe.Pointer(&buf))
 		sanitizedKey   string
 	)
-	if s, ok := r.lockedLookup(subscopeBucket, unsanitizedKey); ok {
+
+	s, ok := r.lockedLookup(subscopeBucket, unsanitizedKey)
+	if ok {
 		// If this subscope isn't closed, or (in order to preserve historical
 		// behavior) if it isn't configured to report on close, return it.
 		if !s.closed.Load() || !s.reportOnClose {
@@ -170,17 +172,19 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		case parent.cachedReporter != nil:
 			s.cachedReport()
 		}
+	}
 
-		tags = parent.copyAndSanitizeMap(tags)
-		sanitizedKey = scopeRegistryKey(prefix, parent.tags, tags)
+	tags = parent.copyAndSanitizeMap(tags)
+	sanitizedKey = scopeRegistryKey(prefix, parent.tags, tags)
 
+	// If a scope was found above but we didn't return, we need to remove the
+	// scope from both keys.
+	if ok {
 		r.removeWithRLock(subscopeBucket, unsanitizedKey)
 		r.removeWithRLock(subscopeBucket, sanitizedKey)
 		s.clearMetrics()
-	} else {
-		tags = parent.copyAndSanitizeMap(tags)
-		sanitizedKey = scopeRegistryKey(prefix, parent.tags, tags)
 	}
+
 	subscopeBucket.mu.RUnlock()
 
 	// Force-allocate the unsafe string as a safe string. Note that neither
