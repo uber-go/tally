@@ -34,107 +34,83 @@ import (
 )
 
 func TestNoDefunctSubscopes(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
 	var (
 		tags = map[string]string{
 			"hello": "world",
 		}
-		cases = map[string]struct {
-			reportOnClose bool
-			wantReportsA  int
-			wantReportsB  int
-		}{
-			"ReportOnSubscopeClose=true": {
-				reportOnClose: true,
-				wantReportsA:  1,
-				wantReportsB:  1,
-			},
-			"ReportOnSubscopeClose=false": {
-				reportOnClose: false,
-				wantReportsA:  0,
-				wantReportsB:  1,
-			},
-		}
+		mockreporter = tallymock.NewMockStatsReporter(ctrl)
+		ready        = make(chan struct{})
+		closed       atomic.Bool
+		wg           sync.WaitGroup
 	)
+	wg.Add(2)
 
-	for name, tt := range cases {
-		t.Run(name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
+	// Expect counter A to be reported when ReportOnSubscopeClose is
+	// true. Otherwise, the counter will belong to a closed scope and
+	// will not be reported.
+	mockreporter.EXPECT().
+		ReportCounter("a", gomock.Any(), int64(123)).
+		Do(func(_ string, _ map[string]string, _ int64) {
+			wg.Done()
+		}).
+		Times(1)
 
-			var (
-				mockreporter = tallymock.NewMockStatsReporter(ctrl)
-				ready        = make(chan struct{})
-				closed       atomic.Bool
-				wg           sync.WaitGroup
-			)
-			wg.Add(tt.wantReportsA + tt.wantReportsB)
+	// Expect counter B to be reported regardless of whether
+	// ReportOnSubscopeClose is true, because the scope is acquired
+	// after the flush loop has happened (and the scope has been
+	// removed from the registry's cache).
+	mockreporter.EXPECT().
+		ReportCounter("b", gomock.Any(), int64(456)).
+		Do(func(_ string, _ map[string]string, _ int64) {
+			wg.Done()
+		}).
+		Times(1)
 
-			// Expect counter A to be reported when ReportOnSubscopeClose is
-			// true. Otherwise, the counter will belong to a closed scope and
-			// will not be reported.
-			mockreporter.EXPECT().
-				ReportCounter("a", gomock.Any(), int64(123)).
-				Do(func(_ string, _ map[string]string, _ int64) {
-					wg.Done()
-				}).
-				Times(tt.wantReportsA)
+	// Use flushing as a signal to determine if/when a closed scope
+	// would be removed from the registry's cache.
+	mockreporter.EXPECT().
+		Flush().
+		Do(func() {
+			// Don't unblock the ready channel until we've explicitly
+			// closed the scope.
+			if !closed.Load() {
+				return
+			}
 
-			// Expect counter B to be reported regardless of whether
-			// ReportOnSubscopeClose is true, because the scope is acquired
-			// after the flush loop has happened (and the scope has been
-			// removed from the registry's cache).
-			mockreporter.EXPECT().
-				ReportCounter("b", gomock.Any(), int64(456)).
-				Do(func(_ string, _ map[string]string, _ int64) {
-					wg.Done()
-				}).
-				Times(tt.wantReportsB)
+			select {
+			case <-ready:
+			default:
+				close(ready)
+			}
+		}).
+		MinTimes(1)
 
-			// Use flushing as a signal to determine if/when a closed scope
-			// would be removed from the registry's cache.
-			mockreporter.EXPECT().
-				Flush().
-				Do(func() {
-					// Don't unblock the ready channel until we've explicitly
-					// closed the scope.
-					if !closed.Load() {
-						return
-					}
+	root, _ := tally.NewRootScope(tally.ScopeOptions{
+		Reporter: mockreporter,
+	}, time.Millisecond)
 
-					select {
-					case <-ready:
-					default:
-						close(ready)
-					}
-				}).
-				MinTimes(1)
+	subscope := root.Tagged(tags)
+	requireClose(t, subscope)
+	subscope = root.Tagged(tags)
 
-			root, _ := tally.NewRootScope(tally.ScopeOptions{
-				Reporter:              mockreporter,
-				ReportOnSubscopeClose: tt.reportOnClose,
-			}, time.Millisecond)
+	// Signal and wait for the next flush to ensure that subscope can
+	// be a closed scope.
+	closed.Store(true)
+	<-ready
 
-			subscope := root.Tagged(tags)
-			requireClose(t, subscope)
-			subscope = root.Tagged(tags)
+	// Use the maybe-closed (if not reporting on close) subscope for
+	// counter A.
+	subscope.Counter("a").Inc(123)
 
-			// Signal and wait for the next flush to ensure that subscope can
-			// be a closed scope.
-			closed.Store(true)
-			<-ready
+	// Guarantee that counter B will not use a closed subscope.
+	subscope = root.Tagged(tags)
+	subscope.Counter("b").Inc(456)
 
-			// Use the maybe-closed (if not reporting on close) subscope for
-			// counter A.
-			subscope.Counter("a").Inc(123)
-
-			// Guarantee that counter B will not use a closed subscope.
-			subscope = root.Tagged(tags)
-			subscope.Counter("b").Inc(456)
-
-			requireClose(t, root)
-			wg.Wait()
-		})
-	}
+	requireClose(t, root)
+	wg.Wait()
 }
 
 func requireClose(t *testing.T, scope tally.Scope) {

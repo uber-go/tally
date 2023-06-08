@@ -159,9 +159,10 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 
 	s, ok := r.lockedLookup(subscopeBucket, unsanitizedKey)
 	if ok {
-		// If this subscope isn't closed, or (in order to preserve historical
-		// behavior) if it isn't configured to report on close, return it.
-		if !s.closed.Load() || !s.reportOnClose {
+		// If this subscope isn't closed, return it. Otherwise, report it
+		// immediately and delete it so that a new (functional) scope can be
+		// returned instead.
+		if !s.closed.Load() {
 			subscopeBucket.mu.RUnlock()
 			return s
 		}
@@ -228,7 +229,6 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		timers:          make(map[string]*timer),
 		bucketCache:     parent.bucketCache,
 		done:            make(chan struct{}),
-		reportOnClose:   parent.reportOnClose,
 	}
 	subscopeBucket.s[sanitizedKey] = subscope
 	if _, ok := r.lockedLookup(subscopeBucket, unsanitizedKey); !ok {
