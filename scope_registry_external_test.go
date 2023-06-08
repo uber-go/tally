@@ -48,20 +48,12 @@ func TestNoDefunctSubscopes(t *testing.T) {
 	)
 	wg.Add(2)
 
-	// Expect counter A to be reported when ReportOnSubscopeClose is
-	// true. Otherwise, the counter will belong to a closed scope and
-	// will not be reported.
 	mockreporter.EXPECT().
 		ReportCounter("a", gomock.Any(), int64(123)).
 		Do(func(_ string, _ map[string]string, _ int64) {
 			wg.Done()
 		}).
 		Times(1)
-
-	// Expect counter B to be reported regardless of whether
-	// ReportOnSubscopeClose is true, because the scope is acquired
-	// after the flush loop has happened (and the scope has been
-	// removed from the registry's cache).
 	mockreporter.EXPECT().
 		ReportCounter("b", gomock.Any(), int64(456)).
 		Do(func(_ string, _ map[string]string, _ int64) {
@@ -101,8 +93,7 @@ func TestNoDefunctSubscopes(t *testing.T) {
 	closed.Store(true)
 	<-ready
 
-	// Use the maybe-closed (if not reporting on close) subscope for
-	// counter A.
+	// Use the maybe-closed subscope for counter A.
 	subscope.Counter("a").Inc(123)
 
 	// Guarantee that counter B will not use a closed subscope.
