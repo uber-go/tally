@@ -1,5 +1,5 @@
-hash: 23f5ede86d6a4b9970e0d5ae025de37ab77246e36dbe5dbae98be73722e4954e
-updated: 2022-06-02T16:30:47.793742-04:00
+hash: 61a6b12902a915c40b2e5c3720803e9c71fbfac455cbe58e5c1fb9e9474518fe
+updated: 2023-06-10T00:32:40.687313472Z
 imports:
 - name: github.com/beorn7/perks
   version: 4c0e84591b9aa9e6dcfdf3e020114cd81f89d5f9
@@ -9,13 +9,18 @@ imports:
   version: 138b925ccdf617776955904ba7759fce64406cec
   subpackages:
   - statsd
+- name: github.com/golang/mock
+  version: 5b455625bd2c8ffbcc0de6a0873f864ba3820904
+  subpackages:
+  - gomock
+  - mockgen/model
 - name: github.com/golang/protobuf
-  version: ae97035608a719c7a1c1c41bed0ae0744bdb0c6f
+  version: 5d5e8c018a13017f9d5b8bf4fad64aaa42a87308
   subpackages:
   - proto
   - ptypes/timestamp
 - name: github.com/m3db/prometheus_client_golang
-  version: a457ed11e3d6f6b70bf47f9aa8a92e4136c941ff
+  version: 3601e01160ff9b74a616d661683e0ff884e5b0c5
   subpackages:
   - prometheus
   - prometheus/internal
@@ -26,7 +31,7 @@ imports:
   subpackages:
   - go
 - name: github.com/m3db/prometheus_common
-  version: bd06b6bd06817a628eae4783b5a7b8f85c6da410
+  version: dfb62d9d4677e88e0cf818e9a4faab072eee2785
   subpackages:
   - expfmt
   - internal/bitbucket.org/ww/goautoneg
@@ -38,16 +43,20 @@ imports:
 - name: github.com/pkg/errors
   version: 614d223910a179a466c1767a985424175c39b465
 - name: github.com/prometheus/procfs
-  version: f436cbb89ece38bf080d446b3ca27053b305eaac
+  version: 332e865adfebaa7eaedc94535a3f12f7e5eeb2d4
   subpackages:
   - internal/fs
   - internal/util
 - name: github.com/twmb/murmur3
-  version: ae8d9b870b19ddd1cae2d86cfff5278d931d94b8
+  version: 3fcd9c20f2443ea2612fca5675f4cf6849e809b9
 - name: go.uber.org/atomic
-  version: 3504dfaa1fa414923b1c8693f45d2f6931daf229
+  version: 76f817c8b7e771cdffc2b9f11a7ebb80333ca92b
+- name: golang.org/x/sys
+  version: b52f5441ce4ee981d7a9295a5ddad71e196486a7
+  subpackages:
+  - unix
 - name: google.golang.org/protobuf
-  version: 32051b4f86e54c2142c7c05362c6e96ae3454a1c
+  version: f221882bfb484564f1714ae05f197dea2c76898d
   subpackages:
   - encoding/prototext
   - encoding/protowire
@@ -107,6 +116,10 @@ testImports:
   subpackages:
   - assert
   - require
+- name: go.uber.org/goleak
+  version: 4a14d384c51ba0c8e6a2fb4dc8bf83d15cdec096
+  subpackages:
+  - internal/stack
 - name: golang.org/x/tools
   version: 3fe2afc9e626f32e91aff6eddb78b14743446865
   subpackages:

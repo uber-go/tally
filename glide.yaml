@@ -24,6 +24,7 @@ import:
   version: ^1.27.0
 - package: github.com/golang/protobuf
   version: ^1.5.2
+- package: github.com/golang/mock
 testImport:
 - package: github.com/axw/gocov
   version: 54b98cfcac0c63fb3f9bd8e7ad241b724d4e985b

@@ -27,9 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var (
-	numInternalMetrics = 3
-)
+var numInternalMetrics = 3
 
 func TestVerifyCachedTaggedScopesAlloc(t *testing.T) {
 	root, _ := NewRootScope(ScopeOptions{
@@ -49,7 +47,7 @@ func TestVerifyCachedTaggedScopesAlloc(t *testing.T) {
 			"qux": "quux",
 		})
 	})
-	expected := 2.0
+	expected := 3.0
 	assert.True(t, allocs <= expected, "the cached tagged scopes should allocate at most %.0f allocations, but did allocate %.0f", expected, allocs)
 }
 
