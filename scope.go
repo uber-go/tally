@@ -101,6 +101,7 @@ type scope struct {
 	done        chan struct{}
 	wg          sync.WaitGroup
 	root        bool
+	testScope   bool
 }
 
 // ScopeOptions is a set of options to construct a scope.
@@ -114,6 +115,7 @@ type ScopeOptions struct {
 	SanitizeOptions *SanitizeOptions
 	MetricsOption   InternalMetricOption
 
+	testScope          bool
 	registryShardCount uint
 }
 
@@ -132,7 +134,11 @@ func NewTestScope(
 	prefix string,
 	tags map[string]string,
 ) TestScope {
-	return newRootScope(ScopeOptions{Prefix: prefix, Tags: tags}, 0)
+	return newRootScope(ScopeOptions{
+		Prefix:    prefix,
+		Tags:      tags,
+		testScope: true,
+	}, 0)
 }
 
 func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
@@ -177,6 +183,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		separator:       sanitizer.Name(opts.Separator),
 		timers:          make(map[string]*timer),
 		root:            true,
+		testScope:       opts.testScope,
 	}
 
 	// NB(r): Take a copy of the tags on creation

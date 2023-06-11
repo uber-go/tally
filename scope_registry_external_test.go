@@ -33,6 +33,38 @@ import (
 	"github.com/uber-go/tally/tallymock"
 )
 
+func TestTestScopesNotPruned(t *testing.T) {
+	var (
+		root     = tally.NewTestScope("", nil)
+		subscope = root.SubScope("foo")
+		counter  = subscope.Counter("bar")
+	)
+
+	counter.Inc(123)
+
+	closer, ok := subscope.(io.Closer)
+	require.True(t, ok)
+	require.NoError(t, closer.Close())
+
+	subscope = root.SubScope("foo")
+	counter = subscope.Counter("bar")
+	counter.Inc(123)
+
+	var (
+		snapshot = root.Snapshot()
+		counters = snapshot.Counters()
+	)
+	require.Len(t, counters, 1)
+	require.Len(t, snapshot.Gauges(), 0)
+	require.Len(t, snapshot.Timers(), 0)
+	require.Len(t, snapshot.Histograms(), 0)
+
+	val, ok := counters["foo.bar+"]
+	require.True(t, ok)
+	require.Equal(t, "foo.bar", val.Name())
+	require.EqualValues(t, 246, val.Value())
+}
+
 func TestNoDefunctSubscopes(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
