@@ -23,7 +23,6 @@ package tally_test
 import (
 	"io"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/uber-go/tally/v4"
 	"github.com/uber-go/tally/v4/tallymock"
+	"go.uber.org/atomic"
 )
 
 func TestTestScopesNotPruned(t *testing.T) {
