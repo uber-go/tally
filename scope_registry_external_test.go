@@ -50,13 +50,16 @@ func TestTestScopesNotPruned(t *testing.T) {
 	counter = subscope.Counter("bar")
 	counter.Inc(123)
 
-	snapshot := root.Snapshot()
-	require.Len(t, snapshot.Counters(), 1)
+	var (
+		snapshot = root.Snapshot()
+		counters = snapshot.Counters()
+	)
+	require.Len(t, counters, 1)
 	require.Len(t, snapshot.Gauges(), 0)
 	require.Len(t, snapshot.Timers(), 0)
 	require.Len(t, snapshot.Histograms(), 0)
 
-	val, ok := snapshot.Counters()["foo.bar+"]
+	val, ok := counters["foo.bar+"]
 	require.True(t, ok)
 	require.Equal(t, "foo.bar", val.Name())
 	require.EqualValues(t, 246, val.Value())
