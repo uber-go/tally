@@ -39,7 +39,8 @@ const (
 	// OmitInternalMetrics turns off internal metrics submission.
 	OmitInternalMetrics
 
-	_defaultInitialSliceSize = 16
+	_defaultInitialSliceSize         = 16
+	_minimumAllowedReportingInterval = 2 * time.Second
 )
 
 var (
@@ -120,6 +121,10 @@ type ScopeOptions struct {
 // a reporting interval.
 // Must provide either a StatsReporter or a CachedStatsReporter.
 func NewRootScope(opts ScopeOptions, interval time.Duration) (Scope, io.Closer) {
+	if interval > 0 && interval < _minimumAllowedReportingInterval {
+		interval = _minimumAllowedReportingInterval
+	}
+
 	s := newRootScope(opts, interval)
 	return s, s
 }
