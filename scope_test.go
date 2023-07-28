@@ -395,6 +395,26 @@ func TestWriteReportLoop(t *testing.T) {
 	r.WaitAll()
 }
 
+func TestWriteReportLoopDefaultInterval(t *testing.T) {
+	r := newTestStatsReporter()
+	s, closer := NewRootScopeWithDefaultInterval(
+		ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics},
+	)
+	defer closer.Close()
+
+	r.cg.Add(1)
+	s.Counter("bar").Inc(1)
+	r.gg.Add(1)
+	s.Gauge("zed").Update(1)
+	r.tg.Add(1)
+	s.Timer("ticky").Record(time.Millisecond * 175)
+	r.hg.Add(1)
+	s.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
+
+	r.WaitAll()
+}
+
 func TestCachedReportLoop(t *testing.T) {
 	r := newTestStatsReporter()
 	s, closer := NewRootScope(ScopeOptions{CachedReporter: r, MetricsOption: OmitInternalMetrics}, 10)
