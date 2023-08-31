@@ -94,7 +94,7 @@ func (r Reporter) ReportHistogramDurationSamples(
 	value int64,
 ) {
 	r.logger.Info(
-		"ReportHistogramValueSamples",
+		"ReportHistogramDurationSamples",
 		zap.String("type", "histogram"),
 		zap.String("name", name),
 		zap.Object("tags", tagsMarshaler(tags)),
