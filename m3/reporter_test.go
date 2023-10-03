@@ -583,18 +583,28 @@ func TestReporterCommmonTagsInternal(t *testing.T) {
 	require.NoError(t, err)
 	defer r.Close()
 
-	wg.Add(internalMetrics)
+	c := r.AllocateCounter("testCounter1", nil)
+	c.ReportCount(1)
+	wg.Add(internalMetrics + 1)
 	r.Flush()
 	wg.Wait()
 
+	numInternalMetricsActual := 0
 	metrics := server.Service.getMetrics()
-	require.Equal(t, internalMetrics, len(metrics))
+	require.Equal(t, internalMetrics+1, len(metrics))
 	for _, metric := range metrics {
-		require.True(t, strings.HasPrefix(metric.Name, "tally.internal"))
-		for k, v := range commonTagsInternal {
-			require.True(t, tagEquals(metric.Tags, k, v))
+		if strings.HasPrefix(metric.Name, "tally.internal") {
+			numInternalMetricsActual++
+			for k, v := range commonTagsInternal {
+				require.True(t, tagEquals(metric.Tags, k, v))
+			}
+		} else {
+			require.Equal(t, "testCounter1", metric.Name)
+			require.False(t, tagIncluded(metric.Tags, "internal1"))
+			require.False(t, tagIncluded(metric.Tags, "internal2"))
 		}
 	}
+	require.Equal(t, internalMetrics, numInternalMetricsActual)
 }
 
 func TestReporterHasReportingAndTaggingCapability(t *testing.T) {
