@@ -561,6 +561,42 @@ func TestReporterResetTagsAfterReturnToPool(t *testing.T) {
 	require.Equal(t, 0, len(filtered[1].GetTags()))
 }
 
+func TestReporterCommmonTagsInternal(t *testing.T) {
+	var wg sync.WaitGroup
+	server := newFakeM3Server(t, &wg, false, Compact)
+	go server.Serve()
+	defer server.Close()
+
+	commonTagsInternal := map[string]string{
+		"internal1": "test1",
+		"internal2": "test2",
+	}
+
+	r, err := NewReporter(Options{
+		HostPorts:          []string{server.Addr},
+		Service:            "test-service",
+		CommonTags:         defaultCommonTags,
+		MaxQueueSize:       queueSize,
+		MaxPacketSizeBytes: maxPacketSize,
+		CommonTagsInternal: commonTagsInternal,
+	})
+	require.NoError(t, err)
+	defer r.Close()
+
+	wg.Add(internalMetrics)
+	r.Flush()
+	wg.Wait()
+
+	metrics := server.Service.getMetrics()
+	require.Equal(t, internalMetrics, len(metrics))
+	for _, metric := range metrics {
+		require.True(t, strings.HasPrefix(metric.Name, "tally.internal"))
+		for k, v := range commonTagsInternal {
+			require.True(t, tagEquals(metric.Tags, k, v))
+		}
+	}
+}
+
 func TestReporterHasReportingAndTaggingCapability(t *testing.T) {
 	r, err := NewReporter(Options{
 		HostPorts:  []string{"127.0.0.1:9052"},
@@ -589,6 +625,13 @@ type fakeM3ServerPackets struct {
 	values [][]byte
 }
 
+// newFakeM3Server creates a new fake M3 server that listens on a random port
+// and returns the address.
+// The server will wait for the given wait group to be done before returning.
+// If countBatches is true, the server will wait for a batch to be received
+// before returning.
+// But if countBatches is false, the server will wait for a metric to be received
+// before returning.
 func newFakeM3Server(t *testing.T, wg *sync.WaitGroup, countBatches bool, protocol Protocol) *fakeM3Server {
 	service := newFakeM3Service(wg, countBatches)
 	processor := m3thrift.NewM3Processor(service)

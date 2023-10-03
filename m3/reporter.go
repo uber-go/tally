@@ -149,6 +149,7 @@ type Options struct {
 	HistogramBucketIDName       string
 	HistogramBucketName         string
 	HistogramBucketTagPrecision uint
+	CommonTagsInternal          map[string]string
 }
 
 // NewReporter creates a new M3 reporter.
@@ -288,6 +289,11 @@ func NewReporter(opts Options) (Reporter, error) {
 	internalTags := map[string]string{
 		"version": tally.Version,
 	}
+
+	for k, v := range opts.CommonTagsInternal {
+		internalTags[k] = v
+	}
+
 	r.batchSizeHistogram = r.AllocateHistogram("tally.internal.batch-size", internalTags, buckets)
 	r.numBatchesCounter = r.AllocateCounter("tally.internal.num-batches", internalTags)
 	r.numMetricsCounter = r.AllocateCounter("tally.internal.num-metrics", internalTags)
