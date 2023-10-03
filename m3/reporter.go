@@ -149,7 +149,7 @@ type Options struct {
 	HistogramBucketIDName       string
 	HistogramBucketName         string
 	HistogramBucketTagPrecision uint
-	CommonTagsInternal          map[string]string
+	InternalTags                map[string]string
 }
 
 // NewReporter creates a new M3 reporter.
@@ -290,7 +290,7 @@ func NewReporter(opts Options) (Reporter, error) {
 		"version": tally.Version,
 	}
 
-	for k, v := range opts.CommonTagsInternal {
+	for k, v := range opts.InternalTags {
 		internalTags[k] = v
 	}
 

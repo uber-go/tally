@@ -70,6 +70,6 @@ func (c Configuration) NewReporter() (Reporter, error) {
 		MaxPacketSizeBytes:          c.PacketSize,
 		IncludeHost:                 c.IncludeHost,
 		HistogramBucketTagPrecision: c.HistogramBucketTagPrecision,
-		CommonTagsInternal:          c.CommonTagsInternal,
+		InternalTags:                c.CommonTagsInternal,
 	})
 }
