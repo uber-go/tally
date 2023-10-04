@@ -561,6 +561,58 @@ func TestReporterResetTagsAfterReturnToPool(t *testing.T) {
 	require.Equal(t, 0, len(filtered[1].GetTags()))
 }
 
+func TestReporterCommmonTagsInternal(t *testing.T) {
+	var wg sync.WaitGroup
+	server := newFakeM3Server(t, &wg, false, Compact)
+	go server.Serve()
+	defer server.Close()
+
+	internalTags := map[string]string{
+		"internal1": "test1",
+		"internal2": "test2",
+	}
+
+	r, err := NewReporter(Options{
+		HostPorts:          []string{server.Addr},
+		Service:            "test-service",
+		CommonTags:         defaultCommonTags,
+		MaxQueueSize:       queueSize,
+		IncludeHost:        true,
+		MaxPacketSizeBytes: maxPacketSize,
+		InternalTags:       internalTags,
+	})
+	require.NoError(t, err)
+	defer r.Close()
+
+	c := r.AllocateCounter("testCounter1", nil)
+	c.ReportCount(1)
+	wg.Add(internalMetrics + 1)
+	r.Flush()
+	wg.Wait()
+
+	numInternalMetricsActual := 0
+	metrics := server.Service.getMetrics()
+	require.Equal(t, internalMetrics+1, len(metrics))
+	for _, metric := range metrics {
+		if strings.HasPrefix(metric.Name, "tally.internal") {
+			numInternalMetricsActual++
+			for k, v := range internalTags {
+				require.True(t, tagEquals(metric.Tags, k, v))
+			}
+		} else {
+			require.Equal(t, "testCounter1", metric.Name)
+			require.False(t, tagIncluded(metric.Tags, "internal1"))
+			require.False(t, tagIncluded(metric.Tags, "internal2"))
+		}
+		// The following tags should not be present as part of the individual metrics
+		// as they are common tags.
+		require.False(t, tagIncluded(metric.Tags, "host"))
+		require.False(t, tagIncluded(metric.Tags, "instance"))
+		require.False(t, tagIncluded(metric.Tags, "service"))
+	}
+	require.Equal(t, internalMetrics, numInternalMetricsActual)
+}
+
 func TestReporterHasReportingAndTaggingCapability(t *testing.T) {
 	r, err := NewReporter(Options{
 		HostPorts:  []string{"127.0.0.1:9052"},
@@ -589,6 +641,13 @@ type fakeM3ServerPackets struct {
 	values [][]byte
 }
 
+// newFakeM3Server creates a new fake M3 server that listens on a random port
+// and returns the server.
+// The server will wait for the given wait group to be done before returning.
+// If countBatches is true, the server will wait consider the wg.Add()s to be
+// representing batches and will do a eg.Done() for each encountered batch.
+// But if countBatches is false, the server will do the same thing but for individual
+// metrics instead of batches.
 func newFakeM3Server(t *testing.T, wg *sync.WaitGroup, countBatches bool, protocol Protocol) *fakeM3Server {
 	service := newFakeM3Service(wg, countBatches)
 	processor := m3thrift.NewM3Processor(service)
