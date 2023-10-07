@@ -50,9 +50,9 @@ type Configuration struct {
 	// with the histogram bucket bound values.
 	HistogramBucketTagPrecision uint `yaml:"histogramBucketTagPrecision"`
 
-	// CommonTagsInternal are tags that should be added to all internal metrics
+	// InternalTags are tags that should be added to all internal metrics
 	// emitted by the reporter.
-	CommonTagsInternal map[string]string `yaml:"commonTagsInternal"`
+	InternalTags map[string]string `yaml:"internalTags"`
 }
 
 // NewReporter creates a new M3 reporter from this configuration.
@@ -70,6 +70,6 @@ func (c Configuration) NewReporter() (Reporter, error) {
 		MaxPacketSizeBytes:          c.PacketSize,
 		IncludeHost:                 c.IncludeHost,
 		HistogramBucketTagPrecision: c.HistogramBucketTagPrecision,
-		InternalTags:                c.CommonTagsInternal,
+		InternalTags:                c.InternalTags,
 	})
 }
