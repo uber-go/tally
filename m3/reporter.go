@@ -22,6 +22,7 @@ package m3
 
 import (
 	"fmt"
+	"hash/maphash"
 	"io"
 	"math"
 	"os"
@@ -125,6 +126,7 @@ type reporter struct {
 	stringInterner  *cache.StringInterner
 	tagCache        *cache.TagCache
 	wg              sync.WaitGroup
+	hashSeed        maphash.Seed
 
 	batchSizeHistogram    tally.CachedHistogram
 	numBatches            atomic.Int64
@@ -284,6 +286,7 @@ func NewReporter(opts Options) (Reporter, error) {
 		resourcePool:    resourcePool,
 		stringInterner:  cache.NewStringInterner(),
 		tagCache:        cache.NewTagCache(),
+		hashSeed:        maphash.MakeSeed(),
 	}
 
 	internalTags := map[string]string{
@@ -467,9 +470,11 @@ func (r *reporter) newMetric(
 	tags map[string]string,
 	t metricType,
 ) m3thrift.Metric {
+	h64 := r.hashNameAndTags(name, tags)
 	m := m3thrift.Metric{
 		Name:      r.stringInterner.Intern(name),
 		Timestamp: _maxInt64,
+		Hash:      h64,
 	}
 
 	switch t {
@@ -710,6 +715,14 @@ func (r *reporter) timeLoop() {
 			return
 		}
 	}
+}
+
+func (r *reporter) hashNameAndTags(name string, tags map[string]string) int64 {
+	h := maphash.Hash{}
+	h.SetSeed(r.hashSeed)
+	_, _ = h.WriteString(tally.KeyForStringMap(tags))
+	_, _ = h.WriteString(name)
+	return int64(h.Sum64())
 }
 
 type cachedMetric struct {

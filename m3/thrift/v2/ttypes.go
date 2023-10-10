@@ -433,6 +433,7 @@ type Metric struct {
 	Value     MetricValue `thrift:"value,2,required" json:"value"`
 	Timestamp int64       `thrift:"timestamp,3,required" json:"timestamp"`
 	Tags      []MetricTag `thrift:"tags,4" json:"tags,omitempty"`
+	Hash      int64       `thrift:"hash,5" json:"hash"`
 }
 
 func NewMetric() *Metric {
@@ -461,6 +462,11 @@ var Metric_Tags_DEFAULT []MetricTag
 func (p *Metric) GetTags() []MetricTag {
 	return p.Tags
 }
+
+func (p *Metric) GetHash() int64 {
+	return p.Hash
+}
+
 func (p *Metric) IsSetValue() bool {
 	return p.Value.GetMetricType() != MetricType_INVALID || p.Value.Count != 0 || p.Value.Gauge != 0 || p.Value.Timer != 0
 }
@@ -504,6 +510,10 @@ func (p *Metric) Read(iprot thrift.TProtocol) error {
 			issetTimestamp = true
 		case 4:
 			if err := p.readField4(iprot); err != nil {
+				return err
+			}
+		case 5:
+			if err := p.readField5(iprot); err != nil {
 				return err
 			}
 		default:
@@ -576,6 +586,15 @@ func (p *Metric) readField4(iprot thrift.TProtocol) error {
 	return nil
 }
 
+func (p *Metric) readField5(iprot thrift.TProtocol) error {
+	if v, err := iprot.ReadI64(); err != nil {
+		return thrift.PrependError("error reading field 5: ", err)
+	} else {
+		p.Hash = v
+	}
+	return nil
+}
+
 func (p *Metric) Write(oprot thrift.TProtocol) error {
 	if err := oprot.WriteStructBegin("Metric"); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
@@ -590,6 +609,9 @@ func (p *Metric) Write(oprot thrift.TProtocol) error {
 		return err
 	}
 	if err := p.writeField4(oprot); err != nil {
+		return err
+	}
+	if err := p.writeField5(oprot); err != nil {
 		return err
 	}
 	if err := oprot.WriteFieldStop(); err != nil {
@@ -659,6 +681,19 @@ func (p *Metric) writeField4(oprot thrift.TProtocol) (err error) {
 		if err := oprot.WriteFieldEnd(); err != nil {
 			return thrift.PrependError(fmt.Sprintf("%T write field end error 4:tags: ", p), err)
 		}
+	}
+	return err
+}
+
+func (p *Metric) writeField5(oprot thrift.TProtocol) (err error) {
+	if err := oprot.WriteFieldBegin("hash", thrift.I64, 5); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write field begin error 3:hash: ", p), err)
+	}
+	if err := oprot.WriteI64(int64(p.Hash)); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T.hash (5) field write error: ", p), err)
+	}
+	if err := oprot.WriteFieldEnd(); err != nil {
+		return thrift.PrependError(fmt.Sprintf("%T write field end error 5:hash: ", p), err)
 	}
 	return err
 }
