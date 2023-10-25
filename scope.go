@@ -102,6 +102,11 @@ type scope struct {
 	done        chan struct{}
 	wg          sync.WaitGroup
 	root        bool
+
+	counterChangeNotifyCh chan *counter
+	gaugeChangeNotifyCh   chan *gauge
+	changedCounters       []*counter
+	changedGauges         []*gauge
 }
 
 // ScopeOptions is a set of options to construct a scope.
@@ -166,23 +171,27 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 	}
 
 	s := &scope{
-		baseReporter:    baseReporter,
-		bucketCache:     newBucketCache(),
-		cachedReporter:  opts.CachedReporter,
-		counters:        make(map[string]*counter),
-		countersSlice:   make([]*counter, 0, _defaultInitialSliceSize),
-		defaultBuckets:  opts.DefaultBuckets,
-		done:            make(chan struct{}),
-		gauges:          make(map[string]*gauge),
-		gaugesSlice:     make([]*gauge, 0, _defaultInitialSliceSize),
-		histograms:      make(map[string]*histogram),
-		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
-		prefix:          sanitizer.Name(opts.Prefix),
-		reporter:        opts.Reporter,
-		sanitizer:       sanitizer,
-		separator:       sanitizer.Name(opts.Separator),
-		timers:          make(map[string]*timer),
-		root:            true,
+		baseReporter:          baseReporter,
+		bucketCache:           newBucketCache(),
+		cachedReporter:        opts.CachedReporter,
+		counters:              make(map[string]*counter),
+		countersSlice:         make([]*counter, 0, _defaultInitialSliceSize),
+		defaultBuckets:        opts.DefaultBuckets,
+		done:                  make(chan struct{}),
+		gauges:                make(map[string]*gauge),
+		gaugesSlice:           make([]*gauge, 0, _defaultInitialSliceSize),
+		histograms:            make(map[string]*histogram),
+		histogramsSlice:       make([]*histogram, 0, _defaultInitialSliceSize),
+		prefix:                sanitizer.Name(opts.Prefix),
+		reporter:              opts.Reporter,
+		sanitizer:             sanitizer,
+		separator:             sanitizer.Name(opts.Separator),
+		timers:                make(map[string]*timer),
+		root:                  true,
+		counterChangeNotifyCh: make(chan *counter, 1024),
+		gaugeChangeNotifyCh:   make(chan *gauge, 1024),
+		changedCounters:       make([]*counter, 0, _defaultInitialSliceSize),
+		changedGauges:         make([]*gauge, 0, _defaultInitialSliceSize),
 	}
 
 	// NB(r): Take a copy of the tags on creation
@@ -196,7 +205,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			s.reportLoop(interval)
+			s.processLoop(interval)
 		}()
 	}
 
@@ -281,6 +290,35 @@ func (s *scope) reportRegistry() {
 	}
 }
 
+func (s *scope) processLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case c := <-s.counterChangeNotifyCh:
+			s.changedCounters = append(s.changedCounters, c)
+		case g := <-s.gaugeChangeNotifyCh:
+			s.changedGauges = append(s.changedGauges, g)
+		case <-ticker.C:
+			s.reportChanges(s.changedCounters, s.changedGauges)
+			// Reset the changed counters and gauges
+			s.changedCounters = s.changedCounters[:0]
+			s.changedGauges = s.changedGauges[:0]
+		default:
+			return
+		}
+	}
+}
+
+func (s *scope) reportChanges(counters []*counter, gauges []*gauge) {
+	for _, c := range counters {
+		c.cachedReport()
+	}
+	for _, g := range gauges {
+		g.cachedReport()
+	}
+}
+
 func (s *scope) Counter(name string) Counter {
 	name = s.sanitizer.Name(name)
 	if c, ok := s.counter(name); ok {
@@ -295,14 +333,18 @@ func (s *scope) Counter(name string) Counter {
 	}
 
 	var cachedCounter CachedCount
+	var changeNotifyFn func(c *counter)
 	if s.cachedReporter != nil {
 		cachedCounter = s.cachedReporter.AllocateCounter(
 			s.fullyQualifiedName(name),
 			s.tags,
 		)
+		changeNotifyFn = func(c *counter) {
+			s.counterChangeNotifyCh <- c
+		}
 	}
 
-	c := newCounter(cachedCounter)
+	c := newCounter(cachedCounter, changeNotifyFn)
 	s.counters[name] = c
 	s.countersSlice = append(s.countersSlice, c)
 
@@ -331,13 +373,17 @@ func (s *scope) Gauge(name string) Gauge {
 	}
 
 	var cachedGauge CachedGauge
+	var changeNotifyFn func(g *gauge)
 	if s.cachedReporter != nil {
 		cachedGauge = s.cachedReporter.AllocateGauge(
 			s.fullyQualifiedName(name), s.tags,
 		)
+		changeNotifyFn = func(g *gauge) {
+			s.gaugeChangeNotifyCh <- g
+		}
 	}
 
-	g := newGauge(cachedGauge)
+	g := newGauge(cachedGauge, changeNotifyFn)
 	s.gauges[name] = g
 	s.gaugesSlice = append(s.gaugesSlice, g)
 

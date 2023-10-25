@@ -84,7 +84,7 @@ func (r *statsTestReporter) Capabilities() Capabilities {
 func (r *statsTestReporter) Flush() {}
 
 func TestCounter(t *testing.T) {
-	counter := newCounter(nil)
+	counter := newCounter(nil, nil)
 	r := newStatsTestReporter()
 
 	counter.Inc(1)
@@ -101,7 +101,7 @@ func TestCounter(t *testing.T) {
 }
 
 func TestGauge(t *testing.T) {
-	gauge := newGauge(nil)
+	gauge := newGauge(nil, nil)
 	r := newStatsTestReporter()
 
 	gauge.Update(42)
