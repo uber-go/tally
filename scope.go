@@ -105,8 +105,6 @@ type scope struct {
 
 	counterChangeNotifyCh chan *counter
 	gaugeChangeNotifyCh   chan *gauge
-	changedCounters       []*counter
-	changedGauges         []*gauge
 }
 
 // ScopeOptions is a set of options to construct a scope.
@@ -190,8 +188,6 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		root:                  true,
 		counterChangeNotifyCh: make(chan *counter, 1024),
 		gaugeChangeNotifyCh:   make(chan *gauge, 1024),
-		changedCounters:       make([]*counter, 0, _defaultInitialSliceSize),
-		changedGauges:         make([]*gauge, 0, _defaultInitialSliceSize),
 	}
 
 	// NB(r): Take a copy of the tags on creation
@@ -292,18 +288,21 @@ func (s *scope) reportRegistry() {
 
 func (s *scope) processLoop(interval time.Duration) {
 	ticker := time.NewTicker(interval)
+	counters := make([]*counter, 0, _defaultInitialSliceSize)
+	gauges := make([]*gauge, 0, _defaultInitialSliceSize)
+
 	defer ticker.Stop()
 	for {
 		select {
 		case c := <-s.counterChangeNotifyCh:
-			s.changedCounters = append(s.changedCounters, c)
+			counters = append(counters, c)
 		case g := <-s.gaugeChangeNotifyCh:
-			s.changedGauges = append(s.changedGauges, g)
+			gauges = append(gauges, g)
 		case <-ticker.C:
-			s.reportChanges(s.changedCounters, s.changedGauges)
+			s.reportChanges(counters, gauges)
 			// Reset the changed counters and gauges
-			s.changedCounters = s.changedCounters[:0]
-			s.changedGauges = s.changedGauges[:0]
+			counters = counters[:0]
+			gauges = gauges[:0]
 		default:
 			return
 		}
