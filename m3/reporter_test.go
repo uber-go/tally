@@ -597,15 +597,18 @@ func TestReporterCommmonTagsInternal(t *testing.T) {
 			for k, v := range internalTags {
 				require.True(t, tagEquals(metric.Tags, k, v))
 			}
+
+			// The following tags should be redacted.
+			require.True(t, tagEquals(metric.Tags, "host", DefaultTagRedactValue))
+			require.True(t, tagEquals(metric.Tags, "instance", DefaultTagRedactValue))
 		} else {
 			require.Equal(t, "testCounter1", metric.Name)
 			require.False(t, tagIncluded(metric.Tags, "internal1"))
 			require.False(t, tagIncluded(metric.Tags, "internal2"))
 		}
+
 		// The following tags should not be present as part of the individual metrics
 		// as they are common tags.
-		require.False(t, tagIncluded(metric.Tags, "host"))
-		require.False(t, tagIncluded(metric.Tags, "instance"))
 		require.False(t, tagIncluded(metric.Tags, "service"))
 	}
 	require.Equal(t, internalMetrics, numInternalMetricsActual)
