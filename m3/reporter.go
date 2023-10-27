@@ -66,6 +66,8 @@ const (
 	DefaultHistogramBucketIDName = "bucketid"
 	// DefaultHistogramBucketName is the default histogram bucket name tag name
 	DefaultHistogramBucketName = "bucket"
+	// DefaultTagRedactValue is the default tag value to use when redacting
+	DefaultTagRedactValue = "global"
 	// DefaultHistogramBucketTagPrecision is the default
 	// precision to use when formatting the metric tag
 	// with the histogram bucket bound values.
@@ -287,7 +289,9 @@ func NewReporter(opts Options) (Reporter, error) {
 	}
 
 	internalTags := map[string]string{
-		"version": tally.Version,
+		"version":  tally.Version,
+		"host":     DefaultTagRedactValue,
+		"instance": DefaultTagRedactValue,
 	}
 
 	for k, v := range opts.InternalTags {
