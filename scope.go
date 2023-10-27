@@ -300,6 +300,7 @@ func (s *scope) processLoop(interval time.Duration) {
 			gauges = append(gauges, g)
 		case <-ticker.C:
 			s.reportChanges(counters, gauges)
+			s.cachedReporter.Flush()
 			// Reset the changed counters and gauges
 			counters = counters[:0]
 			gauges = gauges[:0]
