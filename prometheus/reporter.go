@@ -21,15 +21,17 @@
 package prometheus
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
 	prom "github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	tally "github.com/uber-go/tally/v4"
+
+	"github.com/uber-go/tally/v4"
 )
 
 const (
@@ -295,11 +297,11 @@ func NewReporter(opts Options) Reporter {
 			//      this message as a concrete error type (it uses fmt.Errorf),
 			//      we need to check the error message.
 			if strings.Contains(err.Error(), "previously registered") {
-				err = errors.WithMessagef(
-					err,
+				err = fmt.Errorf(
 					"potential tally.Scope() vs Prometheus usage contract mismatch: "+
 						"if this occurs after using Scope.Tagged(), different metric "+
-						"names must be used than were registered with the parent scope",
+						"names must be used than were registered with the parent scope: %w",
+					err,
 				)
 			}
 

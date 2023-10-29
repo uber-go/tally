@@ -21,6 +21,7 @@
 package m3
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -31,14 +32,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
-	tally "github.com/uber-go/tally/v4"
+	"go.uber.org/atomic"
+
+	"github.com/uber-go/tally/v4"
 	"github.com/uber-go/tally/v4/internal/cache"
 	customtransport "github.com/uber-go/tally/v4/m3/customtransports"
 	m3thrift "github.com/uber-go/tally/v4/m3/thrift/v2"
 	"github.com/uber-go/tally/v4/m3/thriftudp"
 	"github.com/uber-go/tally/v4/thirdparty/github.com/apache/thrift/lib/go/thrift"
-	"go.uber.org/atomic"
 )
 
 // Protocol describes a M3 thrift transport protocol.
@@ -223,7 +224,7 @@ func NewReporter(opts Options) (Reporter, error) {
 		if opts.CommonTags[HostTag] == "" {
 			hostname, err := os.Hostname()
 			if err != nil {
-				return nil, errors.WithMessage(err, "error resolving host tag")
+				return nil, fmt.Errorf("error resolving host tag: %w", err)
 			}
 			tagm[HostTag] = hostname
 		}
@@ -246,10 +247,7 @@ func NewReporter(opts Options) (Reporter, error) {
 	)
 
 	if err := batch.Write(proto); err != nil {
-		return nil, errors.WithMessage(
-			err,
-			"failed to write to proto for size calculation",
-		)
+		return nil, fmt.Errorf("failed to write to proto for size calculation: %w", err)
 	}
 
 	resourcePool.releaseMetricSlice(batch.Metrics)
