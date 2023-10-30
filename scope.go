@@ -302,7 +302,16 @@ func (s *scope) processLoop(interval time.Duration) {
 			s.reportChanges(counters, gauges)
 			s.cachedReporter.Flush()
 			// Reset the changed counters and gauges
+			var zeroCounter *counter
+			for i := range counters {
+				counters[i] = zeroCounter
+			}
 			counters = counters[:0]
+
+			var zeroGauge *gauge
+			for i := range gauges {
+				gauges[i] = zeroGauge
+			}
 			gauges = gauges[:0]
 		default:
 			return
