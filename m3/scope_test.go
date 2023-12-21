@@ -50,10 +50,10 @@ func newTestReporterScope(
 	require.NoError(t, err)
 
 	scope, closer := tally.NewRootScope(tally.ScopeOptions{
-		Prefix:         scopePrefix,
-		Tags:           scopeTags,
-		CachedReporter: r,
-		MetricsOption:  tally.SendInternalMetrics,
+		Prefix:                 scopePrefix,
+		Tags:                   scopeTags,
+		CachedReporter:         r,
+		OmitCardinalityMetrics: false,
 	}, shortInterval)
 
 	return r, scope, func() {
