@@ -36,7 +36,7 @@ var (
 	counterCardinalityName   = "tally.internal.counter_cardinality"
 	gaugeCardinalityName     = "tally.internal.gauge_cardinality"
 	histogramCardinalityName = "tally.internal.histogram_cardinality"
-	scopeCardinalityName     = "tally.internal.scope_cardinality"
+	scopeCardinalityName     = "tally.internal.num_active_scopes"
 )
 
 const (
