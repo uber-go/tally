@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Uber Technologies, Inc.
+// Copyright (c) 2024 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@ import (
 )
 
 var (
-	numInternalMetrics = 3
+	numInternalMetrics = 4
 )
 
 func TestVerifyCachedTaggedScopesAlloc(t *testing.T) {
@@ -53,21 +53,49 @@ func TestVerifyCachedTaggedScopesAlloc(t *testing.T) {
 	assert.True(t, allocs <= expected, "the cached tagged scopes should allocate at most %.0f allocations, but did allocate %.0f", expected, allocs)
 }
 
+func TestVerifyOmitCardinalityMetricsTags(t *testing.T) {
+	r := newTestStatsReporter()
+	_, closer := NewRootScope(ScopeOptions{
+		Reporter:               r,
+		OmitCardinalityMetrics: false,
+		CardinalityMetricsTags: map[string]string{
+			"cardinality_tag_key": "cardinality_tag_value",
+		},
+	}, 0)
+	wantOmitCardinalityMetricsTags := map[string]string{
+		"cardinality_tag_key": "cardinality_tag_value",
+		"version":             Version,
+		"host":                "global",
+		"instance":            "global",
+	}
+
+	r.gg.Add(numInternalMetrics)
+	closer.Close()
+	r.WaitAll()
+
+	assert.NotNil(t, r.gauges[counterCardinalityName], "counter cardinality should not be nil")
+	assert.Equal(
+		t, wantOmitCardinalityMetricsTags, r.gauges[counterCardinalityName].tags, "expected tags %v, got tags %v",
+		wantOmitCardinalityMetricsTags, r.gauges[counterCardinalityName].tags,
+	)
+}
+
 func TestNewTestStatsReporterOneScope(t *testing.T) {
 	r := newTestStatsReporter()
-	root, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: SendInternalMetrics}, 0)
+	root, closer := NewRootScope(ScopeOptions{Reporter: r, OmitCardinalityMetrics: false}, 0)
 	s := root.(*scope)
 
 	numFakeCounters := 3
 	numFakeGauges := 5
 	numFakeHistograms := 11
+	numScopes := 1
 
-	r.cg.Add(numFakeCounters + numInternalMetrics)
+	r.cg.Add(numFakeCounters)
 	for c := 1; c <= numFakeCounters; c++ {
 		s.Counter(fmt.Sprintf("counter-%d", c)).Inc(int64(c))
 	}
 
-	r.gg.Add(numFakeGauges)
+	r.gg.Add(numFakeGauges + numInternalMetrics)
 	for g := 1; g <= numFakeGauges; g++ {
 		s.Gauge(fmt.Sprintf("gauge_%d", g)).Update(float64(g))
 	}
@@ -80,35 +108,41 @@ func TestNewTestStatsReporterOneScope(t *testing.T) {
 	closer.Close()
 	r.WaitAll()
 
-	assert.NotNil(t, r.counters[counterCardinalityName], "counter cardinality should not be nil")
+	assert.NotNil(t, r.gauges[counterCardinalityName], "counter cardinality should not be nil")
 	assert.Equal(
-		t, int64(numFakeCounters), r.counters[counterCardinalityName].val, "expected %d counters, got %d counters",
-		numFakeCounters, r.counters[counterCardinalityName].val,
+		t, numFakeCounters, int(r.gauges[counterCardinalityName].val), "expected %d counters, got %d counters",
+		numFakeCounters, r.gauges[counterCardinalityName].val,
 	)
 
-	assert.NotNil(t, r.counters[gaugeCardinalityName], "gauge cardinality should not be nil")
+	assert.NotNil(t, r.gauges[gaugeCardinalityName], "gauge cardinality should not be nil")
 	assert.Equal(
-		t, int64(numFakeGauges), r.counters[gaugeCardinalityName].val, "expected %d gauges, got %d gauges",
-		numFakeGauges, r.counters[gaugeCardinalityName].val,
+		t, numFakeGauges, int(r.gauges[gaugeCardinalityName].val), "expected %d gauges, got %d gauges",
+		numFakeGauges, r.gauges[gaugeCardinalityName].val,
 	)
 
-	assert.NotNil(t, r.counters[histogramCardinalityName], "histogram cardinality should not be nil")
+	assert.NotNil(t, r.gauges[histogramCardinalityName], "histogram cardinality should not be nil")
 	assert.Equal(
-		t, int64(numFakeHistograms), r.counters[histogramCardinalityName].val,
-		"expected %d histograms, got %d histograms", numFakeHistograms, r.counters[histogramCardinalityName].val,
+		t, numFakeHistograms, int(r.gauges[histogramCardinalityName].val),
+		"expected %d histograms, got %d histograms", numFakeHistograms, r.gauges[histogramCardinalityName].val,
+	)
+
+	assert.NotNil(t, r.gauges[scopeCardinalityName], "scope cardinality should not be nil")
+	assert.Equal(
+		t, numScopes, int(r.gauges[scopeCardinalityName].val), "expected %d scopes, got %d scopes",
+		numScopes, r.gauges[scopeCardinalityName].val,
 	)
 }
 
 func TestNewTestStatsReporterManyScopes(t *testing.T) {
 	r := newTestStatsReporter()
-	root, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: SendInternalMetrics}, 0)
-	wantCounters, wantGauges, wantHistograms := int64(3), int64(2), int64(1)
+	root, closer := NewRootScope(ScopeOptions{Reporter: r, OmitCardinalityMetrics: false}, 0)
+	wantCounters, wantGauges, wantHistograms, wantScopes := 3, 2, 1, 2
 
 	s := root.(*scope)
-	r.cg.Add(2 + numInternalMetrics)
+	r.cg.Add(2)
 	s.Counter("counter-foo").Inc(1)
 	s.Counter("counter-bar").Inc(2)
-	r.gg.Add(1)
+	r.gg.Add(1 + numInternalMetrics)
 	s.Gauge("gauge-foo").Update(3)
 	r.hg.Add(1)
 	s.Histogram("histogram-foo", MustMakeLinearValueBuckets(0, 1, 10)).RecordValue(4)
@@ -122,22 +156,28 @@ func TestNewTestStatsReporterManyScopes(t *testing.T) {
 	closer.Close()
 	r.WaitAll()
 
-	assert.NotNil(t, r.counters[counterCardinalityName], "counter cardinality should not be nil")
+	assert.NotNil(t, r.gauges[counterCardinalityName], "counter cardinality should not be nil")
 	assert.Equal(
-		t, wantCounters, r.counters[counterCardinalityName].val, "expected %d counters, got %d counters", wantCounters,
-		r.counters[counterCardinalityName].val,
+		t, wantCounters, int(r.gauges[counterCardinalityName].val), "expected %d counters, got %d counters", wantCounters,
+		r.gauges[counterCardinalityName].val,
 	)
 
-	assert.NotNil(t, r.counters[gaugeCardinalityName], "gauge cardinality should not be nil")
+	assert.NotNil(t, r.gauges[gaugeCardinalityName], "gauge cardinality should not be nil")
 	assert.Equal(
-		t, wantGauges, r.counters[gaugeCardinalityName].val, "expected %d counters, got %d gauges", wantGauges,
-		r.counters[gaugeCardinalityName].val,
+		t, wantGauges, int(r.gauges[gaugeCardinalityName].val), "expected %d gauges, got %d gauges", wantGauges,
+		r.gauges[gaugeCardinalityName].val,
 	)
 
-	assert.NotNil(t, r.counters[histogramCardinalityName], "histogram cardinality should not be nil")
+	assert.NotNil(t, r.gauges[histogramCardinalityName], "histogram cardinality should not be nil")
 	assert.Equal(
-		t, wantHistograms, r.counters[histogramCardinalityName].val, "expected %d counters, got %d histograms",
-		wantHistograms, r.counters[histogramCardinalityName].val,
+		t, wantHistograms, int(r.gauges[histogramCardinalityName].val), "expected %d histograms, got %d histograms",
+		wantHistograms, r.gauges[histogramCardinalityName].val,
+	)
+
+	assert.NotNil(t, r.gauges[scopeCardinalityName], "scope cardinality should not be nil")
+	assert.Equal(
+		t, wantScopes, int(r.gauges[scopeCardinalityName].val), "expected %d scopes, got %d scopes",
+		wantScopes, r.gauges[scopeCardinalityName].val,
 	)
 }
 

@@ -360,7 +360,7 @@ func (r *testStatsReporter) Flush() {
 
 func TestWriteTimerImmediately(t *testing.T) {
 	r := newTestStatsReporter()
-	s, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, 0)
+	s, closer := NewRootScope(ScopeOptions{Reporter: r, OmitCardinalityMetrics: true}, 0)
 	defer closer.Close()
 	r.tg.Add(1)
 	s.Timer("ticky").Record(time.Millisecond * 175)
@@ -369,7 +369,7 @@ func TestWriteTimerImmediately(t *testing.T) {
 
 func TestWriteTimerClosureImmediately(t *testing.T) {
 	r := newTestStatsReporter()
-	s, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, 0)
+	s, closer := NewRootScope(ScopeOptions{Reporter: r, OmitCardinalityMetrics: true}, 0)
 	defer closer.Close()
 	r.tg.Add(1)
 	tm := s.Timer("ticky")
@@ -379,7 +379,7 @@ func TestWriteTimerClosureImmediately(t *testing.T) {
 
 func TestWriteReportLoop(t *testing.T) {
 	r := newTestStatsReporter()
-	s, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, 10)
+	s, closer := NewRootScope(ScopeOptions{Reporter: r, OmitCardinalityMetrics: true}, 10)
 	defer closer.Close()
 
 	r.cg.Add(1)
@@ -398,7 +398,7 @@ func TestWriteReportLoop(t *testing.T) {
 func TestWriteReportLoopDefaultInterval(t *testing.T) {
 	r := newTestStatsReporter()
 	s, closer := NewRootScopeWithDefaultInterval(
-		ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics},
+		ScopeOptions{Reporter: r, OmitCardinalityMetrics: true},
 	)
 	defer closer.Close()
 
@@ -417,7 +417,7 @@ func TestWriteReportLoopDefaultInterval(t *testing.T) {
 
 func TestCachedReportLoop(t *testing.T) {
 	r := newTestStatsReporter()
-	s, closer := NewRootScope(ScopeOptions{CachedReporter: r, MetricsOption: OmitInternalMetrics}, 10)
+	s, closer := NewRootScope(ScopeOptions{CachedReporter: r, OmitCardinalityMetrics: true}, 10)
 	defer closer.Close()
 
 	r.cg.Add(1)
@@ -435,9 +435,9 @@ func TestCachedReportLoop(t *testing.T) {
 func testReportLoopFlushOnce(t *testing.T, cached bool) {
 	r := newTestStatsReporter()
 
-	scopeOpts := ScopeOptions{CachedReporter: r, MetricsOption: OmitInternalMetrics}
+	scopeOpts := ScopeOptions{CachedReporter: r, OmitCardinalityMetrics: true}
 	if !cached {
-		scopeOpts = ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}
+		scopeOpts = ScopeOptions{Reporter: r, OmitCardinalityMetrics: true}
 	}
 
 	s, closer := NewRootScope(scopeOpts, 10*time.Minute)
@@ -475,7 +475,7 @@ func TestReporterFlushOnce(t *testing.T) {
 func TestWriteOnce(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, 0)
+	root, closer := NewRootScope(ScopeOptions{Reporter: r, OmitCardinalityMetrics: true}, 0)
 	defer closer.Close()
 
 	s := root.(*scope)
@@ -546,10 +546,10 @@ func TestHistogramSharedBucketMetrics(t *testing.T) {
 	var (
 		r     = newTestStatsReporter()
 		scope = newRootScope(ScopeOptions{
-			Prefix:         "",
-			Tags:           nil,
-			CachedReporter: r,
-			MetricsOption:  OmitInternalMetrics,
+			Prefix:                 "",
+			Tags:                   nil,
+			CachedReporter:         r,
+			OmitCardinalityMetrics: true,
 		}, 0)
 		builder = func(s Scope) func(map[string]string) {
 			buckets := MustMakeLinearValueBuckets(10, 10, 3)
@@ -620,10 +620,10 @@ func TestConcurrentUpdates(t *testing.T) {
 		counterIncrs     = 5000
 		rs               = newRootScope(
 			ScopeOptions{
-				Prefix:         "",
-				Tags:           nil,
-				CachedReporter: r,
-				MetricsOption:  OmitInternalMetrics,
+				Prefix:                 "",
+				Tags:                   nil,
+				CachedReporter:         r,
+				OmitCardinalityMetrics: true,
 			}, 0,
 		)
 		scopes   = []Scope{rs}
@@ -669,9 +669,9 @@ func TestCounterSanitized(t *testing.T) {
 	r := newTestStatsReporter()
 
 	root, closer := NewRootScope(ScopeOptions{
-		Reporter:        r,
-		SanitizeOptions: &alphanumericSanitizerOpts,
-		MetricsOption:   OmitInternalMetrics,
+		Reporter:               r,
+		SanitizeOptions:        &alphanumericSanitizerOpts,
+		OmitCardinalityMetrics: true,
 	}, 0)
 	defer closer.Close()
 
@@ -727,7 +727,7 @@ func TestCounterSanitized(t *testing.T) {
 func TestCachedReporter(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, closer := NewRootScope(ScopeOptions{CachedReporter: r, MetricsOption: OmitInternalMetrics}, 0)
+	root, closer := NewRootScope(ScopeOptions{CachedReporter: r, OmitCardinalityMetrics: true}, 0)
 	defer closer.Close()
 
 	s := root.(*scope)
@@ -764,7 +764,7 @@ func TestCachedReporter(t *testing.T) {
 func TestRootScopeWithoutPrefix(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, 0)
+	root, closer := NewRootScope(ScopeOptions{Reporter: r, OmitCardinalityMetrics: true}, 0)
 	defer closer.Close()
 
 	s := root.(*scope)
@@ -799,7 +799,7 @@ func TestRootScopeWithPrefix(t *testing.T) {
 	r := newTestStatsReporter()
 
 	root, closer := NewRootScope(
-		ScopeOptions{Prefix: "foo", Reporter: r, MetricsOption: OmitInternalMetrics}, 0,
+		ScopeOptions{Prefix: "foo", Reporter: r, OmitCardinalityMetrics: true}, 0,
 	)
 	defer closer.Close()
 
@@ -836,7 +836,7 @@ func TestRootScopeWithDifferentSeparator(t *testing.T) {
 
 	root, closer := NewRootScope(
 		ScopeOptions{
-			Prefix: "foo", Separator: "_", Reporter: r, MetricsOption: OmitInternalMetrics,
+			Prefix: "foo", Separator: "_", Reporter: r, OmitCardinalityMetrics: true,
 		}, 0,
 	)
 	defer closer.Close()
@@ -873,7 +873,7 @@ func TestSubScope(t *testing.T) {
 	r := newTestStatsReporter()
 
 	root, closer := NewRootScope(
-		ScopeOptions{Prefix: "foo", Reporter: r, MetricsOption: OmitInternalMetrics}, 0,
+		ScopeOptions{Prefix: "foo", Reporter: r, OmitCardinalityMetrics: true}, 0,
 	)
 	defer closer.Close()
 
@@ -916,7 +916,7 @@ func TestSubScope(t *testing.T) {
 func TestSubScopeClose(t *testing.T) {
 	r := newTestStatsReporter()
 
-	rs, closer := NewRootScope(ScopeOptions{Prefix: "foo", Reporter: r, MetricsOption: OmitInternalMetrics}, 0)
+	rs, closer := NewRootScope(ScopeOptions{Prefix: "foo", Reporter: r, OmitCardinalityMetrics: true}, 0)
 	// defer closer.Close()
 	_ = closer
 
@@ -1009,7 +1009,7 @@ func TestTaggedSubScope(t *testing.T) {
 	ts := map[string]string{"env": "test"}
 	root, closer := NewRootScope(
 		ScopeOptions{
-			Prefix: "foo", Tags: ts, Reporter: r, MetricsOption: OmitInternalMetrics,
+			Prefix: "foo", Tags: ts, Reporter: r, OmitCardinalityMetrics: true,
 		}, 0,
 	)
 	defer closer.Close()
@@ -1067,11 +1067,11 @@ func TestTaggedSanitizedSubScope(t *testing.T) {
 
 	ts := map[string]string{"env": "test:env"}
 	root, closer := NewRootScope(ScopeOptions{
-		Prefix:          "foo",
-		Tags:            ts,
-		Reporter:        r,
-		SanitizeOptions: &alphanumericSanitizerOpts,
-		MetricsOption:   OmitInternalMetrics,
+		Prefix:                 "foo",
+		Tags:                   ts,
+		Reporter:               r,
+		SanitizeOptions:        &alphanumericSanitizerOpts,
+		OmitCardinalityMetrics: true,
 	}, 0)
 	defer closer.Close()
 	s := root.(*scope)
@@ -1104,7 +1104,7 @@ func TestTaggedExistingReturnsSameScope(t *testing.T) {
 	} {
 		root, closer := NewRootScope(
 			ScopeOptions{
-				Prefix: "foo", Tags: initialTags, Reporter: r, MetricsOption: OmitInternalMetrics,
+				Prefix: "foo", Tags: initialTags, Reporter: r, OmitCardinalityMetrics: true,
 			}, 0,
 		)
 		defer closer.Close()
@@ -1224,7 +1224,7 @@ func TestSnapshotConcurrent(t *testing.T) {
 
 func TestCapabilities(t *testing.T) {
 	r := newTestStatsReporter()
-	s, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, 0)
+	s, closer := NewRootScope(ScopeOptions{Reporter: r, OmitCardinalityMetrics: true}, 0)
 	defer closer.Close()
 	assert.True(t, s.Capabilities().Reporting())
 	assert.False(t, s.Capabilities().Tagging())
@@ -1252,8 +1252,8 @@ func TestScopeDefaultBuckets(t *testing.T) {
 			90 * time.Millisecond,
 			120 * time.Millisecond,
 		},
-		Reporter:      r,
-		MetricsOption: OmitInternalMetrics,
+		Reporter:               r,
+		OmitCardinalityMetrics: true,
 	}, 0)
 	defer closer.Close()
 
@@ -1284,7 +1284,7 @@ func newTestMets(scope Scope) testMets {
 func TestReturnByValue(t *testing.T) {
 	r := newTestStatsReporter()
 
-	root, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, 0)
+	root, closer := NewRootScope(ScopeOptions{Reporter: r, OmitCardinalityMetrics: true}, 0)
 	defer closer.Close()
 
 	s := root.(*scope)
@@ -1301,7 +1301,7 @@ func TestReturnByValue(t *testing.T) {
 
 func TestScopeAvoidReportLoopRunOnClose(t *testing.T) {
 	r := newTestStatsReporter()
-	root, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, 0)
+	root, closer := NewRootScope(ScopeOptions{Reporter: r, OmitCardinalityMetrics: true}, 0)
 
 	s := root.(*scope)
 	s.reportLoopRun()
@@ -1316,7 +1316,7 @@ func TestScopeAvoidReportLoopRunOnClose(t *testing.T) {
 
 func TestScopeFlushOnClose(t *testing.T) {
 	r := newTestStatsReporter()
-	root, closer := NewRootScope(ScopeOptions{Reporter: r, MetricsOption: OmitInternalMetrics}, time.Hour)
+	root, closer := NewRootScope(ScopeOptions{Reporter: r, OmitCardinalityMetrics: true}, time.Hour)
 
 	r.cg.Add(1)
 	root.Counter("foo").Inc(1)
