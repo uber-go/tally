@@ -55,7 +55,7 @@ var defaultCommonTags = map[string]string{"env": "test", "host": "test"}
 var protocols = []Protocol{Compact, Binary}
 
 const internalMetrics = 5    // Additional metrics the reporter sends in a batch - use this, not a magic number.
-const cardinalityMetrics = 3 // Additional metrics emitted by the scope registry.
+const cardinalityMetrics = 4 // Additional metrics emitted by the scope registry.
 
 // TestReporter tests the reporter works as expected with both compact and binary protocols
 func TestReporter(t *testing.T) {
@@ -599,8 +599,8 @@ func TestReporterCommmonTagsInternal(t *testing.T) {
 			}
 
 			// The following tags should be redacted.
-			require.True(t, tagEquals(metric.Tags, "host", DefaultTagRedactValue))
-			require.True(t, tagEquals(metric.Tags, "instance", DefaultTagRedactValue))
+			require.True(t, tagEquals(metric.Tags, "host", tally.DefaultTagRedactValue))
+			require.True(t, tagEquals(metric.Tags, "instance", tally.DefaultTagRedactValue))
 		} else {
 			require.Equal(t, "testCounter1", metric.Name)
 			require.False(t, tagIncluded(metric.Tags, "internal1"))
