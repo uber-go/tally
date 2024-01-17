@@ -55,6 +55,7 @@ func main() {
 
 	scope, closer := tally.NewRootScope(tally.ScopeOptions{
 		CachedReporter: r,
+		OmitCardinalityMetrics: true,
 	}, 5 * time.Second)
 	defer closer.Close()
 
