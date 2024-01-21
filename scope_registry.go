@@ -225,6 +225,9 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		timers:          make(map[string]*timer),
 		bucketCache:     parent.bucketCache,
 		done:            make(chan struct{}),
+
+		counterChangeNotifyCh: parent.counterChangeNotifyCh,
+		gaugeChangeNotifyCh:   parent.gaugeChangeNotifyCh,
 	}
 	subscopeBucket.s[key] = subscope
 	if _, ok := r.lockedLookup(subscopeBucket, preSanitizeKey); !ok {

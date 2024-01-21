@@ -60,17 +60,30 @@ func (c *capabilities) Tagging() bool {
 }
 
 type counter struct {
-	prev        int64
-	curr        int64
-	cachedCount CachedCount
+	prev           int64
+	curr           int64
+	updated        uint64
+	cachedCount    CachedCount
+	changeNotifyFn func(c *counter)
 }
 
-func newCounter(cachedCount CachedCount) *counter {
-	return &counter{cachedCount: cachedCount}
+func newCounter(
+	cachedCount CachedCount,
+	changeNotifyFn func(c *counter),
+) *counter {
+	return &counter{
+		cachedCount:    cachedCount,
+		changeNotifyFn: changeNotifyFn,
+	}
 }
 
 func (c *counter) Inc(v int64) {
 	atomic.AddInt64(&c.curr, v)
+	if c.changeNotifyFn != nil {
+		if atomic.SwapUint64(&c.updated, 1) == 0 {
+			c.changeNotifyFn(c)
+		}
+	}
 }
 
 func (c *counter) value() int64 {
@@ -99,7 +112,9 @@ func (c *counter) cachedReport() {
 		return
 	}
 
-	c.cachedCount.ReportCount(delta)
+	if atomic.SwapUint64(&c.updated, 0) == 1 {
+		c.cachedCount.ReportCount(delta)
+	}
 }
 
 func (c *counter) snapshot() int64 {
@@ -107,18 +122,29 @@ func (c *counter) snapshot() int64 {
 }
 
 type gauge struct {
-	updated     uint64
-	curr        uint64
-	cachedGauge CachedGauge
+	updated        uint64
+	curr           uint64
+	cachedGauge    CachedGauge
+	changeNotifyFn func(g *gauge)
 }
 
-func newGauge(cachedGauge CachedGauge) *gauge {
-	return &gauge{cachedGauge: cachedGauge}
+func newGauge(
+	cachedGauge CachedGauge,
+	changeNotifyFn func(g *gauge),
+) *gauge {
+	return &gauge{
+		cachedGauge:    cachedGauge,
+		changeNotifyFn: changeNotifyFn,
+	}
 }
 
 func (g *gauge) Update(v float64) {
 	atomic.StoreUint64(&g.curr, math.Float64bits(v))
-	atomic.StoreUint64(&g.updated, 1)
+	if atomic.SwapUint64(&g.updated, 1) == 0 {
+		if g.changeNotifyFn != nil {
+			g.changeNotifyFn(g)
+		}
+	}
 }
 
 func (g *gauge) value() float64 {
@@ -297,7 +323,7 @@ func newHistogram(
 	}
 
 	for i := range h.samples {
-		h.samples[i].counter = newCounter(nil)
+		h.samples[i].counter = newCounter(nil, nil)
 
 		if cachedHistogram != nil {
 			switch htype {
