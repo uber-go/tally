@@ -43,6 +43,7 @@ func TestConfigSimple(t *testing.T) {
 	assert.True(t, ok)
 	assert.True(t, tagEquals(reporter.commonTags, "service", "my-service"))
 	assert.True(t, tagEquals(reporter.commonTags, "env", "test"))
+	assert.Equal(t, 0, len(c.InternalTags))
 }
 
 func TestConfigMulti(t *testing.T) {

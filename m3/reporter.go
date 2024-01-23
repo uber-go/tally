@@ -66,6 +66,8 @@ const (
 	DefaultHistogramBucketIDName = "bucketid"
 	// DefaultHistogramBucketName is the default histogram bucket name tag name
 	DefaultHistogramBucketName = "bucket"
+	// DefaultTagRedactValue is the default tag value to use when redacting
+	DefaultTagRedactValue = "global"
 	// DefaultHistogramBucketTagPrecision is the default
 	// precision to use when formatting the metric tag
 	// with the histogram bucket bound values.
@@ -149,6 +151,7 @@ type Options struct {
 	HistogramBucketIDName       string
 	HistogramBucketName         string
 	HistogramBucketTagPrecision uint
+	InternalTags                map[string]string
 }
 
 // NewReporter creates a new M3 reporter.
@@ -286,8 +289,15 @@ func NewReporter(opts Options) (Reporter, error) {
 	}
 
 	internalTags := map[string]string{
-		"version": tally.Version,
+		"version":  tally.Version,
+		"host":     DefaultTagRedactValue,
+		"instance": DefaultTagRedactValue,
 	}
+
+	for k, v := range opts.InternalTags {
+		internalTags[k] = v
+	}
+
 	r.batchSizeHistogram = r.AllocateHistogram("tally.internal.batch-size", internalTags, buckets)
 	r.numBatchesCounter = r.AllocateCounter("tally.internal.num-batches", internalTags)
 	r.numMetricsCounter = r.AllocateCounter("tally.internal.num-metrics", internalTags)

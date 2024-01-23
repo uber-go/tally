@@ -39,7 +39,8 @@ const (
 	// OmitInternalMetrics turns off internal metrics submission.
 	OmitInternalMetrics
 
-	_defaultInitialSliceSize = 16
+	_defaultInitialSliceSize  = 16
+	_defaultReportingInterval = 2 * time.Second
 )
 
 var (
@@ -101,19 +102,22 @@ type scope struct {
 	done        chan struct{}
 	wg          sync.WaitGroup
 	root        bool
+	testScope   bool
 }
 
 // ScopeOptions is a set of options to construct a scope.
 type ScopeOptions struct {
-	Tags               map[string]string
-	Prefix             string
-	Reporter           StatsReporter
-	CachedReporter     CachedStatsReporter
-	Separator          string
-	DefaultBuckets     Buckets
-	SanitizeOptions    *SanitizeOptions
+	Tags            map[string]string
+	Prefix          string
+	Reporter        StatsReporter
+	CachedReporter  CachedStatsReporter
+	Separator       string
+	DefaultBuckets  Buckets
+	SanitizeOptions *SanitizeOptions
+	MetricsOption   InternalMetricOption
+
+	testScope          bool
 	registryShardCount uint
-	MetricsOption      InternalMetricOption
 }
 
 // NewRootScope creates a new root Scope with a set of options and
@@ -124,6 +128,12 @@ func NewRootScope(opts ScopeOptions, interval time.Duration) (Scope, io.Closer) 
 	return s, s
 }
 
+// NewRootScopeWithDefaultInterval invokes NewRootScope with the default
+// reporting interval of 2s.
+func NewRootScopeWithDefaultInterval(opts ScopeOptions) (Scope, io.Closer) {
+	return NewRootScope(opts, _defaultReportingInterval)
+}
+
 // NewTestScope creates a new Scope without a stats reporter with the
 // given prefix and adds the ability to take snapshots of metrics emitted
 // to it.
@@ -131,7 +141,11 @@ func NewTestScope(
 	prefix string,
 	tags map[string]string,
 ) TestScope {
-	return newRootScope(ScopeOptions{Prefix: prefix, Tags: tags}, 0)
+	return newRootScope(ScopeOptions{
+		Prefix:    prefix,
+		Tags:      tags,
+		testScope: true,
+	}, 0)
 }
 
 func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
@@ -176,6 +190,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		separator:       sanitizer.Name(opts.Separator),
 		timers:          make(map[string]*timer),
 		root:            true,
+		testScope:       opts.testScope,
 	}
 
 	// NB(r): Take a copy of the tags on creation
