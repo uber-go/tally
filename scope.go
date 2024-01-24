@@ -97,13 +97,13 @@ type scope struct {
 
 // ScopeOptions is a set of options to construct a scope.
 type ScopeOptions struct {
-	Tags            map[string]string
-	Prefix          string
-	Reporter        StatsReporter
-	CachedReporter  CachedStatsReporter
-	Separator       string
-	DefaultBuckets  Buckets
-	SanitizeOptions *SanitizeOptions
+	Tags                   map[string]string
+	Prefix                 string
+	Reporter               StatsReporter
+	CachedReporter         CachedStatsReporter
+	Separator              string
+	DefaultBuckets         Buckets
+	SanitizeOptions        *SanitizeOptions
 	OmitCardinalityMetrics bool
 	CardinalityMetricsTags map[string]string
 
