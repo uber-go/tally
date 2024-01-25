@@ -49,7 +49,7 @@ func TestVerifyCachedTaggedScopesAlloc(t *testing.T) {
 			"qux": "quux",
 		})
 	})
-	expected := 2.0
+	expected := 3.0
 	assert.True(t, allocs <= expected, "the cached tagged scopes should allocate at most %.0f allocations, but did allocate %.0f", expected, allocs)
 }
 

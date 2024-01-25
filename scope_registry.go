@@ -181,23 +181,56 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 	// as the memory layout of []byte is a superset of string the below casting is safe and does not do any alloc
 	// However it cannot be used outside of the stack; a heap allocation is needed if that string needs to be stored
 	// in the map as a key
-	if s, ok := r.lockedLookup(subscopeBucket, *(*string)(unsafe.Pointer(&buf))); ok {
-		subscopeBucket.mu.RUnlock()
-		return s
+	var (
+		unsanitizedKey = *(*string)(unsafe.Pointer(&buf))
+		sanitizedKey   string
+	)
+
+	s, ok := r.lockedLookup(subscopeBucket, unsanitizedKey)
+	if ok {
+		// If this subscope isn't closed or is a test scope, return it.
+		// Otherwise, report it immediately and delete it so that a new
+		// (functional) scope can be returned instead.
+		if !s.closed.Load() || s.testScope {
+			subscopeBucket.mu.RUnlock()
+			return s
+		}
+
+		switch {
+		case parent.reporter != nil:
+			s.report(parent.reporter)
+		case parent.cachedReporter != nil:
+			s.cachedReport()
+		}
 	}
+
+	tags = parent.copyAndSanitizeMap(tags)
+	sanitizedKey = scopeRegistryKey(prefix, parent.tags, tags)
+
+	// If a scope was found above but we didn't return, we need to remove the
+	// scope from both keys.
+	if ok {
+		r.removeWithRLock(subscopeBucket, unsanitizedKey)
+		r.removeWithRLock(subscopeBucket, sanitizedKey)
+		s.clearMetrics()
+	}
+
 	subscopeBucket.mu.RUnlock()
 
-	// heap allocating the buf as a string to keep the key in the subscopes map
-	preSanitizeKey := string(buf)
-	tags = parent.copyAndSanitizeMap(tags)
-	key := scopeRegistryKey(prefix, parent.tags, tags)
+	// Force-allocate the unsafe string as a safe string. Note that neither
+	// string(x) nor x+"" will have the desired effect (the former is a nop,
+	// and the latter will likely be elided), so append a new character and
+	// truncate instead.
+	//
+	// ref: https://go.dev/play/p/sxhExUKSxCw
+	unsanitizedKey = (unsanitizedKey + ".")[:len(unsanitizedKey)]
 
 	subscopeBucket.mu.Lock()
 	defer subscopeBucket.mu.Unlock()
 
-	if s, ok := r.lockedLookup(subscopeBucket, key); ok {
-		if _, ok = r.lockedLookup(subscopeBucket, preSanitizeKey); !ok {
-			subscopeBucket.s[preSanitizeKey] = s
+	if s, ok := r.lockedLookup(subscopeBucket, sanitizedKey); ok {
+		if _, ok = r.lockedLookup(subscopeBucket, unsanitizedKey); !ok {
+			subscopeBucket.s[unsanitizedKey] = s
 		}
 		return s
 	}
@@ -225,10 +258,11 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		timers:          make(map[string]*timer),
 		bucketCache:     parent.bucketCache,
 		done:            make(chan struct{}),
+		testScope:       parent.testScope,
 	}
-	subscopeBucket.s[key] = subscope
-	if _, ok := r.lockedLookup(subscopeBucket, preSanitizeKey); !ok {
-		subscopeBucket.s[preSanitizeKey] = subscope
+	subscopeBucket.s[sanitizedKey] = subscope
+	if _, ok := r.lockedLookup(subscopeBucket, unsanitizedKey); !ok {
+		subscopeBucket.s[unsanitizedKey] = subscope
 	}
 	return subscope
 }
