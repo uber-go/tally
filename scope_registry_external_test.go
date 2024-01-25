@@ -113,7 +113,8 @@ func TestNoDefunctSubscopes(t *testing.T) {
 		MinTimes(1)
 
 	root, _ := tally.NewRootScope(tally.ScopeOptions{
-		Reporter: mockreporter,
+		Reporter:               mockreporter,
+		OmitCardinalityMetrics: true,
 	}, time.Millisecond)
 
 	subscope := root.Tagged(tags)

@@ -104,9 +104,11 @@ type ScopeOptions struct {
 	Separator              string
 	DefaultBuckets         Buckets
 	SanitizeOptions        *SanitizeOptions
-	registryShardCount     uint
 	OmitCardinalityMetrics bool
 	CardinalityMetricsTags map[string]string
+
+	testScope          bool
+	registryShardCount uint
 }
 
 // NewRootScope creates a new root Scope with a set of options and
