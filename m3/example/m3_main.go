@@ -1,4 +1,4 @@
-// Copyright (c) 2021 Uber Technologies, Inc.
+// Copyright (c) 2024 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -87,7 +87,8 @@ func main() {
 	}
 
 	scope, closer := tally.NewRootScope(tally.ScopeOptions{
-		CachedReporter: r,
+		CachedReporter:         r,
+		CardinalityMetricsTags: cfg.M3.InternalTags,
 	}, 1*time.Second)
 
 	defer closer.Close()
