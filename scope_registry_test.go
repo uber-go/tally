@@ -221,3 +221,22 @@ func TestForEachScopeConcurrent(t *testing.T) {
 
 	<-done
 }
+
+func TestCachedReporterNoAllocOnOmitInternalMetrics(t *testing.T) {
+	r := newTestStatsReporter()
+	root, closer := NewRootScope(ScopeOptions{CachedReporter: r, OmitCardinalityMetrics: true}, 0)
+	wantGauges := 1
+
+	s := root.(*scope)
+
+	r.gg.Add(wantGauges)
+	s.Gauge("gauge-foo").Update(3)
+
+	closer.Close()
+	r.WaitAll()
+
+	assert.Equal(
+		t, wantGauges, len(r.gauges), "expected %d gauges, got %d gauges", wantGauges,
+		len(r.gauges),
+	)
+}
