@@ -309,6 +309,8 @@ func (r *scopeRegistry) reportInternalMetrics() {
 	scopes.Inc() // Account for root scope.
 	r.ForEachScope(
 		func(ss *scope) {
+			ss.cm.RLock()
+			defer ss.cm.RUnlock()
 			counterSliceLen, gaugeSliceLen, histogramSliceLen := int64(len(ss.countersSlice)), int64(len(ss.gaugesSlice)), int64(len(ss.histogramsSlice))
 			if ss.root { // Root scope is referenced across all buckets.
 				rootCounters.Store(counterSliceLen)
