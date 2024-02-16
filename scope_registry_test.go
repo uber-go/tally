@@ -221,3 +221,39 @@ func TestForEachScopeConcurrent(t *testing.T) {
 
 	<-done
 }
+
+func TestCachedReporterInternalMetricsAlloc(t *testing.T) {
+	tests := []struct {
+		name                   string
+		omitCardinalityMetrics bool
+		wantGauges             int
+	}{
+		{
+			name:                   "omit metrics",
+			omitCardinalityMetrics: true,
+			wantGauges:             1,
+		},
+		{
+			name:                   "include metrics",
+			omitCardinalityMetrics: false,
+			wantGauges:             1 + numInternalMetrics,
+		},
+	}
+
+	for _, tt := range tests {
+		r := newTestStatsReporter()
+		root, closer := NewRootScope(ScopeOptions{CachedReporter: r, OmitCardinalityMetrics: tt.omitCardinalityMetrics}, 0)
+		s := root.(*scope)
+
+		r.gg.Add(tt.wantGauges)
+		s.Gauge("gauge-foo").Update(3)
+
+		closer.Close()
+		r.WaitAll()
+
+		assert.Equal(
+			t, tt.wantGauges, len(r.gauges), "%n: expected %d gauges, got %d gauges", tt.name, tt.wantGauges,
+			len(r.gauges),
+		)
+	}
+}
