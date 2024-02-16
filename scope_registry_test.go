@@ -222,21 +222,38 @@ func TestForEachScopeConcurrent(t *testing.T) {
 	<-done
 }
 
-func TestCachedReporterNoAllocOnOmitInternalMetrics(t *testing.T) {
-	r := newTestStatsReporter()
-	root, closer := NewRootScope(ScopeOptions{CachedReporter: r, OmitCardinalityMetrics: true}, 0)
-	wantGauges := 1
+func TestCachedReporterInternalMetricsAlloc(t *testing.T) {
+	tests := []struct {
+		name                   string
+		omitCardinalityMetrics bool
+		wantGauges             int
+	}{
+		{
+			name:                   "omit metrics",
+			omitCardinalityMetrics: true,
+			wantGauges:             1,
+		},
+		{
+			name:                   "include metrics",
+			omitCardinalityMetrics: false,
+			wantGauges:             1 + numInternalMetrics,
+		},
+	}
 
-	s := root.(*scope)
+	for _, tt := range tests {
+		r := newTestStatsReporter()
+		root, closer := NewRootScope(ScopeOptions{CachedReporter: r, OmitCardinalityMetrics: tt.omitCardinalityMetrics}, 0)
+		s := root.(*scope)
 
-	r.gg.Add(wantGauges)
-	s.Gauge("gauge-foo").Update(3)
+		r.gg.Add(tt.wantGauges)
+		s.Gauge("gauge-foo").Update(3)
 
-	closer.Close()
-	r.WaitAll()
+		closer.Close()
+		r.WaitAll()
 
-	assert.Equal(
-		t, wantGauges, len(r.gauges), "expected %d gauges, got %d gauges", wantGauges,
-		len(r.gauges),
-	)
+		assert.Equal(
+			t, tt.wantGauges, len(r.gauges), "%n: expected %d gauges, got %d gauges", tt.name, tt.wantGauges,
+			len(r.gauges),
+		)
+	}
 }
