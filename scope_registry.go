@@ -103,7 +103,7 @@ func newScopeRegistryWithShardCount(
 		}
 		r.subscopes[i].s[scopeRegistryKey(root.prefix, root.tags)] = root
 	}
-	if r.root.cachedReporter != nil {
+	if r.root.cachedReporter != nil && !omitCardinalityMetrics {
 		r.cachedCounterCardinalityGauge = r.root.cachedReporter.AllocateGauge(r.sanitizedCounterCardinalityName, r.cardinalityMetricsTags)
 		r.cachedGaugeCardinalityGauge = r.root.cachedReporter.AllocateGauge(r.sanitizedGaugeCardinalityName, r.cardinalityMetricsTags)
 		r.cachedHistogramCardinalityGauge = r.root.cachedReporter.AllocateGauge(r.sanitizedHistogramCardinalityName, r.cardinalityMetricsTags)
