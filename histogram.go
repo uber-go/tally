@@ -373,7 +373,7 @@ func ExponentialDurationBuckets(start time.Duration, factor float64, n int) (Dur
 	return buckets, nil
 }
 
-// MustMakeExponentialDurationBuckets creates a set of exponential value buckets
+// MustMakeExponentialDurationBuckets creates a set of exponential duration buckets
 // or panics.
 func MustMakeExponentialDurationBuckets(start time.Duration, factor float64, n int) DurationBuckets {
 	buckets, err := ExponentialDurationBuckets(start, factor, n)
