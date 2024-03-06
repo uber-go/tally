@@ -22,7 +22,10 @@ package tally
 
 import (
 	"fmt"
+	"strconv"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -256,4 +259,67 @@ func TestCachedReporterInternalMetricsAlloc(t *testing.T) {
 			len(r.gauges),
 		)
 	}
+}
+
+func TestCachedReporterInternalMetricsConcurrent(t *testing.T) {
+	tr := newTestStatsReporter()
+	root, closer := NewRootScope(ScopeOptions{
+		CachedReporter:         tr,
+		OmitCardinalityMetrics: false,
+	}, 0)
+	s := root.(*scope)
+
+	var wg sync.WaitGroup
+
+	done := make(chan struct{})
+	time.AfterFunc(time.Second, func() {
+		close(done)
+	})
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var i int
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			suffix := strconv.Itoa(i)
+			tr.gg.Add(1)
+			tr.tg.Add(1)
+			tr.cg.Add(1)
+			s.Gauge("gauge-foo" + suffix).Update(42)
+			s.Timer("timer-foo" + suffix).Record(42)
+			s.Counter("counter-foo" + suffix).Inc(42)
+			i++
+			time.Sleep(time.Microsecond)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				// kick off report loop manually, so we can keep track of how many internal metrics
+				// we emitted.
+				tr.gg.Add(numInternalMetrics)
+				s.reportLoopRun()
+			}
+		}
+	}()
+	wg.Wait()
+
+	// Close should also trigger internal metric report.
+	tr.gg.Add(numInternalMetrics)
+	closer.Close()
 }
