@@ -166,10 +166,14 @@ func TestHistogramDurationSamples(t *testing.T) {
 		h.RecordDuration(offset +
 			time.Duration(rand.Float64()*float64(10*time.Millisecond)))
 	}
+	offset = 60 * time.Millisecond
+	h.RecordDurationWithWeight(offset+
+		time.Duration(rand.Float64()*float64(10*time.Millisecond)), 2)
 
 	h.report(h.name, h.tags, r)
 
 	assert.Equal(t, 3, r.durationSamples[10*time.Millisecond])
 	assert.Equal(t, 5, r.durationSamples[60*time.Millisecond])
+	assert.Equal(t, 2, r.durationSamples[70*time.Millisecond])
 	assert.Equal(t, buckets, r.buckets)
 }

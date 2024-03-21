@@ -100,6 +100,10 @@ type Histogram interface {
 	// Will use the configured duration buckets for the histogram.
 	RecordDuration(value time.Duration)
 
+	// RecordDurationWithWeight records a specific duration directly with a weight.
+	// Will use the configured duration buckets for the histogram.
+	RecordDurationWithWeight(value time.Duration, weight int64)
+
 	// Start gives you a specific point in time to then record a duration.
 	// Will use the configured duration buckets for the histogram.
 	Start() Stopwatch

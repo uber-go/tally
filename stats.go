@@ -387,7 +387,7 @@ func (h *histogram) RecordValueWithWeight(value float64, weight int64) {
 	h.recordValueWithWeight(value, weight)
 }
 
-func (h *histogram) RecordDuration(value time.Duration) {
+func (h *histogram) recordDurationWithWeight(value time.Duration, weight int64) {
 	if h.htype != durationHistogramType {
 		return
 	}
@@ -399,7 +399,15 @@ func (h *histogram) RecordDuration(value time.Duration) {
 	idx := sort.Search(len(h.buckets), func(i int) bool {
 		return h.buckets[i].durationUpperBound >= value
 	})
-	h.samples[idx].counter.Inc(1)
+	h.samples[idx].counter.Inc(weight)
+}
+
+func (h *histogram) RecordDuration(value time.Duration) {
+	h.recordDurationWithWeight(value, 1)
+}
+
+func (h *histogram) RecordDurationWithWeight(value time.Duration, weight int64) {
+	h.recordDurationWithWeight(value, weight)
 }
 
 func (h *histogram) Start() Stopwatch {
