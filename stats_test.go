@@ -108,6 +108,14 @@ func TestGauge(t *testing.T) {
 	gauge.report("", nil, r)
 	assert.Equal(t, float64(42), r.last)
 
+	gauge.Add(4.2)
+	gauge.report("", nil, r)
+	assert.Equal(t, float64(46.2), r.last)
+
+	gauge.Sub(-4)
+	gauge.report("", nil, r)
+	assert.Equal(t, float64(50.2), r.last)
+
 	gauge.Update(1234)
 	gauge.Update(5678)
 	gauge.report("", nil, r)

@@ -121,6 +121,15 @@ func (g *gauge) Update(v float64) {
 	atomic.StoreUint64(&g.updated, 1)
 }
 
+func (g *gauge) Add(v float64) {
+	v += math.Float64frombits(atomic.LoadUint64(&g.curr))
+	g.Update(v)
+}
+
+func (g *gauge) Sub(v float64) {
+	g.Add(-v)
+}
+
 func (g *gauge) value() float64 {
 	return math.Float64frombits(atomic.LoadUint64(&g.curr))
 }
