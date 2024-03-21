@@ -139,11 +139,14 @@ func TestHistogramValueSamples(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		h.RecordValue(offset + rand.Float64()*10)
 	}
+	offset = 60
+	h.RecordValueWithWeight(offset+rand.Float64()*10, 2)
 
 	h.report(h.name, h.tags, r)
 
 	assert.Equal(t, 3, r.valueSamples[10.0])
 	assert.Equal(t, 5, r.valueSamples[60.0])
+	assert.Equal(t, 2, r.valueSamples[70.0])
 	assert.Equal(t, buckets, r.buckets)
 }
 

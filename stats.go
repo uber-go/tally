@@ -364,7 +364,7 @@ func (h *histogram) cachedReport() {
 	}
 }
 
-func (h *histogram) RecordValue(value float64) {
+func (h *histogram) recordValueWithWeight(value float64, weight int64) {
 	if h.htype != valueHistogramType {
 		return
 	}
@@ -376,7 +376,15 @@ func (h *histogram) RecordValue(value float64) {
 	idx := sort.Search(len(h.buckets), func(i int) bool {
 		return h.buckets[i].valueUpperBound >= value
 	})
-	h.samples[idx].counter.Inc(1)
+	h.samples[idx].counter.Inc(weight)
+}
+
+func (h *histogram) RecordValue(value float64) {
+	h.recordValueWithWeight(value, 1)
+}
+
+func (h *histogram) RecordValueWithWeight(value float64, weight int64) {
+	h.recordValueWithWeight(value, weight)
 }
 
 func (h *histogram) RecordDuration(value time.Duration) {
