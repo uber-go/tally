@@ -30,10 +30,9 @@ import (
 // all emitted values have a given prefix or set of tags.
 //
 // IMPORTANT: When using Prometheus reporters, users must take care to
-//
-//	not create metrics from both parent scopes and subscopes
-//	that have the same metric name but different tag keys,
-//	as metric allocation will panic.
+//            not create metrics from both parent scopes and subscopes
+//            that have the same metric name but different tag keys,
+//            as metric allocation will panic.
 type Scope interface {
 	// Counter returns the Counter object corresponding to the name.
 	Counter(name string) Counter
@@ -92,17 +91,9 @@ type Histogram interface {
 	// Will use the configured value buckets for the histogram.
 	RecordValue(value float64)
 
-	// RecordValueWithWeight records a specific value directly with a weight.
-	// Will use the configured value buckets for the histogram.
-	RecordValueWithWeight(value float64, weight int64)
-
 	// RecordDuration records a specific duration directly.
 	// Will use the configured duration buckets for the histogram.
 	RecordDuration(value time.Duration)
-
-	// RecordDurationWithWeight records a specific duration directly with a weight.
-	// Will use the configured duration buckets for the histogram.
-	RecordDurationWithWeight(value time.Duration, weight int64)
 
 	// Start gives you a specific point in time to then record a duration.
 	// Will use the configured duration buckets for the histogram.
