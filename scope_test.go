@@ -101,6 +101,8 @@ func newTestHistogramValue() *testHistogramValue {
 }
 
 type testStatsReporter struct {
+	mtx sync.Mutex
+
 	cg sync.WaitGroup
 	gg sync.WaitGroup
 	tg sync.WaitGroup
@@ -125,6 +127,9 @@ func newTestStatsReporter() *testStatsReporter {
 }
 
 func (r *testStatsReporter) getCounters() map[string]*testIntValue {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	dst := make(map[string]*testIntValue, len(r.counters))
 	for k, v := range r.counters {
 		var (
@@ -142,6 +147,9 @@ func (r *testStatsReporter) getCounters() map[string]*testIntValue {
 }
 
 func (r *testStatsReporter) getGauges() map[string]*testFloatValue {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	dst := make(map[string]*testFloatValue, len(r.gauges))
 	for k, v := range r.gauges {
 		var (
@@ -159,6 +167,9 @@ func (r *testStatsReporter) getGauges() map[string]*testFloatValue {
 }
 
 func (r *testStatsReporter) getTimers() map[string]*testIntValue {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	dst := make(map[string]*testIntValue, len(r.timers))
 	for k, v := range r.timers {
 		var (
@@ -176,6 +187,9 @@ func (r *testStatsReporter) getTimers() map[string]*testIntValue {
 }
 
 func (r *testStatsReporter) getHistograms() map[string]*testHistogramValue {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	dst := make(map[string]*testHistogramValue, len(r.histograms))
 	for k, v := range r.histograms {
 		var (
@@ -202,6 +216,9 @@ func (r *testStatsReporter) WaitAll() {
 func (r *testStatsReporter) AllocateCounter(
 	name string, tags map[string]string,
 ) CachedCount {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	counter := &testIntValue{
 		val:      0,
 		tags:     tags,
@@ -212,6 +229,9 @@ func (r *testStatsReporter) AllocateCounter(
 }
 
 func (r *testStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	r.counters[name] = &testIntValue{
 		val:  value,
 		tags: tags,
@@ -222,6 +242,9 @@ func (r *testStatsReporter) ReportCounter(name string, tags map[string]string, v
 func (r *testStatsReporter) AllocateGauge(
 	name string, tags map[string]string,
 ) CachedGauge {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	gauge := &testFloatValue{
 		val:      0,
 		tags:     tags,
@@ -232,6 +255,9 @@ func (r *testStatsReporter) AllocateGauge(
 }
 
 func (r *testStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	r.gauges[name] = &testFloatValue{
 		val:  value,
 		tags: tags,
@@ -242,6 +268,9 @@ func (r *testStatsReporter) ReportGauge(name string, tags map[string]string, val
 func (r *testStatsReporter) AllocateTimer(
 	name string, tags map[string]string,
 ) CachedTimer {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	timer := &testIntValue{
 		val:      0,
 		tags:     tags,
@@ -252,6 +281,9 @@ func (r *testStatsReporter) AllocateTimer(
 }
 
 func (r *testStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	r.timers[name] = &testIntValue{
 		val:  int64(interval),
 		tags: tags,
@@ -320,6 +352,9 @@ func (r *testStatsReporter) ReportHistogramValueSamples(
 	bucketUpperBound float64,
 	samples int64,
 ) {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	key := KeyForPrefixedStringMap(name, tags)
 	value, ok := r.histograms[key]
 	if !ok {
@@ -339,6 +374,9 @@ func (r *testStatsReporter) ReportHistogramDurationSamples(
 	bucketUpperBound time.Duration,
 	samples int64,
 ) {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	key := KeyForPrefixedStringMap(name, tags)
 	value, ok := r.histograms[key]
 	if !ok {
