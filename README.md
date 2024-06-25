@@ -3,7 +3,7 @@
 Fast, buffered, hierarchical stats collection in Go.
 
 ## Installation
-`go get -u github.com/uber-go/tally`
+`go get -u github.com/uber-go/tally/v4`
 
 ## Abstract
 
