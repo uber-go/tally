@@ -31,10 +31,10 @@ var (
 	scopeRegistryKey = keyForPrefixedStringMaps
 
 	// Metrics related.
-	counterCardinalityName   = "tally.internal.counter_cardinality"
-	gaugeCardinalityName     = "tally.internal.gauge_cardinality"
-	histogramCardinalityName = "tally.internal.histogram_cardinality"
-	scopeCardinalityName     = "tally.internal.num_active_scopes"
+	counterCardinalityName   = "tally_internal_counter_cardinality"
+	gaugeCardinalityName     = "tally_internal_gauge_cardinality"
+	histogramCardinalityName = "tally_internal_histogram_cardinality"
+	scopeCardinalityName     = "tally_internal_num_active_scopes"
 )
 
 const (
