@@ -22,6 +22,7 @@ package thrift
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -566,7 +567,7 @@ func (p *TSimpleJSONProtocol) Transport() TTransport {
 
 func (p *TSimpleJSONProtocol) OutputPreValue() error {
 	if len(p.dumpContext) == 0 {
-		return errors.New("dumpContext is empty")
+        return errors.New("dumpContext is empty")
 	}
 
 	cxt := _ParseContext(p.dumpContext[len(p.dumpContext)-1])
@@ -617,7 +618,7 @@ func (p *TSimpleJSONProtocol) OutputBool(value bool) error {
 		return e
 	}
 	if len(p.dumpContext) == 0 {
-		return errors.New("dumpContext is empty")
+        return errors.New("dumpContext is empty")
 	}
 
 	var v string
@@ -661,7 +662,7 @@ func (p *TSimpleJSONProtocol) OutputF64(value float64) error {
 	} else {
 		v = strconv.FormatFloat(value, 'g', -1, 64)
 		if len(p.dumpContext) == 0 {
-			return errors.New("dumpContext is empty")
+             return errors.New("dumpContext is empty")
 		}
 		switch _ParseContext(p.dumpContext[len(p.dumpContext)-1]) {
 		case _CONTEXT_IN_OBJECT_FIRST, _CONTEXT_IN_OBJECT_NEXT_KEY:
@@ -680,7 +681,7 @@ func (p *TSimpleJSONProtocol) OutputI64(value int64) error {
 		return e
 	}
 	if len(p.dumpContext) == 0 {
-		return errors.New("dumpContext is empty")
+        return errors.New("dumpContext is empty")
 	}
 
 	v := strconv.FormatInt(value, 10)
@@ -780,7 +781,7 @@ func (p *TSimpleJSONProtocol) ParsePreValue() error {
 		return NewTProtocolException(e)
 	}
 	if len(p.parseContextStack) == 0 {
-		return errors.New("parseContextStack is empty")
+        return errors.New("parseContextStack is empty")
 	}
 
 	cxt := _ParseContext(p.parseContextStack[len(p.parseContextStack)-1])
@@ -1027,7 +1028,7 @@ func (p *TSimpleJSONProtocol) ParseObjectEnd() error {
 		return err
 	}
 	if len(p.parseContextStack) == 0 {
-		return errors.New("parseContextStack is empty")
+        return errors.New("parseContextStack is empty")
 	}
 
 	cxt := _ParseContext(p.parseContextStack[len(p.parseContextStack)-1])
@@ -1092,7 +1093,7 @@ func (p *TSimpleJSONProtocol) ParseListEnd() error {
 		return err
 	}
 	if len(p.parseContextStack) == 0 {
-		return errors.New("parseContextStack is empty")
+        return errors.New("parseContextStack is empty")
 	}
 
 	cxt := _ParseContext(p.parseContextStack[len(p.parseContextStack)-1])
