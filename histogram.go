@@ -368,7 +368,7 @@ func ExponentialDurationBuckets(start time.Duration, factor float64, n int) (Dur
 	curr := start
 	for i := range buckets {
 		buckets[i] = curr
-		curr = time.Duration(float64(curr) * factor)
+		curr = time.Duration(safeFloat64ToInt64(float64(curr) * factor))
 	}
 	return buckets, nil
 }

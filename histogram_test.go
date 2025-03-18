@@ -166,6 +166,14 @@ func TestMustMakeExponentialDurationBucketsPanicsOnBadFactor(t *testing.T) {
 	})
 }
 
+func TestMustMakeExponentialDurationBucketsOverflow(t *testing.T) {
+	assert.NotPanics(t, func() {
+		assert.Equal(t, DurationBuckets{
+			math.MaxInt64 * time.Nanosecond, math.MaxInt64 * time.Nanosecond, math.MaxInt64 * time.Nanosecond,
+		}, MustMakeExponentialDurationBuckets(math.MaxInt64*time.Nanosecond, 2, 3))
+	})
+}
+
 func TestBucketPairsNoRaceWhenSorted(t *testing.T) {
 	buckets := DurationBuckets{}
 	for i := 0; i < 99; i++ {
