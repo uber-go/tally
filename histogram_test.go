@@ -41,6 +41,13 @@ func TestDurationBucketsString(t *testing.T) {
 	assert.Equal(t, "[1s 2s 3s]", Buckets(result).String())
 }
 
+func TestDurationBucketsOverflowString(t *testing.T) {
+	maxDuration := time.Duration(math.MaxInt64)
+	result, err := LinearDurationBuckets(maxDuration-(2*time.Second), time.Second, 4)
+	require.NoError(t, err)
+	assert.Equal(t, "[2562047h47m14.854775807s 2562047h47m15.854775807s 2562047h47m16.854775807s 2562047h47m16.854775807s]", Buckets(result).String())
+}
+
 func TestBucketPairsDefaultsToNegInfinityToInfinity(t *testing.T) {
 	pairs := BucketPairs(nil)
 	require.Equal(t, 1, len(pairs))

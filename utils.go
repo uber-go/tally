@@ -22,6 +22,7 @@ package tally
 
 import (
 	"math"
+	"time"
 )
 
 func safeFloat64ToInt64(v float64) int64 {
@@ -32,4 +33,16 @@ func safeFloat64ToInt64(v float64) int64 {
 		return math.MinInt64
 	}
 	return int64(v)
+}
+
+func safeDurationSum(a, b time.Duration) time.Duration {
+	sum := a + b
+	switch {
+	case b > 0 && sum < a: // Overflow
+		return time.Duration(math.MaxInt64)
+	case b < 0 && sum > a: // Underflow
+		return time.Duration(math.MinInt64)
+	default:
+		return sum
+	}
 }
