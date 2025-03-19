@@ -10,10 +10,11 @@ on:
 jobs:
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         go: ["stable", "oldstable"]
+        os: ["ubuntu-latest", "ubuntu-24.04-arm"]
 
     steps:
     - name: Checkout code
