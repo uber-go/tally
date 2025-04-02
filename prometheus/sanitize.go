@@ -35,7 +35,7 @@ var DefaultSanitizerOpts = tally.SanitizeOptions{
 		Characters: tally.UnderscoreCharacters,
 	},
 	ValueCharacters: tally.ValidCharacters{
-		Ranges:     tally.AlphanumericRange,
+		Ranges:     append(tally.AlphanumericRange, tally.SanitizeRange{rune('-'), rune('.')}),
 		Characters: tally.UnderscoreCharacters,
 	},
 	ReplacementCharacter: tally.DefaultReplacementCharacter,
