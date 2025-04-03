@@ -307,8 +307,9 @@ func LinearDurationBuckets(start, width time.Duration, n int) (DurationBuckets, 
 		return nil, errBucketsCountNeedsGreaterThanZero
 	}
 	buckets := make([]time.Duration, n)
-	for i := range buckets {
-		buckets[i] = start + (time.Duration(i) * width)
+	buckets[0] = start
+	for i := 1; i < len(buckets); i++ {
+		buckets[i] = safeDurationSum(buckets[i-1], width)
 	}
 	return buckets, nil
 }
@@ -368,7 +369,7 @@ func ExponentialDurationBuckets(start time.Duration, factor float64, n int) (Dur
 	curr := start
 	for i := range buckets {
 		buckets[i] = curr
-		curr = time.Duration(float64(curr) * factor)
+		curr = time.Duration(safeFloat64ToInt64(float64(curr) * factor))
 	}
 	return buckets, nil
 }

@@ -29,6 +29,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func parseDuration(s string) time.Duration {
+	duration, _ := time.ParseDuration(s)
+	return duration
+}
+
 func TestValueBucketsString(t *testing.T) {
 	result, err := LinearValueBuckets(1, 1, 3)
 	require.NoError(t, err)
@@ -39,6 +44,19 @@ func TestDurationBucketsString(t *testing.T) {
 	result, err := LinearDurationBuckets(time.Second, time.Second, 3)
 	require.NoError(t, err)
 	assert.Equal(t, "[1s 2s 3s]", Buckets(result).String())
+}
+
+func TestDurationBucketsOverflowString(t *testing.T) {
+	maxDuration := time.Duration(math.MaxInt64)
+	result, err := LinearDurationBuckets(maxDuration-(2*time.Second), time.Second, 4)
+	require.NoError(t, err)
+	assert.Equal(t, "[2562047h47m14.854775807s 2562047h47m15.854775807s 2562047h47m16.854775807s 2562047h47m16.854775807s]", Buckets(result).String())
+}
+
+func TestExponentialDurationBucketsOverflowString(t *testing.T) {
+	result, err := ExponentialDurationBuckets(parseDuration("1749144h56m16.554119168s"), 1.3, 4)
+	require.NoError(t, err)
+	assert.Equal(t, "[1749144h56m16.554119168s 2273888h25m9.520355328s 2562047h47m16.854775807s 2562047h47m16.854775807s]", Buckets(result).String())
 }
 
 func TestBucketPairsDefaultsToNegInfinityToInfinity(t *testing.T) {
@@ -163,6 +181,40 @@ func TestMustMakeExponentialDurationBucketsPanicsOnBadStart(t *testing.T) {
 func TestMustMakeExponentialDurationBucketsPanicsOnBadFactor(t *testing.T) {
 	assert.Panics(t, func() {
 		MustMakeExponentialDurationBuckets(2*time.Second, 1, 2)
+	})
+}
+
+func TestMustMakeExponentialDurationBucketsOverflow(t *testing.T) {
+	assert.NotPanics(t, func() {
+		assert.Equal(t, DurationBuckets{
+			math.MaxInt64 * time.Nanosecond, math.MaxInt64 * time.Nanosecond, math.MaxInt64 * time.Nanosecond,
+		}, MustMakeExponentialDurationBuckets(math.MaxInt64*time.Nanosecond, 2, 3))
+	})
+	assert.NotPanics(t, func() {
+		assert.Equal(t, DurationBuckets{
+			parseDuration("471095h35m13.288997632s"),
+			parseDuration("612424h15m47.275696896s"),
+			parseDuration("796151h32m31.458405888s"),
+			parseDuration("1034997h0m16.895927808s"),
+			parseDuration("1345496h6m21.964706816s"),
+			parseDuration("1749144h56m16.554119168s"),
+			parseDuration("2273888h25m9.520355328s"),
+			parseDuration("2562047h47m16.854775807s"),
+			parseDuration("2562047h47m16.854775807s"),
+		}, MustMakeExponentialDurationBuckets(parseDuration("471095h35m13.288997632s"), 1.3, 9))
+	})
+}
+
+func TestMustMakeLinearDurationBucketsOverflow(t *testing.T) {
+	assert.NotPanics(t, func() {
+		assert.Equal(t, DurationBuckets{
+			parseDuration("0s"),
+			parseDuration("1281023h53m38.427387903s"),
+			parseDuration("2562047h47m16.854775806s"),
+			parseDuration("2562047h47m16.854775807s"),
+			parseDuration("2562047h47m16.854775807s"),
+			parseDuration("2562047h47m16.854775807s"),
+		}, MustMakeLinearDurationBuckets(0, time.Duration(math.MaxInt64/2), 6))
 	})
 }
 
