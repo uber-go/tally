@@ -666,6 +666,12 @@ type HistogramSnapshot interface {
 
 	// Durations returns the sample values by upper bound for a durationHistogram
 	Durations() map[time.Duration]int64
+
+	// NumValues returns the number of values which were emitted by this metric
+	NumValues() int64
+
+	// NumDurations returns the number of values which were emitted by this metric
+	NumDurations() int64
 }
 
 // mergeRightTags merges 2 sets of tags with the tags from tagsRight overriding values from tagsLeft
@@ -797,4 +803,20 @@ func (s *histogramSnapshot) Values() map[float64]int64 {
 
 func (s *histogramSnapshot) Durations() map[time.Duration]int64 {
 	return s.durations
+}
+
+func (s *histogramSnapshot) NumValues() int64 {
+	valCounter := 0
+	for _, val := range s.values {
+		valCounter += int(val)
+	}
+	return int64(valCounter)
+}
+
+func (s *histogramSnapshot) NumDurations() int64 {
+	durationCounter := 0
+	for _, val := range s.durations {
+		durationCounter += int(val)
+	}
+	return int64(durationCounter)
 }
