@@ -224,12 +224,12 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 	unsanitizedKey = (unsanitizedKey + ".")[:len(unsanitizedKey)]
 
 	subscopeBucket.mu.Lock()
-	defer subscopeBucket.mu.Unlock()
 
 	if s, ok := r.lockedLookup(subscopeBucket, sanitizedKey); ok {
 		if _, ok = r.lockedLookup(subscopeBucket, unsanitizedKey); !ok {
 			subscopeBucket.s[unsanitizedKey] = s
 		}
+		subscopeBucket.mu.Unlock()
 		return s
 	}
 
@@ -262,6 +262,7 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 	if _, ok := r.lockedLookup(subscopeBucket, unsanitizedKey); !ok {
 		subscopeBucket.s[unsanitizedKey] = subscope
 	}
+	subscopeBucket.mu.Unlock()
 	return subscope
 }
 
@@ -290,10 +291,10 @@ func (r *scopeRegistry) removeWithRLock(subscopeBucket *scopeBucket, key string)
 	// n.b. This function must lock the registry for writing and return it to an
 	//      RLocked state prior to exiting. Defer order is important (LIFO).
 	subscopeBucket.mu.RUnlock()
-	defer subscopeBucket.mu.RLock()
 	subscopeBucket.mu.Lock()
-	defer subscopeBucket.mu.Unlock()
 	delete(subscopeBucket.s, key)
+	subscopeBucket.mu.Unlock()
+	subscopeBucket.mu.RLock()
 }
 
 // Records internal Metrics' cardinalities.
