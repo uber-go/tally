@@ -34,7 +34,7 @@ func KeyForStringMap(
 	return KeyForPrefixedStringMap(nilString, stringMap)
 }
 
-// KeyForPrefixedStringMap generates a unique key for a
+// KeyForPrefixedStringMap generates a unique key for
 // a prefix and a map string set combination.
 func KeyForPrefixedStringMap(
 	prefix string,
