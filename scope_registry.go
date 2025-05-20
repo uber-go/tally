@@ -313,16 +313,16 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 			bucketCache:    parent.bucketCache,
 			ephemeralKey:   ephemeralKey,
 
-			counters:         make(map[string]*counter),
-			countersSlice:    make([]*counter, 0, _defaultInitialSliceSize),
-			gauges:           make(map[string]*gauge),
-			gaugesSlice:      make([]*gauge, 0, _defaultInitialSliceSize),
-			histograms:       make(map[string]*histogram),
-			histogramsSlice:  make([]*histogram, 0, _defaultInitialSliceSize),
-			timers:           make(map[string]*timer),
-			done:             make(chan struct{}),
-			testScope:        parent.testScope,
-			noCacheSubscopes: parent.noCacheSubscopes,
+			// sync.Map is zero-value ready and doesn't need initialization
+			countersSlice:      make([]*counter, 0, _defaultInitialSliceSize),
+			countersSliceMux:   sync.Mutex{},
+			gaugesSlice:        make([]*gauge, 0, _defaultInitialSliceSize),
+			gaugesSliceMux:     sync.Mutex{},
+			histogramsSlice:    make([]*histogram, 0, _defaultInitialSliceSize),
+			histogramsSliceMux: sync.Mutex{},
+			done:               make(chan struct{}),
+			testScope:          parent.testScope,
+			noCacheSubscopes:   parent.noCacheSubscopes,
 		}
 	}
 
@@ -393,16 +393,16 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		registry:       r,
 		bucketCache:    parent.bucketCache,
 
-		counters:         make(map[string]*counter),
-		countersSlice:    make([]*counter, 0, _defaultInitialSliceSize),
-		gauges:           make(map[string]*gauge),
-		gaugesSlice:      make([]*gauge, 0, _defaultInitialSliceSize),
-		histograms:       make(map[string]*histogram),
-		histogramsSlice:  make([]*histogram, 0, _defaultInitialSliceSize),
-		timers:           make(map[string]*timer),
-		done:             make(chan struct{}),
-		testScope:        parent.testScope,
-		noCacheSubscopes: parent.noCacheSubscopes,
+		// sync.Map is zero-value ready and doesn't need initialization
+		countersSlice:      make([]*counter, 0, _defaultInitialSliceSize),
+		countersSliceMux:   sync.Mutex{},
+		gaugesSlice:        make([]*gauge, 0, _defaultInitialSliceSize),
+		gaugesSliceMux:     sync.Mutex{},
+		histogramsSlice:    make([]*histogram, 0, _defaultInitialSliceSize),
+		histogramsSliceMux: sync.Mutex{},
+		done:               make(chan struct{}),
+		testScope:          parent.testScope,
+		noCacheSubscopes:   parent.noCacheSubscopes,
 	}
 
 	// Initialize lastActivity timestamp
@@ -471,7 +471,18 @@ func (r *scopeRegistry) reportInternalMetrics() {
 	scopes.Inc() // Account for root scope.
 	r.ForEachScope(
 		func(ss *scope) {
-			counterSliceLen, gaugeSliceLen, histogramSliceLen := int64(len(ss.countersSlice)), int64(len(ss.gaugesSlice)), int64(len(ss.histogramsSlice))
+			ss.countersSliceMux.Lock()
+			counterSliceLen := int64(len(ss.countersSlice))
+			ss.countersSliceMux.Unlock()
+
+			ss.gaugesSliceMux.Lock()
+			gaugeSliceLen := int64(len(ss.gaugesSlice))
+			ss.gaugesSliceMux.Unlock()
+
+			ss.histogramsSliceMux.Lock()
+			histogramSliceLen := int64(len(ss.histogramsSlice))
+			ss.histogramsSliceMux.Unlock()
+
 			if ss.root { // Root scope is referenced across all buckets.
 				rootCounters.Store(counterSliceLen)
 				rootGauges.Store(gaugeSliceLen)
@@ -551,19 +562,20 @@ func newScopeRegistryWithEvictionOptions(
 		r.maxPoolSize = 1000 // Cap the pool size to prevent memory issues
 		r.scopePool = sync.Pool{
 			New: func() interface{} {
-				counters, countersSlice, gauges, gaugesSlice,
-					histograms, histogramsSlice, timers := preAllocateEmptyMaps()
+				// Get pre-allocated slice capacities from the helper but discard the maps
+				_, countersSlice, _, gaugesSlice,
+					_, histogramsSlice, _ := preAllocateEmptyMaps()
 
 				return &scope{
-					counters:        counters,
-					countersSlice:   countersSlice,
-					gauges:          gauges,
-					gaugesSlice:     gaugesSlice,
-					histograms:      histograms,
-					histogramsSlice: histogramsSlice,
-					timers:          timers,
-					done:            make(chan struct{}),
-					registry:        r,
+					// sync.Map is zero-value ready and doesn't need initialization
+					countersSlice:      countersSlice,
+					countersSliceMux:   sync.Mutex{},
+					gaugesSlice:        gaugesSlice,
+					gaugesSliceMux:     sync.Mutex{},
+					histogramsSlice:    histogramsSlice,
+					histogramsSliceMux: sync.Mutex{},
+					done:               make(chan struct{}),
+					registry:           r,
 				}
 			},
 		}

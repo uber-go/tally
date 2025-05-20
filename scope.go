@@ -71,20 +71,27 @@ type scope struct {
 
 	registry *scopeRegistry
 
-	cm sync.RWMutex
-	gm sync.RWMutex
-	tm sync.RWMutex
-	hm sync.RWMutex
+	// Metric maps use sync.Map for lock-free reads of existing metrics.
+	// This provides a significant performance improvement for the common case
+	// where metrics are created once and read many times.
+	// The sync.Map implementation allows concurrent reads without locking,
+	// and uses atomic operations instead of mutex acquisition.
+	counters   sync.Map // was map[string]*counter
+	gauges     sync.Map // was map[string]*gauge
+	histograms sync.Map // was map[string]*histogram
+	timers     sync.Map // was map[string]*timer
 
-	counters        map[string]*counter
-	countersSlice   []*counter
-	gauges          map[string]*gauge
-	gaugesSlice     []*gauge
-	histograms      map[string]*histogram
-	histogramsSlice []*histogram
-	timers          map[string]*timer
-	// nb: deliberately skipping timersSlice as we report timers immediately,
-	// no buffering is involved.
+	// Slices for reporting - need their own mutexes for appends
+	countersSlice    []*counter
+	countersSliceMux sync.Mutex
+
+	gaugesSlice    []*gauge
+	gaugesSliceMux sync.Mutex
+
+	histogramsSlice    []*histogram
+	histogramsSliceMux sync.Mutex
+
+	// timersSlice is deliberately skipped. No dedicated mux for it for now.
 
 	bucketCache      *bucketCache
 	closed           int32 // Used with atomic operations
@@ -93,7 +100,7 @@ type scope struct {
 	root             bool
 	testScope        bool
 	noCacheSubscopes bool
-	ephemeralKey     string // Key used for pool lookups of ephemeral scopes
+	ephemeralKey     string // Key used for pool looks of ephemeral scopes
 
 	// Activity tracking for eviction
 	lastActivity int64 // Unix timestamp in seconds of last metric activity
@@ -177,22 +184,23 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 	}
 
 	s := &scope{
-		baseReporter:     baseReporter,
-		bucketCache:      newBucketCache(),
-		cachedReporter:   opts.CachedReporter,
-		counters:         make(map[string]*counter),
-		countersSlice:    make([]*counter, 0, _defaultInitialSliceSize),
-		defaultBuckets:   opts.DefaultBuckets,
-		done:             make(chan struct{}),
-		gauges:           make(map[string]*gauge),
-		gaugesSlice:      make([]*gauge, 0, _defaultInitialSliceSize),
-		histograms:       make(map[string]*histogram),
-		histogramsSlice:  make([]*histogram, 0, _defaultInitialSliceSize),
+		baseReporter:   baseReporter,
+		bucketCache:    newBucketCache(),
+		cachedReporter: opts.CachedReporter,
+		// counters, gauges, histograms, timers are sync.Map and are zero-value ready.
+		// The explicit make(map[string]...) calls are removed for these.
+		countersSlice: make([]*counter, 0, _defaultInitialSliceSize),
+		// countersSliceMux is zero-value ready.
+		defaultBuckets: opts.DefaultBuckets,
+		done:           make(chan struct{}),
+		gaugesSlice:    make([]*gauge, 0, _defaultInitialSliceSize),
+		// gaugesSliceMux is zero-value ready.
+		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
+		// histogramsSliceMux is zero-value ready.
 		prefix:           sanitizer.Name(opts.Prefix),
 		reporter:         opts.Reporter,
 		sanitizer:        sanitizer,
 		separator:        sanitizer.Name(opts.Separator),
-		timers:           make(map[string]*timer),
 		root:             true,
 		testScope:        opts.testScope,
 		noCacheSubscopes: opts.NoCacheSubscopes,
@@ -217,12 +225,9 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		opts.EnableScopePooling,
 	)
 
-	if interval > 0 {
+	if s.root && !s.testScope && interval > 0 {
 		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
-			s.reportLoop(interval)
-		}()
+		go s.reportLoop(interval)
 	}
 
 	return s
@@ -230,47 +235,47 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 
 // report dumps all aggregated stats into the reporter. Should be called automatically by the root scope periodically.
 func (s *scope) report(r StatsReporter) {
-	s.cm.RLock()
-	for name, counter := range s.counters {
-		counter.report(s.fullyQualifiedName(name), s.tags, r)
-	}
-	s.cm.RUnlock()
+	s.counters.Range(func(key, value interface{}) bool {
+		c := value.(*counter)
+		c.report(s.fullyQualifiedName(key.(string)), s.tags, r)
+		return true
+	})
 
-	s.gm.RLock()
-	for name, gauge := range s.gauges {
-		gauge.report(s.fullyQualifiedName(name), s.tags, r)
-	}
-	s.gm.RUnlock()
+	s.gauges.Range(func(key, value interface{}) bool {
+		g := value.(*gauge)
+		g.report(s.fullyQualifiedName(key.(string)), s.tags, r)
+		return true
+	})
 
-	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
+	// We do nothing for timers here because timers report directly to the StatsReporter without buffering
 
-	s.hm.RLock()
-	for name, histogram := range s.histograms {
-		histogram.report(s.fullyQualifiedName(name), s.tags, r)
-	}
-	s.hm.RUnlock()
+	s.histograms.Range(func(key, value interface{}) bool {
+		h := value.(*histogram)
+		h.report(s.fullyQualifiedName(key.(string)), s.tags, r)
+		return true
+	})
 }
 
 func (s *scope) cachedReport() {
-	s.cm.RLock()
-	for _, counter := range s.countersSlice {
-		counter.cachedReport()
-	}
-	s.cm.RUnlock()
+	s.counters.Range(func(key, value interface{}) bool {
+		c := value.(*counter)
+		c.cachedReport()
+		return true
+	})
 
-	s.gm.RLock()
-	for _, gauge := range s.gaugesSlice {
-		gauge.cachedReport()
-	}
-	s.gm.RUnlock()
+	s.gauges.Range(func(key, value interface{}) bool {
+		g := value.(*gauge)
+		g.cachedReport()
+		return true
+	})
 
-	// we do nothing for timers here because timers report directly to ths StatsReporter without buffering
+	// We do nothing for timers here because timers report directly to the StatsReporter without buffering
 
-	s.hm.RLock()
-	for _, histogram := range s.histogramsSlice {
-		histogram.cachedReport()
-	}
-	s.hm.RUnlock()
+	s.histograms.Range(func(key, value interface{}) bool {
+		h := value.(*histogram)
+		h.cachedReport()
+		return true
+	})
 }
 
 // reportLoop is used by the root scope for periodic reporting
@@ -309,17 +314,13 @@ func (s *scope) reportRegistry() {
 func (s *scope) Counter(name string) Counter {
 	s.trackActivity()
 	name = s.sanitizer.Name(name)
-	if c, ok := s.counter(name); ok {
-		return c
+
+	// Try to load existing counter first
+	if value, ok := s.counters.Load(name); ok {
+		return value.(*counter)
 	}
 
-	s.cm.Lock()
-	defer s.cm.Unlock()
-
-	if c, ok := s.counters[name]; ok {
-		return c
-	}
-
+	// Create a new counter
 	var cachedCounter CachedCount
 	if s.cachedReporter != nil {
 		cachedCounter = s.cachedReporter.AllocateCounter(
@@ -329,34 +330,39 @@ func (s *scope) Counter(name string) Counter {
 	}
 
 	c := newCounter(cachedCounter)
-	s.counters[name] = c
-	s.countersSlice = append(s.countersSlice, c)
 
-	return c
+	// Attempt to store it, or get the existing one if another goroutine created it first
+	actual, loaded := s.counters.LoadOrStore(name, c)
+	if !loaded {
+		// We were the first to create this counter, add it to the slice
+		s.countersSliceMux.Lock()
+		s.countersSlice = append(s.countersSlice, c)
+		s.countersSliceMux.Unlock()
+		return c
+	}
+
+	// Another goroutine beat us to it, use their counter
+	return actual.(*counter)
 }
 
 func (s *scope) counter(sanitizedName string) (Counter, bool) {
-	s.cm.RLock()
-	defer s.cm.RUnlock()
-
-	c, ok := s.counters[sanitizedName]
-	return c, ok
+	value, ok := s.counters.Load(sanitizedName)
+	if !ok {
+		return nil, false
+	}
+	return value.(*counter), true
 }
 
 func (s *scope) Gauge(name string) Gauge {
 	s.trackActivity()
 	name = s.sanitizer.Name(name)
-	if g, ok := s.gauge(name); ok {
-		return g
+
+	// Try to load existing gauge first
+	if value, ok := s.gauges.Load(name); ok {
+		return value.(*gauge)
 	}
 
-	s.gm.Lock()
-	defer s.gm.Unlock()
-
-	if g, ok := s.gauges[name]; ok {
-		return g
-	}
-
+	// Create a new gauge
 	var cachedGauge CachedGauge
 	if s.cachedReporter != nil {
 		cachedGauge = s.cachedReporter.AllocateGauge(
@@ -365,34 +371,39 @@ func (s *scope) Gauge(name string) Gauge {
 	}
 
 	g := newGauge(cachedGauge)
-	s.gauges[name] = g
-	s.gaugesSlice = append(s.gaugesSlice, g)
 
-	return g
+	// Attempt to store it, or get the existing one if another goroutine created it first
+	actual, loaded := s.gauges.LoadOrStore(name, g)
+	if !loaded {
+		// We were the first to create this gauge, add it to the slice
+		s.gaugesSliceMux.Lock()
+		s.gaugesSlice = append(s.gaugesSlice, g)
+		s.gaugesSliceMux.Unlock()
+		return g
+	}
+
+	// Another goroutine beat us to it, use their gauge
+	return actual.(*gauge)
 }
 
 func (s *scope) gauge(name string) (Gauge, bool) {
-	s.gm.RLock()
-	defer s.gm.RUnlock()
-
-	g, ok := s.gauges[name]
-	return g, ok
+	value, ok := s.gauges.Load(name)
+	if !ok {
+		return nil, false
+	}
+	return value.(*gauge), true
 }
 
 func (s *scope) Timer(name string) Timer {
 	s.trackActivity()
 	name = s.sanitizer.Name(name)
-	if t, ok := s.timer(name); ok {
-		return t
+
+	// Try to load existing timer first
+	if value, ok := s.timers.Load(name); ok {
+		return value.(*timer)
 	}
 
-	s.tm.Lock()
-	defer s.tm.Unlock()
-
-	if t, ok := s.timers[name]; ok {
-		return t
-	}
-
+	// Create a new timer
 	var cachedTimer CachedTimer
 	if s.cachedReporter != nil {
 		cachedTimer = s.cachedReporter.AllocateTimer(
@@ -403,26 +414,36 @@ func (s *scope) Timer(name string) Timer {
 	t := newTimer(
 		s.fullyQualifiedName(name), s.tags, s.reporter, cachedTimer,
 	)
-	s.timers[name] = t
 
-	return t
+	// Attempt to store it, or get the existing one if another goroutine created it first
+	actual, loaded := s.timers.LoadOrStore(name, t)
+	if !loaded {
+		// Timer doesn't use a slice, so no need to update slice
+		return t
+	}
+
+	// Another goroutine beat us to it, use their timer
+	return actual.(*timer)
 }
 
 func (s *scope) timer(sanitizedName string) (Timer, bool) {
-	s.tm.RLock()
-	defer s.tm.RUnlock()
-
-	t, ok := s.timers[sanitizedName]
-	return t, ok
+	value, ok := s.timers.Load(sanitizedName)
+	if !ok {
+		return nil, false
+	}
+	return value.(*timer), true
 }
 
 func (s *scope) Histogram(name string, b Buckets) Histogram {
 	s.trackActivity()
 	name = s.sanitizer.Name(name)
-	if h, ok := s.histogram(name); ok {
-		return h
+
+	// Try to load existing histogram first
+	if value, ok := s.histograms.Load(name); ok {
+		return value.(*histogram)
 	}
 
+	// Create a new histogram
 	if b == nil {
 		b = s.defaultBuckets
 	}
@@ -430,13 +451,6 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 	htype := valueHistogramType
 	if _, ok := b.(DurationBuckets); ok {
 		htype = durationHistogramType
-	}
-
-	s.hm.Lock()
-	defer s.hm.Unlock()
-
-	if h, ok := s.histograms[name]; ok {
-		return h
 	}
 
 	var cachedHistogram CachedHistogram
@@ -454,18 +468,27 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 		s.bucketCache.Get(htype, b),
 		cachedHistogram,
 	)
-	s.histograms[name] = h
-	s.histogramsSlice = append(s.histogramsSlice, h)
 
-	return h
+	// Attempt to store it, or get the existing one if another goroutine created it first
+	actual, loaded := s.histograms.LoadOrStore(name, h)
+	if !loaded {
+		// We were the first to create this histogram, add it to the slice
+		s.histogramsSliceMux.Lock()
+		s.histogramsSlice = append(s.histogramsSlice, h)
+		s.histogramsSliceMux.Unlock()
+		return h
+	}
+
+	// Another goroutine beat us to it, use their histogram
+	return actual.(*histogram)
 }
 
 func (s *scope) histogram(sanitizedName string) (Histogram, bool) {
-	s.hm.RLock()
-	defer s.hm.RUnlock()
-
-	h, ok := s.histograms[sanitizedName]
-	return h, ok
+	value, ok := s.histograms.Load(sanitizedName)
+	if !ok {
+		return nil, false
+	}
+	return value.(*histogram), true
 }
 
 func (s *scope) Tagged(tags map[string]string) Scope {
@@ -483,7 +506,9 @@ func (s *scope) subscope(prefix string, tags map[string]string) Scope {
 		// Check if NoCacheSubscopes option is enabled on the root scope
 		if s.noCacheSubscopes {
 			allTags := mergeRightTags(s.tags, s.copyAndSanitizeMap(tags))
-			return &scope{
+
+			// Create ephemeral scope with sync.Map instead of map[string]*timer
+			ephemeralScope := &scope{
 				separator:      s.separator,
 				prefix:         prefix,
 				tags:           allTags,
@@ -495,17 +520,18 @@ func (s *scope) subscope(prefix string, tags map[string]string) Scope {
 				registry:       s.registry,
 				bucketCache:    s.bucketCache,
 
-				counters:         make(map[string]*counter),
 				countersSlice:    make([]*counter, 0, _defaultInitialSliceSize),
-				gauges:           make(map[string]*gauge),
 				gaugesSlice:      make([]*gauge, 0, _defaultInitialSliceSize),
-				histograms:       make(map[string]*histogram),
 				histogramsSlice:  make([]*histogram, 0, _defaultInitialSliceSize),
-				timers:           make(map[string]*timer),
 				done:             make(chan struct{}),
 				testScope:        s.testScope,
 				noCacheSubscopes: s.noCacheSubscopes,
 			}
+
+			// Initialize lastActivity timestamp
+			ephemeralScope.lastActivity = time.Now().Unix()
+
+			return ephemeralScope
 		}
 	}
 
@@ -529,42 +555,42 @@ func (s *scope) Snapshot() Snapshot {
 			tags[k] = v
 		}
 
-		ss.cm.RLock()
-		for key, c := range ss.counters {
-			name := ss.fullyQualifiedName(key)
+		ss.counters.Range(func(key, value interface{}) bool {
+			c := value.(*counter)
+			name := ss.fullyQualifiedName(key.(string))
 			id := KeyForPrefixedStringMap(name, tags)
 			snap.counters[id] = &counterSnapshot{
 				name:  name,
 				tags:  tags,
 				value: c.snapshot(),
 			}
-		}
-		ss.cm.RUnlock()
-		ss.gm.RLock()
-		for key, g := range ss.gauges {
-			name := ss.fullyQualifiedName(key)
+			return true
+		})
+		ss.gauges.Range(func(key, value interface{}) bool {
+			g := value.(*gauge)
+			name := ss.fullyQualifiedName(key.(string))
 			id := KeyForPrefixedStringMap(name, tags)
 			snap.gauges[id] = &gaugeSnapshot{
 				name:  name,
 				tags:  tags,
 				value: g.snapshot(),
 			}
-		}
-		ss.gm.RUnlock()
-		ss.tm.RLock()
-		for key, t := range ss.timers {
-			name := ss.fullyQualifiedName(key)
+			return true
+		})
+		ss.timers.Range(func(key, value interface{}) bool {
+			t := value.(*timer)
+			name := ss.fullyQualifiedName(key.(string))
 			id := KeyForPrefixedStringMap(name, tags)
 			snap.timers[id] = &timerSnapshot{
 				name:   name,
 				tags:   tags,
 				values: t.snapshot(),
 			}
-		}
-		ss.tm.RUnlock()
-		ss.hm.RLock()
-		for key, h := range ss.histograms {
-			name := ss.fullyQualifiedName(key)
+			return true
+		})
+		ss.histograms.Range(func(key, value interface{}) bool {
+			h := value.(*histogram)
+			name := ss.fullyQualifiedName(key.(string))
 			id := KeyForPrefixedStringMap(name, tags)
 			snap.histograms[id] = &histogramSnapshot{
 				name:      name,
@@ -572,8 +598,8 @@ func (s *scope) Snapshot() Snapshot {
 				values:    h.snapshotValues(),
 				durations: h.snapshotDurations(),
 			}
-		}
-		ss.hm.RUnlock()
+			return true
+		})
 	})
 
 	return snap
@@ -638,32 +664,27 @@ func (s *scope) Close() error {
 }
 
 func (s *scope) clearMetrics() {
-	s.cm.Lock()
-	s.gm.Lock()
-	s.tm.Lock()
-	s.hm.Lock()
-	defer s.cm.Unlock()
-	defer s.gm.Unlock()
-	defer s.tm.Unlock()
-	defer s.hm.Unlock()
-
-	for k := range s.counters {
-		delete(s.counters, k)
-	}
+	s.counters.Range(func(key, value interface{}) bool {
+		s.counters.Delete(key)
+		return true
+	})
 	s.countersSlice = nil
 
-	for k := range s.gauges {
-		delete(s.gauges, k)
-	}
+	s.gauges.Range(func(key, value interface{}) bool {
+		s.gauges.Delete(key)
+		return true
+	})
 	s.gaugesSlice = nil
 
-	for k := range s.timers {
-		delete(s.timers, k)
-	}
+	s.timers.Range(func(key, value interface{}) bool {
+		s.timers.Delete(key)
+		return true
+	})
 
-	for k := range s.histograms {
-		delete(s.histograms, k)
-	}
+	s.histograms.Range(func(key, value interface{}) bool {
+		s.histograms.Delete(key)
+		return true
+	})
 	s.histogramsSlice = nil
 }
 
@@ -907,24 +928,28 @@ func (s *scope) trackActivity() {
 // resetForPool resets the scope for reuse from the object pool
 func (s *scope) resetForPool() {
 	// Clear maps but maintain capacity
-	for k := range s.counters {
-		delete(s.counters, k)
-	}
+	s.counters.Range(func(key, value interface{}) bool {
+		s.counters.Delete(key)
+		return true
+	})
 	s.countersSlice = s.countersSlice[:0]
 
-	for k := range s.gauges {
-		delete(s.gauges, k)
-	}
+	s.gauges.Range(func(key, value interface{}) bool {
+		s.gauges.Delete(key)
+		return true
+	})
 	s.gaugesSlice = s.gaugesSlice[:0]
 
-	for k := range s.histograms {
-		delete(s.histograms, k)
-	}
+	s.histograms.Range(func(key, value interface{}) bool {
+		s.histograms.Delete(key)
+		return true
+	})
 	s.histogramsSlice = s.histogramsSlice[:0]
 
-	for k := range s.timers {
-		delete(s.timers, k)
-	}
+	s.timers.Range(func(key, value interface{}) bool {
+		s.timers.Delete(key)
+		return true
+	})
 
 	// Reset state flags
 	atomic.StoreInt32(&s.closed, 0)
