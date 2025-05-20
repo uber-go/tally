@@ -21,6 +21,7 @@
 package tally
 
 import (
+	"bytes"
 	"hash/maphash"
 	"runtime"
 	"sort"
@@ -66,14 +67,25 @@ type scopeRegistry struct {
 	cachedHistogramCardinalityGauge   CachedGauge
 	cachedScopeCardinalityGauge       CachedGauge
 	// High cardinality adaptive behavior
-	adaptiveMode   atomic.Bool
-	totalSubScopes atomic.Int64
+	adaptiveMode   int32 // Used as atomic boolean
+	totalSubScopes int64 // Used with atomic operations
 
-	// Eviction policy options
+	// Eviction and LRU policy config
 	enableEviction             bool
 	maxInactivity              time.Duration
 	maxSubscopesBeforeEviction int
-	lastEvictionCheck          atomic.Int64
+	lastEvictionCheck          int64 // Unix timestamp in seconds of last eviction check
+
+	// Scope pooling
+	scopePool       sync.Pool
+	pooledScopes    map[string]*scope // Scopes available for reuse, indexed by key
+	pooledScopesMtx sync.Mutex        // Mutex for pool access
+	pooledScopesLRU []string          // Keys in LRU order (oldest first)
+	poolAccessTimes map[string]int64  // Last access time for each key
+	maxPoolSize     int               // Maximum number of scopes in the pool
+	poolSize        int64             // Current size of the pool, accessed atomically
+	poolHits        int64             // Track hits for stats
+	poolMisses      int64             // Track misses for stats
 }
 
 type scopeBucket struct {
@@ -108,8 +120,8 @@ func newScopeRegistryWithShardCount(
 	}
 
 	// Initialize the adaptiveMode and totalSubScopes fields
-	r.adaptiveMode.Store(false)
-	r.totalSubScopes.Store(0)
+	atomic.StoreInt32(&r.adaptiveMode, 0)
+	atomic.StoreInt64(&r.totalSubScopes, 0)
 
 	for k, v := range cardinalityMetricsTags {
 		r.cardinalityMetricsTags[root.sanitizer.Key(k)] = root.sanitizer.Value(v)
@@ -139,13 +151,18 @@ func (r *scopeRegistry) Report(reporter StatsReporter) {
 		r.evictInactiveScopes()
 	}
 
+	// Cleanup the scope pool
+	if r.scopePool.New != nil {
+		r.cleanupScopePool()
+	}
+
 	for _, subscopeBucket := range r.subscopes {
 		subscopeBucket.mu.RLock()
 
 		for name, s := range subscopeBucket.s {
 			s.report(reporter)
 
-			if s.closed.Load() {
+			if atomic.LoadInt32(&s.closed) != 0 {
 				r.removeWithRLock(subscopeBucket, name)
 				s.clearMetrics()
 			}
@@ -164,13 +181,18 @@ func (r *scopeRegistry) CachedReport() {
 		r.evictInactiveScopes()
 	}
 
+	// Cleanup the scope pool
+	if r.scopePool.New != nil {
+		r.cleanupScopePool()
+	}
+
 	for _, subscopeBucket := range r.subscopes {
 		subscopeBucket.mu.RLock()
 
 		for name, s := range subscopeBucket.s {
 			s.cachedReport()
 
-			if s.closed.Load() {
+			if atomic.LoadInt32(&s.closed) != 0 {
 				r.removeWithRLock(subscopeBucket, name)
 				s.clearMetrics()
 			}
@@ -191,13 +213,93 @@ func (r *scopeRegistry) ForEachScope(f func(*scope)) {
 }
 
 func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]string) *scope {
-	if parent.closed.Load() || r.root.closed.Load() {
+	if atomic.LoadInt32(&parent.closed) != 0 || atomic.LoadInt32(&r.root.closed) != 0 {
 		return NoopScope.(*scope)
 	}
 
 	// If NoCacheSubscopes is enabled on parent scope, create an ephemeral scope
-	if parent.noCacheSubscopes || r.adaptiveMode.Load() {
+	if parent.noCacheSubscopes || atomic.LoadInt32(&r.adaptiveMode) == 1 {
 		allTags := mergeRightTags(parent.tags, tags)
+
+		// For ephemeral scopes, we'll generate a key for pooling purposes only
+		ephemeralKey := poolKey(prefix, allTags)
+
+		// Get a scope from the pool if available
+		if r.scopePool.New != nil {
+			// First, try to find an existing scope in our pool map
+			r.pooledScopesMtx.Lock()
+			existingScope, exists := r.pooledScopes[ephemeralKey]
+			if exists {
+				// Remove it from the map but keep the scope
+				delete(r.pooledScopes, ephemeralKey)
+
+				// Remove from LRU list
+				for i, key := range r.pooledScopesLRU {
+					if key == ephemeralKey {
+						// Remove the key by replacing with the last element and truncating
+						lastIdx := len(r.pooledScopesLRU) - 1
+						if i < lastIdx {
+							r.pooledScopesLRU[i] = r.pooledScopesLRU[lastIdx]
+						}
+						r.pooledScopesLRU = r.pooledScopesLRU[:lastIdx]
+						break
+					}
+				}
+
+				// Delete from access times
+				delete(r.poolAccessTimes, ephemeralKey)
+
+				// Update pool size
+				atomic.AddInt64(&r.poolSize, -1)
+
+				// Track pool hit
+				atomic.AddInt64(&r.poolHits, 1)
+
+				r.pooledScopesMtx.Unlock()
+
+				// Make sure it's not marked as closed
+				atomic.StoreInt32(&existingScope.closed, 0)
+				// Update activity timestamp
+				atomic.StoreInt64(&existingScope.lastActivity, time.Now().Unix())
+
+				return existingScope
+			}
+
+			// Track pool miss
+			atomic.AddInt64(&r.poolMisses, 1)
+			r.pooledScopesMtx.Unlock()
+
+			// Get a new scope from the pool
+			newScope := r.scopePool.Get().(*scope)
+
+			// Reset all maps to be safe
+			newScope.resetForPool()
+
+			// Initialize the pooled scope with the new values
+			newScope.separator = parent.separator
+			newScope.prefix = prefix
+			newScope.tags = allTags
+			newScope.reporter = parent.reporter
+			newScope.cachedReporter = parent.cachedReporter
+			newScope.baseReporter = parent.baseReporter
+			newScope.defaultBuckets = parent.defaultBuckets
+			newScope.sanitizer = parent.sanitizer
+			newScope.registry = r
+			newScope.bucketCache = parent.bucketCache
+			newScope.testScope = parent.testScope
+			newScope.noCacheSubscopes = parent.noCacheSubscopes
+			newScope.ephemeralKey = ephemeralKey
+
+			// Make sure lastActivity is current
+			atomic.StoreInt64(&newScope.lastActivity, time.Now().Unix())
+
+			// Ensure the scope is marked as not closed
+			atomic.StoreInt32(&newScope.closed, 0)
+
+			return newScope
+		}
+
+		// If pooling is not enabled, create a new scope
 		return &scope{
 			separator:      parent.separator,
 			prefix:         prefix,
@@ -209,6 +311,7 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 			sanitizer:      parent.sanitizer,
 			registry:       r,
 			bucketCache:    parent.bucketCache,
+			ephemeralKey:   ephemeralKey,
 
 			counters:         make(map[string]*counter),
 			countersSlice:    make([]*counter, 0, _defaultInitialSliceSize),
@@ -247,63 +350,48 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		// If this subscope isn't closed or is a test scope, return it.
 		// Otherwise, report it immediately and delete it so that a new
 		// (functional) scope can be returned instead.
-		if !s.closed.Load() || s.testScope {
+		if atomic.LoadInt32(&s.closed) == 0 || s.testScope {
 			subscopeBucket.mu.RUnlock()
 			return s
 		}
 
-		switch {
-		case parent.reporter != nil:
-			s.report(parent.reporter)
-		case parent.cachedReporter != nil:
-			s.cachedReport()
+		// This scope is closed; if it can still report, flush it in place.
+		if s.baseReporter != nil {
+			// If this scope can report, do so in place.
+			if s.reporter != nil {
+				s.report(s.reporter)
+			} else if s.cachedReporter != nil {
+				s.cachedReport()
+			}
 		}
-	}
 
-	tags = parent.copyAndSanitizeMap(tags)
-	sanitizedKey = scopeRegistryKey(prefix, parent.tags, tags)
-
-	// If a scope was found above but we didn't return, we need to remove the
-	// scope from both keys.
-	if ok {
+		// Recycle the scope so that we can replace it with a new one.
+		// We perform this operation while holding the registry lock to
+		// emulate the semantics of a cache eviction policy.
 		r.removeWithRLock(subscopeBucket, unsanitizedKey)
-		r.removeWithRLock(subscopeBucket, sanitizedKey)
 		s.clearMetrics()
+		subscopeBucket.mu.RUnlock()
+	} else {
+		subscopeBucket.mu.RUnlock()
+		// Sanitize the key before adding it to the bucket.
+		// This is safe as the scope key is stored only to help avoid
+		// recreating the sanitized key if we don't have to.
+		sanitizedKey = string(buf)
 	}
 
-	subscopeBucket.mu.RUnlock()
-
-	// Force-allocate the unsafe string as a safe string. Note that neither
-	// string(x) nor x+"" will have the desired effect (the former is a nop,
-	// and the latter will likely be elided), so append a new character and
-	// truncate instead.
-	//
-	// ref: https://go.dev/play/p/sxhExUKSxCw
-	unsanitizedKey = (unsanitizedKey + ".")[:len(unsanitizedKey)]
-
-	subscopeBucket.mu.Lock()
-	defer subscopeBucket.mu.Unlock()
-
-	if s, ok := r.lockedLookup(subscopeBucket, sanitizedKey); ok {
-		if _, ok = r.lockedLookup(subscopeBucket, unsanitizedKey); !ok {
-			subscopeBucket.s[unsanitizedKey] = s
-		}
-		return s
-	}
-
-	allTags := mergeRightTags(parent.tags, tags)
-	subscope := &scope{
-		separator: parent.separator,
-		prefix:    prefix,
-		// NB(prateek): don't need to copy the tags here,
-		// we assume the map provided is immutable.
-		tags:           allTags,
+	// A sanitized key is a new heap allocation, so it's safe to put
+	// it into a map.
+	s = &scope{
+		separator:      parent.separator,
+		prefix:         prefix,
+		tags:           mergeRightTags(parent.tags, tags),
 		reporter:       parent.reporter,
 		cachedReporter: parent.cachedReporter,
 		baseReporter:   parent.baseReporter,
 		defaultBuckets: parent.defaultBuckets,
 		sanitizer:      parent.sanitizer,
-		registry:       parent.registry,
+		registry:       r,
+		bucketCache:    parent.bucketCache,
 
 		counters:         make(map[string]*counter),
 		countersSlice:    make([]*counter, 0, _defaultInitialSliceSize),
@@ -312,23 +400,33 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		histograms:       make(map[string]*histogram),
 		histogramsSlice:  make([]*histogram, 0, _defaultInitialSliceSize),
 		timers:           make(map[string]*timer),
-		bucketCache:      parent.bucketCache,
 		done:             make(chan struct{}),
 		testScope:        parent.testScope,
 		noCacheSubscopes: parent.noCacheSubscopes,
 	}
-	subscopeBucket.s[sanitizedKey] = subscope
-	if _, ok := r.lockedLookup(subscopeBucket, unsanitizedKey); !ok {
-		subscopeBucket.s[unsanitizedKey] = subscope
+
+	// Initialize lastActivity timestamp
+	atomic.StoreInt64(&s.lastActivity, time.Now().Unix())
+
+	subscopeBucket.mu.Lock()
+	// Since this is a heap allocation, re-examine the cache first. We may have evicted it during a reporting cycle.
+	s2, ok := subscopeBucket.s[sanitizedKey]
+	if ok {
+		subscopeBucket.mu.Unlock()
+		return s2
+	}
+	subscopeBucket.s[sanitizedKey] = s
+	subscopeBucket.mu.Unlock()
+
+	// Increment the total subscopes counter for adaptive monitoring
+	atomic.AddInt64(&r.totalSubScopes, 1)
+
+	// If we've exceeded the high cardinality threshold, switch to adaptive mode
+	if atomic.LoadInt32(&r.adaptiveMode) == 0 && atomic.LoadInt64(&r.totalSubScopes) > HighCardinalityThreshold {
+		atomic.StoreInt32(&r.adaptiveMode, 1)
 	}
 
-	// Check if we've exceeded the high cardinality threshold and enable adaptive mode if so
-	numSubScopes := r.totalSubScopes.Add(1)
-	if numSubScopes > HighCardinalityThreshold && !r.adaptiveMode.Load() {
-		r.adaptiveMode.Store(true)
-	}
-
-	return subscope
+	return s
 }
 
 func (r *scopeRegistry) lockedLookup(subscopeBucket *scopeBucket, key string) (*scope, bool) {
@@ -337,7 +435,7 @@ func (r *scopeRegistry) lockedLookup(subscopeBucket *scopeBucket, key string) (*
 }
 
 func (r *scopeRegistry) purgeIfRootClosed() {
-	if !r.root.closed.Load() {
+	if atomic.LoadInt32(&r.root.closed) == 0 {
 		return
 	}
 
@@ -405,7 +503,28 @@ func (r *scopeRegistry) reportInternalMetrics() {
 	}
 }
 
-// newScopeRegistryWithEvictionOptions creates a new scope registry with eviction options
+// preAllocateEmptyMaps creates empty maps with preallocated capacity
+// to avoid frequent reallocations when adding metrics to scopes
+func preAllocateEmptyMaps() (
+	counters map[string]*counter,
+	countersSlice []*counter,
+	gauges map[string]*gauge,
+	gaugesSlice []*gauge,
+	histograms map[string]*histogram,
+	histogramsSlice []*histogram,
+	timers map[string]*timer,
+) {
+	counters = make(map[string]*counter, _defaultInitialSliceSize)
+	countersSlice = make([]*counter, 0, _defaultInitialSliceSize)
+	gauges = make(map[string]*gauge, _defaultInitialSliceSize)
+	gaugesSlice = make([]*gauge, 0, _defaultInitialSliceSize)
+	histograms = make(map[string]*histogram, _defaultInitialSliceSize)
+	histogramsSlice = make([]*histogram, 0, _defaultInitialSliceSize)
+	timers = make(map[string]*timer, _defaultInitialSliceSize)
+
+	return
+}
+
 func newScopeRegistryWithEvictionOptions(
 	root *scope,
 	shardCount uint,
@@ -414,6 +533,7 @@ func newScopeRegistryWithEvictionOptions(
 	enableEviction bool,
 	maxInactivity time.Duration,
 	maxSubscopesBeforeEviction int,
+	enableScopePooling bool,
 ) *scopeRegistry {
 	r := newScopeRegistryWithShardCount(root, shardCount, omitCardinalityMetrics, cardinalityMetricsTags)
 
@@ -421,7 +541,33 @@ func newScopeRegistryWithEvictionOptions(
 	r.enableEviction = enableEviction
 	r.maxInactivity = maxInactivity
 	r.maxSubscopesBeforeEviction = maxSubscopesBeforeEviction
-	r.lastEvictionCheck.Store(time.Now().Unix())
+	atomic.StoreInt64(&r.lastEvictionCheck, time.Now().Unix())
+
+	// Initialize scope pool if pooling is enabled
+	if enableScopePooling {
+		r.pooledScopes = make(map[string]*scope)
+		r.pooledScopesLRU = make([]string, 0, 128)
+		r.poolAccessTimes = make(map[string]int64)
+		r.maxPoolSize = 1000 // Cap the pool size to prevent memory issues
+		r.scopePool = sync.Pool{
+			New: func() interface{} {
+				counters, countersSlice, gauges, gaugesSlice,
+					histograms, histogramsSlice, timers := preAllocateEmptyMaps()
+
+				return &scope{
+					counters:        counters,
+					countersSlice:   countersSlice,
+					gauges:          gauges,
+					gaugesSlice:     gaugesSlice,
+					histograms:      histograms,
+					histogramsSlice: histogramsSlice,
+					timers:          timers,
+					done:            make(chan struct{}),
+					registry:        r,
+				}
+			},
+		}
+	}
 
 	return r
 }
@@ -431,14 +577,14 @@ func (r *scopeRegistry) evictInactiveScopes() {
 	now := time.Now().Unix()
 
 	// Only run eviction check periodically (every 60 seconds)
-	lastCheck := r.lastEvictionCheck.Load()
+	lastCheck := atomic.LoadInt64(&r.lastEvictionCheck)
 	if now-lastCheck < 60 {
 		return
 	}
-	r.lastEvictionCheck.Store(now)
+	atomic.StoreInt64(&r.lastEvictionCheck, now)
 
 	// Check if we have exceeded the max number of subscopes
-	if r.maxSubscopesBeforeEviction > 0 && r.totalSubScopes.Load() > int64(r.maxSubscopesBeforeEviction) {
+	if r.maxSubscopesBeforeEviction > 0 && atomic.LoadInt64(&r.totalSubScopes) > int64(r.maxSubscopesBeforeEviction) {
 		// We have too many subscopes, enforce eviction
 		r.forceEviction(now)
 		return
@@ -456,15 +602,17 @@ func (r *scopeRegistry) evictInactiveScopes() {
 		subscopeBucket.mu.RLock()
 
 		var toEvict []string
+		var scopes []*scope
 		for name, s := range subscopeBucket.s {
 			// Skip the root scope
 			if s.root {
 				continue
 			}
 
-			lastActivity := s.lastActivity.Load()
+			lastActivity := atomic.LoadInt64(&s.lastActivity)
 			if lastActivity < cutoffTime {
 				toEvict = append(toEvict, name)
+				scopes = append(scopes, s)
 			}
 		}
 
@@ -483,7 +631,14 @@ func (r *scopeRegistry) evictInactiveScopes() {
 					}
 					s.clearMetrics()
 					delete(subscopeBucket.s, name)
-					r.totalSubScopes.Add(-1)
+					atomic.AddInt64(&r.totalSubScopes, -1)
+
+					// Return the scope to the pool for reuse
+					s.resetForPool()
+					// Only return to pool if it exists
+					if r.scopePool.New != nil {
+						r.scopePool.Put(s)
+					}
 				}
 			}
 			subscopeBucket.mu.Unlock()
@@ -520,11 +675,11 @@ func (r *scopeRegistry) forceEviction(now int64) {
 
 	// Sort by activity time (oldest first)
 	sort.Slice(allScopes, func(i, j int) bool {
-		return allScopes[i].scope.lastActivity.Load() < allScopes[j].scope.lastActivity.Load()
+		return atomic.LoadInt64(&allScopes[i].scope.lastActivity) < atomic.LoadInt64(&allScopes[j].scope.lastActivity)
 	})
 
 	// Determine how many to evict - aim to evict 25% of scopes beyond the threshold
-	overageCount := int(r.totalSubScopes.Load()) - r.maxSubscopesBeforeEviction
+	overageCount := int(atomic.LoadInt64(&r.totalSubScopes)) - r.maxSubscopesBeforeEviction
 	if overageCount <= 0 {
 		return
 	}
@@ -558,9 +713,121 @@ func (r *scopeRegistry) forceEviction(now int64) {
 			}
 			s.clearMetrics()
 			delete(bucket.s, toEvict.name)
-			r.totalSubScopes.Add(-1)
+			atomic.AddInt64(&r.totalSubScopes, -1)
+
+			// Return the scope to the pool for reuse
+			s.resetForPool()
+			// Only return to pool if it exists
+			if r.scopePool.New != nil {
+				r.scopePool.Put(s)
+			}
 		}
 
 		bucket.mu.Unlock()
+	}
+}
+
+// Custom key generator for pooled scopes
+func poolKey(prefix string, tags map[string]string) string {
+	// Use a faster key generation to avoid string concatenation costs
+	var buf bytes.Buffer
+	buf.WriteString(prefix)
+	buf.WriteByte(':')
+
+	// Sort keys for deterministic ordering
+	keys := make([]string, 0, len(tags))
+	for k := range tags {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		buf.WriteString(k)
+		buf.WriteByte('=')
+		buf.WriteString(tags[k])
+		buf.WriteByte(',')
+	}
+
+	return buf.String()
+}
+
+// cleanupScopePool removes stale scopes from the pool that haven't been used recently
+func (r *scopeRegistry) cleanupScopePool() {
+	// Only run cleanup periodically
+	now := time.Now().Unix()
+	lastCheck := atomic.LoadInt64(&r.lastEvictionCheck)
+	if now-lastCheck < 60 { // Only check once per minute
+		return
+	}
+
+	// Update last check time
+	atomic.StoreInt64(&r.lastEvictionCheck, now)
+
+	r.pooledScopesMtx.Lock()
+	defer r.pooledScopesMtx.Unlock()
+
+	// Nothing to clean if pool is empty
+	if len(r.pooledScopes) == 0 {
+		return
+	}
+
+	// Calculate pooling statistics
+	hitRate := float64(0)
+	if totalOps := atomic.LoadInt64(&r.poolHits) + atomic.LoadInt64(&r.poolMisses); totalOps > 0 {
+		hitRate = float64(atomic.LoadInt64(&r.poolHits)) / float64(totalOps) * 100
+	}
+
+	// Adjust pool size based on hit rate
+	// If hit rate is high, we can increase max pool size
+	if hitRate > 90 && r.maxPoolSize < 2000 {
+		r.maxPoolSize += 100
+	} else if hitRate < 30 && r.maxPoolSize > 100 {
+		r.maxPoolSize -= 50
+	}
+
+	// Remove old scopes - anything not accessed in the last 5 minutes
+	cutoffTime := now - 300 // 5 minutes
+	var removedCount int
+
+	// Start with the oldest scopes first (front of LRU list)
+	i := 0
+	for i < len(r.pooledScopesLRU) {
+		key := r.pooledScopesLRU[i]
+		accessTime, exists := r.poolAccessTimes[key]
+
+		// If too old or we need to reduce pool size
+		if !exists || accessTime < cutoffTime || len(r.pooledScopes) > r.maxPoolSize {
+			// Get the scope and remove it from all tracking
+			scope := r.pooledScopes[key]
+			delete(r.pooledScopes, key)
+			delete(r.poolAccessTimes, key)
+
+			// Remove from LRU by swapping with last element and truncating
+			lastIdx := len(r.pooledScopesLRU) - 1
+			if i < lastIdx {
+				r.pooledScopesLRU[i] = r.pooledScopesLRU[lastIdx]
+			}
+			r.pooledScopesLRU = r.pooledScopesLRU[:lastIdx]
+
+			// Return to generic pool
+			if scope != nil {
+				r.scopePool.Put(scope)
+			}
+
+			// Update counter
+			removedCount++
+		} else {
+			// Only increment if we didn't remove this entry
+			i++
+		}
+	}
+
+	// Update pool size counter
+	atomic.StoreInt64(&r.poolSize, int64(len(r.pooledScopes)))
+
+	// Reset hit/miss counters periodically
+	if now%3600 == 0 { // Reset every hour
+		atomic.StoreInt64(&r.poolHits, 0)
+		atomic.StoreInt64(&r.poolMisses, 0)
 	}
 }
