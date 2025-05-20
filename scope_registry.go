@@ -22,6 +22,7 @@ package tally
 
 import (
 	"bytes"
+	"fmt"
 	"hash/maphash"
 	"runtime"
 	"sort"
@@ -41,6 +42,13 @@ var (
 	gaugeCardinalityName     = "tally.internal.gauge_cardinality"
 	histogramCardinalityName = "tally.internal.histogram_cardinality"
 	scopeCardinalityName     = "tally.internal.num_active_scopes"
+
+	// bytesBufferPool is a pool for bytes.Buffer to reduce allocations.
+	bytesBufferPool = sync.Pool{
+		New: func() interface{} {
+			return new(bytes.Buffer)
+		},
+	}
 )
 
 const (
@@ -49,6 +57,29 @@ const (
 	// HighCardinalityThreshold is the number of subscopes after which caching will be disabled
 	HighCardinalityThreshold = 5000
 )
+
+// EnableParallelFlush controls whether to use parallel processing for flushing
+// when reporting metrics. Set to true for higher performance in production,
+// but leave as false for tests to avoid wait group issues with the test reporter.
+//
+// Based on benchmark results, the optimal configuration for high-cardinality
+// environments is:
+// - For test environments: EnableParallelFlush=false (sequential processing)
+// - For production: EnableParallelFlush=true and MaxParallelFlushGoroutines=4 or 8
+//
+// The per-shard parallel approach (MaxParallelFlushGoroutines=0) should generally be
+// avoided as it can lead to too many goroutines under high-cardinality conditions.
+var EnableParallelFlush atomic.Bool
+
+// MaxParallelFlushGoroutines controls the maximum number of goroutines to use for parallel flushing.
+// Default value of 0 means use one goroutine per shard. Setting this to a positive number
+// will use the specified number of worker goroutines for optimal resource usage.
+//
+// Recommended values:
+// - 0: Use one goroutine per shard (not recommended for high-cardinality cases)
+// - 4-8: Provides good performance balance for most workloads
+// - 16+: May cause degraded performance due to contention
+var MaxParallelFlushGoroutines int
 
 type scopeRegistry struct {
 	seed maphash.Seed
@@ -86,6 +117,10 @@ type scopeRegistry struct {
 	poolSize        int64             // Current size of the pool, accessed atomically
 	poolHits        int64             // Track hits for stats
 	poolMisses      int64             // Track misses for stats
+
+	// String interner for scope keys
+	stringInterner map[string]string
+	internerMutex  sync.Mutex
 }
 
 type scopeBucket struct {
@@ -117,6 +152,7 @@ func newScopeRegistryWithShardCount(
 			"host":     DefaultTagRedactValue,
 			"instance": DefaultTagRedactValue,
 		},
+		stringInterner: make(map[string]string),
 	}
 
 	// Initialize the adaptiveMode and totalSubScopes fields
@@ -142,6 +178,22 @@ func newScopeRegistryWithShardCount(
 	return r
 }
 
+// internString returns a canonical representation of the given string,
+// reducing allocations if the same string value appears multiple times.
+func (r *scopeRegistry) internString(s string) string {
+	r.internerMutex.Lock()
+	defer r.internerMutex.Unlock()
+
+	interned, ok := r.stringInterner[s]
+	if ok {
+		return interned
+	}
+
+	r.stringInterner[s] = s
+	return s
+}
+
+// Report processes all scopes and reports their metrics to the provided reporter
 func (r *scopeRegistry) Report(reporter StatsReporter) {
 	defer r.purgeIfRootClosed()
 	r.reportInternalMetrics()
@@ -156,22 +208,219 @@ func (r *scopeRegistry) Report(reporter StatsReporter) {
 		r.cleanupScopePool()
 	}
 
-	for _, subscopeBucket := range r.subscopes {
-		subscopeBucket.mu.RLock()
-
-		for name, s := range subscopeBucket.s {
-			s.report(reporter)
-
-			if atomic.LoadInt32(&s.closed) != 0 {
-				r.removeWithRLock(subscopeBucket, name)
-				s.clearMetrics()
-			}
+	// Choose between sequential or parallel processing based on the feature flag
+	if EnableParallelFlush.Load() {
+		if MaxParallelFlushGoroutines > 0 {
+			r.workerPoolReport(reporter, MaxParallelFlushGoroutines)
+		} else {
+			r.parallelReport(reporter)
 		}
-
-		subscopeBucket.mu.RUnlock()
+	} else {
+		r.sequentialReport(reporter)
 	}
 }
 
+// sequentialReport processes all scopes sequentially to avoid waitgroup issues with test reporters
+func (r *scopeRegistry) sequentialReport(reporter StatsReporter) {
+	for _, subscopeBucket := range r.subscopes {
+		// Copy out scope references under lock to minimize lock duration
+		scopesToReport := make([]*scope, 0, len(subscopeBucket.s))
+		scopeKeys := make([]string, 0, len(subscopeBucket.s))
+
+		subscopeBucket.mu.RLock()
+		for name, s := range subscopeBucket.s {
+			scopesToReport = append(scopesToReport, s)
+			scopeKeys = append(scopeKeys, name)
+		}
+		subscopeBucket.mu.RUnlock()
+
+		// Process each scope without holding the lock
+		for i, s := range scopesToReport {
+			safeReportScope(s, reporter)
+
+			// Check if scope is closed after reporting
+			if atomic.LoadInt32(&s.closed) != 0 {
+				subscopeBucket.mu.Lock()
+				delete(subscopeBucket.s, scopeKeys[i])
+				subscopeBucket.mu.Unlock()
+				s.clearMetrics()
+			}
+		}
+	}
+}
+
+// safeReportScope wraps the scope.report call with panic recovery.
+func safeReportScope(s *scope, reporter StatsReporter) {
+	defer func() {
+		if err := recover(); err != nil {
+			// TODO: Consider making this logging configurable or sending to an internal metric
+			fmt.Printf("tally: panic during scope report for scope %s: %v\n", s.fullyQualifiedName("."), err)
+			// Potentially re-panic if it's a critical error, or ensure the reporter's state is clean.
+			// For now, we just log and continue, assuming the reporter can handle individual metric failures.
+		}
+	}()
+	s.report(reporter)
+}
+
+// parallelReport processes scopes in parallel with one goroutine per shard for high throughput
+func (r *scopeRegistry) parallelReport(reporter StatsReporter) {
+	var wg sync.WaitGroup
+	type closedScopeInfo struct {
+		bucket *scopeBucket
+		name   string
+		scope  *scope
+	}
+
+	// Buffer for closed scopes info
+	closedScopes := make(chan closedScopeInfo, 100)
+
+	// Process each shard concurrently
+	for _, subscopeBucket := range r.subscopes {
+		wg.Add(1)
+		go func(bucket *scopeBucket) {
+			defer wg.Done()
+
+			// Copy scope references under lock to minimize lock duration
+			scopesToReport := make([]*scope, 0, len(bucket.s))
+			scopeKeys := make([]string, 0, len(bucket.s))
+
+			bucket.mu.RLock()
+			for name, s := range bucket.s {
+				scopesToReport = append(scopesToReport, s)
+				scopeKeys = append(scopeKeys, name)
+			}
+			bucket.mu.RUnlock()
+
+			// Process each scope without holding the lock
+			for i, s := range scopesToReport {
+				safeReportScope(s, reporter)
+
+				// Check if scope is closed after reporting
+				if atomic.LoadInt32(&s.closed) != 0 {
+					closedScopes <- closedScopeInfo{
+						bucket: bucket,
+						name:   scopeKeys[i],
+						scope:  s,
+					}
+				}
+			}
+		}(subscopeBucket)
+	}
+
+	// Close channel when all reporting is done
+	go func() {
+		wg.Wait()
+		close(closedScopes)
+	}()
+
+	// Process closed scopes outside the main reporting path
+	for info := range closedScopes {
+		info.bucket.mu.Lock()
+		delete(info.bucket.s, info.name)
+		info.bucket.mu.Unlock()
+		info.scope.clearMetrics()
+	}
+}
+
+// workerPoolReport processes scopes using a fixed-size worker pool for better resource control
+func (r *scopeRegistry) workerPoolReport(reporter StatsReporter, numWorkers int) {
+	var wg sync.WaitGroup
+
+	// First gather all scope references under minimal lock contention
+	type scopeBatch struct {
+		bucket    *scopeBucket
+		scopes    []*scope
+		scopeKeys []string
+	}
+
+	// Collect all scopes across all buckets
+	var batches []scopeBatch
+
+	for _, subscopeBucket := range r.subscopes {
+		batch := scopeBatch{
+			bucket: subscopeBucket,
+		}
+
+		subscopeBucket.mu.RLock()
+		batch.scopes = make([]*scope, 0, len(subscopeBucket.s))
+		batch.scopeKeys = make([]string, 0, len(subscopeBucket.s))
+
+		for name, s := range subscopeBucket.s {
+			batch.scopes = append(batch.scopes, s)
+			batch.scopeKeys = append(batch.scopeKeys, name)
+		}
+		subscopeBucket.mu.RUnlock()
+
+		if len(batch.scopes) > 0 {
+			batches = append(batches, batch)
+		}
+	}
+
+	// If we have no scopes to process, return early
+	if len(batches) == 0 {
+		return
+	}
+
+	// Split the work evenly among workers
+	type workItem struct {
+		scope    *scope
+		scopeKey string
+		bucket   *scopeBucket
+	}
+
+	// Create work queue - estimate size based on average batch
+	var totalScopes int
+	for _, batch := range batches {
+		totalScopes += len(batch.scopes)
+	}
+
+	workChan := make(chan workItem, totalScopes)
+	closedScopesChan := make(chan workItem, totalScopes) // Channel for scopes found to be closed
+
+	// Fill work queue
+	for _, batch := range batches {
+		for scopeIdx, s := range batch.scopes {
+			workChan <- workItem{
+				scope:    s,
+				scopeKey: batch.scopeKeys[scopeIdx],
+				bucket:   batch.bucket,
+			}
+		}
+	}
+	close(workChan)
+
+	// Start worker pool
+	wg.Add(numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			defer wg.Done()
+			for item := range workChan {
+				safeReportScope(item.scope, reporter)
+
+				// Check if scope is closed
+				if atomic.LoadInt32(&item.scope.closed) != 0 {
+					closedScopesChan <- item
+				}
+			}
+		}()
+	}
+
+	// Close result channel when all workers are done
+	go func() {
+		wg.Wait()
+		close(closedScopesChan)
+	}()
+
+	// Process closed scopes
+	for item := range closedScopesChan {
+		item.bucket.mu.Lock()
+		delete(item.bucket.s, item.scopeKey)
+		item.bucket.mu.Unlock()
+		item.scope.clearMetrics()
+	}
+}
+
+// CachedReport processes all scopes and reports their metrics via the cached reporter
 func (r *scopeRegistry) CachedReport() {
 	defer r.purgeIfRootClosed()
 	r.reportInternalMetrics()
@@ -186,29 +435,231 @@ func (r *scopeRegistry) CachedReport() {
 		r.cleanupScopePool()
 	}
 
+	// Choose between sequential or parallel processing based on the feature flag
+	if EnableParallelFlush.Load() {
+		if MaxParallelFlushGoroutines > 0 {
+			r.workerPoolCachedReport(MaxParallelFlushGoroutines)
+		} else {
+			r.parallelCachedReport()
+		}
+	} else {
+		r.sequentialCachedReport()
+	}
+}
+
+// sequentialCachedReport processes all scopes sequentially to avoid waitgroup issues
+func (r *scopeRegistry) sequentialCachedReport() {
 	for _, subscopeBucket := range r.subscopes {
+		// Copy out scope references under lock to minimize lock duration
+		scopesToReport := make([]*scope, 0, len(subscopeBucket.s))
+		scopeKeys := make([]string, 0, len(subscopeBucket.s))
+
 		subscopeBucket.mu.RLock()
-
 		for name, s := range subscopeBucket.s {
-			s.cachedReport()
+			scopesToReport = append(scopesToReport, s)
+			scopeKeys = append(scopeKeys, name)
+		}
+		subscopeBucket.mu.RUnlock()
 
+		// Process each scope without holding the lock
+		for i, s := range scopesToReport {
+			safeCachedReportScope(s)
+
+			// Check if scope is closed after reporting
 			if atomic.LoadInt32(&s.closed) != 0 {
-				r.removeWithRLock(subscopeBucket, name)
+				subscopeBucket.mu.Lock()
+				delete(subscopeBucket.s, scopeKeys[i])
+				subscopeBucket.mu.Unlock()
 				s.clearMetrics()
 			}
 		}
+	}
+}
 
+// safeCachedReportScope wraps the scope.cachedReport call with panic recovery.
+func safeCachedReportScope(s *scope) {
+	defer func() {
+		if err := recover(); err != nil {
+			// TODO: Consider making this logging configurable or sending to an internal metric
+			fmt.Printf("tally: panic during scope cachedReport for scope %s: %v\n", s.fullyQualifiedName("."), err)
+		}
+	}()
+	s.cachedReport()
+}
+
+// parallelCachedReport processes scopes in parallel with one goroutine per shard
+func (r *scopeRegistry) parallelCachedReport() {
+	var wg sync.WaitGroup
+	type closedScopeInfo struct {
+		bucket *scopeBucket
+		name   string
+		scope  *scope
+	}
+
+	// Buffer for closed scopes info
+	closedScopes := make(chan closedScopeInfo, 100)
+
+	// Process each shard concurrently
+	for _, subscopeBucket := range r.subscopes {
+		wg.Add(1)
+		go func(bucket *scopeBucket) {
+			defer wg.Done()
+
+			// Copy scope references under lock to minimize lock duration
+			scopesToReport := make([]*scope, 0, len(bucket.s))
+			scopeKeys := make([]string, 0, len(bucket.s))
+
+			bucket.mu.RLock()
+			for name, s := range bucket.s {
+				scopesToReport = append(scopesToReport, s)
+				scopeKeys = append(scopeKeys, name)
+			}
+			bucket.mu.RUnlock()
+
+			// Process each scope without holding the lock
+			for i, s := range scopesToReport {
+				safeCachedReportScope(s)
+
+				// Check if scope is closed after reporting
+				if atomic.LoadInt32(&s.closed) != 0 {
+					closedScopes <- closedScopeInfo{
+						bucket: bucket,
+						name:   scopeKeys[i],
+						scope:  s,
+					}
+				}
+			}
+		}(subscopeBucket)
+	}
+
+	// Close channel when all reporting is done
+	go func() {
+		wg.Wait()
+		close(closedScopes)
+	}()
+
+	// Process closed scopes outside the main reporting path
+	for info := range closedScopes {
+		info.bucket.mu.Lock()
+		delete(info.bucket.s, info.name)
+		info.bucket.mu.Unlock()
+		info.scope.clearMetrics()
+	}
+}
+
+// workerPoolCachedReport processes scopes using a fixed-size worker pool
+func (r *scopeRegistry) workerPoolCachedReport(numWorkers int) {
+	var wg sync.WaitGroup
+
+	// First gather all scope references under minimal lock contention
+	type scopeBatch struct {
+		bucket    *scopeBucket
+		scopes    []*scope
+		scopeKeys []string
+	}
+
+	// Collect all scopes across all buckets
+	var batches []scopeBatch
+
+	for _, subscopeBucket := range r.subscopes {
+		batch := scopeBatch{
+			bucket: subscopeBucket,
+		}
+
+		subscopeBucket.mu.RLock()
+		batch.scopes = make([]*scope, 0, len(subscopeBucket.s))
+		batch.scopeKeys = make([]string, 0, len(subscopeBucket.s))
+
+		for name, s := range subscopeBucket.s {
+			batch.scopes = append(batch.scopes, s)
+			batch.scopeKeys = append(batch.scopeKeys, name)
+		}
 		subscopeBucket.mu.RUnlock()
+
+		if len(batch.scopes) > 0 {
+			batches = append(batches, batch)
+		}
+	}
+
+	// If we have no scopes to process, return early
+	if len(batches) == 0 {
+		return
+	}
+
+	// Split the work evenly among workers
+	type workItem struct {
+		scope    *scope
+		scopeKey string
+		bucket   *scopeBucket
+	}
+
+	// Create work queue
+	var totalScopes int
+	for _, batch := range batches {
+		totalScopes += len(batch.scopes)
+	}
+	workChan := make(chan workItem, totalScopes)
+	closedScopesChan := make(chan workItem, totalScopes) // Channel for scopes found to be closed
+
+	// Fill work queue
+	for _, batch := range batches {
+		for scopeIdx, s := range batch.scopes {
+			workChan <- workItem{
+				scope:    s,
+				scopeKey: batch.scopeKeys[scopeIdx],
+				bucket:   batch.bucket,
+			}
+		}
+	}
+	close(workChan)
+
+	// Start worker pool
+	wg.Add(numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			defer wg.Done()
+			for item := range workChan {
+				safeCachedReportScope(item.scope)
+
+				if atomic.LoadInt32(&item.scope.closed) != 0 {
+					closedScopesChan <- item
+				}
+			}
+		}()
+	}
+
+	// Close result channel when all workers are done
+	go func() {
+		wg.Wait()
+		close(closedScopesChan)
+	}()
+
+	// Process closed scopes
+	for item := range closedScopesChan {
+		item.bucket.mu.Lock()
+		delete(item.bucket.s, item.scopeKey)
+		item.bucket.mu.Unlock()
+		item.scope.clearMetrics()
 	}
 }
 
 func (r *scopeRegistry) ForEachScope(f func(*scope)) {
+	// Process each shard sequentially, but minimize lock hold time
 	for _, subscopeBucket := range r.subscopes {
+		// Copy scope references under lock to minimize lock duration
+		var scopesToProcess []*scope
+
 		subscopeBucket.mu.RLock()
+		scopesToProcess = make([]*scope, 0, len(subscopeBucket.s))
 		for _, s := range subscopeBucket.s {
-			f(s)
+			scopesToProcess = append(scopesToProcess, s)
 		}
 		subscopeBucket.mu.RUnlock()
+
+		// Process the scopes outside the lock
+		for _, s := range scopesToProcess {
+			f(s)
+		}
 	}
 }
 
@@ -222,7 +673,8 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		allTags := mergeRightTags(parent.tags, tags)
 
 		// For ephemeral scopes, we'll generate a key for pooling purposes only
-		ephemeralKey := poolKey(prefix, allTags)
+		rawEphemeralKey := poolKey(prefix, allTags)
+		ephemeralKey := r.internString(rawEphemeralKey)
 
 		// Get a scope from the pool if available
 		if r.scopePool.New != nil {
@@ -376,7 +828,8 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		// Sanitize the key before adding it to the bucket.
 		// This is safe as the scope key is stored only to help avoid
 		// recreating the sanitized key if we don't have to.
-		sanitizedKey = string(buf)
+		keyCandidate := string(buf)
+		sanitizedKey = r.internString(keyCandidate)
 	}
 
 	// A sanitized key is a new heap allocation, so it's safe to put
@@ -742,7 +1195,10 @@ func (r *scopeRegistry) forceEviction(now int64) {
 // Custom key generator for pooled scopes
 func poolKey(prefix string, tags map[string]string) string {
 	// Use a faster key generation to avoid string concatenation costs
-	var buf bytes.Buffer
+	buf := bytesBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bytesBufferPool.Put(buf)
+
 	buf.WriteString(prefix)
 	buf.WriteByte(':')
 
@@ -842,4 +1298,45 @@ func (r *scopeRegistry) cleanupScopePool() {
 		atomic.StoreInt64(&r.poolHits, 0)
 		atomic.StoreInt64(&r.poolMisses, 0)
 	}
+}
+
+// scopeClosureInfo holds the information needed to clean up a closed scope
+type scopeClosureInfo struct {
+	bucket *scopeBucket
+	name   string
+	scope  *scope
+}
+
+// EnableOptimizedFlush configures the flush mechanism for optimal performance
+// in production environments. This reduces lock contention during flush operations
+// by using a worker pool approach with the recommended number of workers.
+//
+// This is particularly beneficial for high-cardinality metric workloads
+// where many metrics need to be reported concurrently.
+func EnableOptimizedFlush() {
+	// Enable parallel processing
+	EnableParallelFlush.Store(true)
+
+	// Use a number of workers based on CPU cores, but capped to avoid contention
+	numCPU := runtime.GOMAXPROCS(-1)
+	if numCPU <= 4 {
+		MaxParallelFlushGoroutines = numCPU
+	} else {
+		// Use 75% of available CPUs, minimum 4, maximum 8
+		workers := (numCPU * 3) / 4
+		if workers < 4 {
+			workers = 4
+		}
+		if workers > 8 {
+			workers = 8
+		}
+		MaxParallelFlushGoroutines = workers
+	}
+}
+
+// DisableOptimizedFlush sets the flush settings back to sequential.
+// Useful for testing or environments where parallelism is not desired.
+func DisableOptimizedFlush() {
+	EnableParallelFlush.Store(false)
+	MaxParallelFlushGoroutines = 0
 }

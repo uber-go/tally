@@ -119,9 +119,10 @@ type testStatsReporter struct {
 	timers     map[string]*testIntValue
 	histograms map[string]*testHistogramValue
 
-	flushes int32
-	noWait  bool
-	mtx     sync.Mutex
+	flushes      int32
+	noWait       bool
+	mtx          sync.Mutex
+	suppressLogs bool
 }
 
 // newTestStatsReporter returns a new TestStatsReporter
