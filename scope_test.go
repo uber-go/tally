@@ -1404,3 +1404,181 @@ func TestHighCardinalityAdaptiveBehavior(t *testing.T) {
 
 	// Test complete
 }
+
+func TestSubscopeEviction(t *testing.T) {
+	// Create a test scope with eviction enabled
+	// We use a real RootScope here because TestScope might not support all features
+	r := newTestStatsReporter()
+	root, closer := NewRootScope(ScopeOptions{
+		Prefix:                 "foo",
+		Reporter:               r,
+		OmitCardinalityMetrics: true,
+		EnableSubscopeEviction: true,
+		MaxSubscopeInactivity:  5 * time.Minute,
+	}, 0)
+	defer closer.Close()
+
+	// Record the pointer value of the first scope to compare later
+	s0 := root.Tagged(map[string]string{"id": "0"})
+	s0Ptr := fmt.Sprintf("%p", s0)
+
+	// Create several more scopes
+	scopes := make([]Scope, 4)
+	for i := 0; i < 4; i++ {
+		scopes[i] = root.Tagged(map[string]string{"id": strconv.Itoa(i + 1)})
+	}
+
+	// Manually set the last activity time for scope 0 to be old
+	rootImpl := root.(*scope)
+	registry := rootImpl.registry
+
+	// Before eviction, manually modify the last activity time of s0 (scope 0)
+	for _, bucket := range registry.subscopes {
+		bucket.mu.RLock()
+		for _, scope := range bucket.s {
+			// Check for tag value directly
+			if tag, exists := scope.tags["id"]; exists && tag == "0" {
+				// Set a timestamp from 10 minutes ago
+				scope.lastActivity.Store(time.Now().Add(-10 * time.Minute).Unix())
+			}
+		}
+		bucket.mu.RUnlock()
+	}
+
+	// Get the current count of subscopes
+	var initialCount int64
+	for _, bucket := range registry.subscopes {
+		bucket.mu.RLock()
+		initialCount += int64(len(bucket.s))
+		bucket.mu.RUnlock()
+	}
+
+	// Force eviction by simulating a report
+	registry.lastEvictionCheck.Store(0) // Reset last check time to ensure eviction runs
+	if registry.root.reporter != nil {
+		registry.Report(registry.root.reporter)
+	} else {
+		registry.CachedReport()
+	}
+
+	// Get the new count of subscopes after eviction
+	var afterCount int64
+	for _, bucket := range registry.subscopes {
+		bucket.mu.RLock()
+		afterCount += int64(len(bucket.s))
+		bucket.mu.RUnlock()
+	}
+
+	// Check that we have evicted at least one scope
+	assert.True(t, afterCount < initialCount, "Should have evicted at least one scope")
+
+	// Create a new scope with the same tag as the evicted one
+	newScope := root.Tagged(map[string]string{"id": "0"})
+	newScopePtr := fmt.Sprintf("%p", newScope)
+
+	// The new scope should be different from the original one
+	assert.NotEqual(t, s0Ptr, newScopePtr, "New scope should be a different instance after eviction")
+}
+
+func TestEvictionLRU(t *testing.T) {
+	// Create a test scope with explicit max-subscopes eviction
+	r := newTestStatsReporter()
+	// Set noWait to avoid WaitGroup deadlocks
+	r.noWait = true
+
+	root, closer := NewRootScope(ScopeOptions{
+		Prefix:                     "foo",
+		Reporter:                   r,
+		OmitCardinalityMetrics:     true,
+		EnableSubscopeEviction:     true,
+		MaxSubscopesBeforeEviction: 5, // Very low limit to ensure eviction
+	}, 0)
+
+	rootImpl := root.(*scope)
+	registry := rootImpl.registry
+
+	// Directly access the registry to clear any existing scopes (like the root scope)
+	// and reset the counter so we have complete control
+	for _, bucket := range registry.subscopes {
+		bucket.mu.Lock()
+		for k, s := range bucket.s {
+			if !s.root {
+				delete(bucket.s, k)
+			}
+		}
+		bucket.mu.Unlock()
+	}
+
+	// Reset the subscope counter
+	registry.totalSubScopes.Store(0)
+
+	// Create scopes with controlled timestamps
+	var scopeRefs []Scope
+	var scopePtrs []string
+
+	// Create scopes with progressively newer timestamps
+	for i := 0; i < 10; i++ {
+		scope := root.Tagged(map[string]string{"id": strconv.Itoa(i)})
+		scopeRefs = append(scopeRefs, scope)
+		scopePtrs = append(scopePtrs, fmt.Sprintf("%p", scope))
+
+		// Use the scope to record a metric which will update its activity timestamp
+		scope.Counter(fmt.Sprintf("counter-%d", i)).Inc(1)
+
+		// For the first 5 scopes, make them "older" by setting their timestamp to the past
+		// with progressively newer timestamps (0 oldest, 4 newest among old ones)
+		if i < 5 {
+			// For each scope, set a timestamp that's (5-i) hours ago
+			// So scope 0 is 5 hours old, scope 1 is 4 hours old, etc.
+			ageHours := 5 - i
+			for _, bucket := range registry.subscopes {
+				bucket.mu.RLock()
+				for _, s := range bucket.s {
+					if tag, exists := s.tags["id"]; exists && tag == strconv.Itoa(i) {
+						s.lastActivity.Store(time.Now().Add(-time.Duration(ageHours) * time.Hour).Unix())
+					}
+				}
+				bucket.mu.RUnlock()
+			}
+		}
+
+		// Force the counter to increment for testing
+		registry.totalSubScopes.Store(int64(i + 1))
+	}
+
+	// Now we have:
+	// - 10 scopes total
+	// - Configured max of 5 scopes before eviction
+	// - First 5 scopes have old timestamps, with scope 0 being the oldest
+
+	// Directly call forceEviction to test it explicitly
+	registry.forceEviction(time.Now().Unix())
+
+	// Clean up resources at the end of the test
+	defer closer.Close()
+
+	// Now the oldest scopes should be evicted. Let's create new scopes with the same IDs
+	// and verify they're different instances
+	for i := 0; i < 3; i++ { // Check the first 3 which should definitely be evicted
+		newScope := root.Tagged(map[string]string{"id": strconv.Itoa(i)})
+		newScopePtr := fmt.Sprintf("%p", newScope)
+
+		// The new scope should be a different instance from the original
+		assert.NotEqual(t,
+			scopePtrs[i],
+			newScopePtr,
+			fmt.Sprintf("Scope with id %d should have been evicted", i))
+	}
+
+	// Also verify that one of the newer scopes is still the same instance
+	for i := 7; i < 10; i++ { // Check some of the newest ones
+		newScope := root.Tagged(map[string]string{"id": strconv.Itoa(i)})
+		newScopePtr := fmt.Sprintf("%p", newScope)
+
+		// The new scope should be the same instance as the original (not evicted)
+		assert.Equal(t,
+			scopePtrs[i],
+			newScopePtr,
+			fmt.Sprintf("Scope with id %d should NOT have been evicted", i))
+	}
+}
