@@ -87,12 +87,13 @@ type scope struct {
 	// nb: deliberately skipping timersSlice as we report timers immediately,
 	// no buffering is involved.
 
-	bucketCache *bucketCache
-	closed      atomic.Bool
-	done        chan struct{}
-	wg          sync.WaitGroup
-	root        bool
-	testScope   bool
+	bucketCache      *bucketCache
+	closed           atomic.Bool
+	done             chan struct{}
+	wg               sync.WaitGroup
+	root             bool
+	testScope        bool
+	noCacheSubscopes bool
 }
 
 // ScopeOptions is a set of options to construct a scope.
@@ -106,6 +107,7 @@ type ScopeOptions struct {
 	SanitizeOptions        *SanitizeOptions
 	OmitCardinalityMetrics bool
 	CardinalityMetricsTags map[string]string
+	NoCacheSubscopes       bool // When true, subscopes won't be cached in the registry
 
 	testScope          bool
 	registryShardCount uint
@@ -164,24 +166,25 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 	}
 
 	s := &scope{
-		baseReporter:    baseReporter,
-		bucketCache:     newBucketCache(),
-		cachedReporter:  opts.CachedReporter,
-		counters:        make(map[string]*counter),
-		countersSlice:   make([]*counter, 0, _defaultInitialSliceSize),
-		defaultBuckets:  opts.DefaultBuckets,
-		done:            make(chan struct{}),
-		gauges:          make(map[string]*gauge),
-		gaugesSlice:     make([]*gauge, 0, _defaultInitialSliceSize),
-		histograms:      make(map[string]*histogram),
-		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
-		prefix:          sanitizer.Name(opts.Prefix),
-		reporter:        opts.Reporter,
-		sanitizer:       sanitizer,
-		separator:       sanitizer.Name(opts.Separator),
-		timers:          make(map[string]*timer),
-		root:            true,
-		testScope:       opts.testScope,
+		baseReporter:     baseReporter,
+		bucketCache:      newBucketCache(),
+		cachedReporter:   opts.CachedReporter,
+		counters:         make(map[string]*counter),
+		countersSlice:    make([]*counter, 0, _defaultInitialSliceSize),
+		defaultBuckets:   opts.DefaultBuckets,
+		done:             make(chan struct{}),
+		gauges:           make(map[string]*gauge),
+		gaugesSlice:      make([]*gauge, 0, _defaultInitialSliceSize),
+		histograms:       make(map[string]*histogram),
+		histogramsSlice:  make([]*histogram, 0, _defaultInitialSliceSize),
+		prefix:           sanitizer.Name(opts.Prefix),
+		reporter:         opts.Reporter,
+		sanitizer:        sanitizer,
+		separator:        sanitizer.Name(opts.Separator),
+		timers:           make(map[string]*timer),
+		root:             true,
+		testScope:        opts.testScope,
+		noCacheSubscopes: opts.NoCacheSubscopes,
 	}
 
 	// NB(r): Take a copy of the tags on creation
@@ -448,6 +451,37 @@ func (s *scope) SubScope(prefix string) Scope {
 }
 
 func (s *scope) subscope(prefix string, tags map[string]string) Scope {
+	// If NoCacheSubscopes is enabled, create an ephemeral scope that isn't stored in the registry
+	if s.registry != nil && s.registry.root != nil && s.registry.root.baseReporter != nil {
+		// Check if NoCacheSubscopes option is enabled on the root scope
+		if s.noCacheSubscopes {
+			allTags := mergeRightTags(s.tags, tags)
+			return &scope{
+				separator:      s.separator,
+				prefix:         prefix,
+				tags:           allTags,
+				reporter:       s.reporter,
+				cachedReporter: s.cachedReporter,
+				baseReporter:   s.baseReporter,
+				defaultBuckets: s.defaultBuckets,
+				sanitizer:      s.sanitizer,
+				registry:       s.registry,
+				bucketCache:    s.bucketCache,
+
+				counters:         make(map[string]*counter),
+				countersSlice:    make([]*counter, 0, _defaultInitialSliceSize),
+				gauges:           make(map[string]*gauge),
+				gaugesSlice:      make([]*gauge, 0, _defaultInitialSliceSize),
+				histograms:       make(map[string]*histogram),
+				histogramsSlice:  make([]*histogram, 0, _defaultInitialSliceSize),
+				timers:           make(map[string]*timer),
+				done:             make(chan struct{}),
+				testScope:        s.testScope,
+				noCacheSubscopes: s.noCacheSubscopes,
+			}
+		}
+	}
+
 	return s.registry.Subscope(s, prefix, tags)
 }
 

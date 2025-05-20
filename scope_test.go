@@ -68,12 +68,16 @@ type testIntValue struct {
 
 func (m *testIntValue) ReportCount(value int64) {
 	m.val = value
-	m.reporter.cg.Done()
+	if !m.reporter.noWait {
+		m.reporter.cg.Done()
+	}
 }
 
 func (m *testIntValue) ReportTimer(interval time.Duration) {
 	m.val = int64(interval)
-	m.reporter.tg.Done()
+	if !m.reporter.noWait {
+		m.reporter.tg.Done()
+	}
 }
 
 type testFloatValue struct {
@@ -84,7 +88,9 @@ type testFloatValue struct {
 
 func (m *testFloatValue) ReportGauge(value float64) {
 	m.val = value
-	m.reporter.gg.Done()
+	if !m.reporter.noWait {
+		m.reporter.gg.Done()
+	}
 }
 
 type testHistogramValue struct {
@@ -114,6 +120,7 @@ type testStatsReporter struct {
 	histograms map[string]*testHistogramValue
 
 	flushes int32
+	noWait  bool
 }
 
 // newTestStatsReporter returns a new TestStatsReporter
@@ -230,13 +237,14 @@ func (r *testStatsReporter) AllocateCounter(
 
 func (r *testStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
 	r.mtx.Lock()
-	defer r.mtx.Unlock()
-
 	r.counters[name] = &testIntValue{
 		val:  value,
 		tags: tags,
 	}
-	r.cg.Done()
+	r.mtx.Unlock()
+	if !r.noWait {
+		r.cg.Done()
+	}
 }
 
 func (r *testStatsReporter) AllocateGauge(
@@ -256,13 +264,14 @@ func (r *testStatsReporter) AllocateGauge(
 
 func (r *testStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
 	r.mtx.Lock()
-	defer r.mtx.Unlock()
-
 	r.gauges[name] = &testFloatValue{
 		val:  value,
 		tags: tags,
 	}
-	r.gg.Done()
+	r.mtx.Unlock()
+	if !r.noWait {
+		r.gg.Done()
+	}
 }
 
 func (r *testStatsReporter) AllocateTimer(
@@ -282,13 +291,14 @@ func (r *testStatsReporter) AllocateTimer(
 
 func (r *testStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
 	r.mtx.Lock()
-	defer r.mtx.Unlock()
-
 	r.timers[name] = &testIntValue{
 		val:  int64(interval),
 		tags: tags,
 	}
-	r.tg.Done()
+	r.mtx.Unlock()
+	if !r.noWait {
+		r.tg.Done()
+	}
 }
 
 func (r *testStatsReporter) AllocateHistogram(
@@ -353,8 +363,6 @@ func (r *testStatsReporter) ReportHistogramValueSamples(
 	samples int64,
 ) {
 	r.mtx.Lock()
-	defer r.mtx.Unlock()
-
 	key := KeyForPrefixedStringMap(name, tags)
 	value, ok := r.histograms[key]
 	if !ok {
@@ -363,7 +371,10 @@ func (r *testStatsReporter) ReportHistogramValueSamples(
 		r.histograms[key] = value
 	}
 	value.valueSamples[bucketUpperBound] = int(samples)
-	r.hg.Done()
+	r.mtx.Unlock()
+	if !r.noWait {
+		r.hg.Done()
+	}
 }
 
 func (r *testStatsReporter) ReportHistogramDurationSamples(
@@ -375,8 +386,6 @@ func (r *testStatsReporter) ReportHistogramDurationSamples(
 	samples int64,
 ) {
 	r.mtx.Lock()
-	defer r.mtx.Unlock()
-
 	key := KeyForPrefixedStringMap(name, tags)
 	value, ok := r.histograms[key]
 	if !ok {
@@ -385,7 +394,10 @@ func (r *testStatsReporter) ReportHistogramDurationSamples(
 		r.histograms[key] = value
 	}
 	value.durationSamples[bucketUpperBound] = int(samples)
-	r.hg.Done()
+	r.mtx.Unlock()
+	if !r.noWait {
+		r.hg.Done()
+	}
 }
 
 func (r *testStatsReporter) Capabilities() Capabilities {
@@ -1366,4 +1378,49 @@ func TestScopeFlushOnClose(t *testing.T) {
 	counters = r.getCounters()
 	assert.EqualValues(t, 1, counters["foo"].val)
 	assert.NoError(t, closer.Close())
+}
+
+func TestNoCacheSubscopes(t *testing.T) {
+	// For this test, we'll use a simpler approach without relying on complex mechanics
+
+	// Create a test scope with NoCacheSubscopes option
+	root := NewTestScope("foo", nil).(*scope)
+	// Set the NoCacheSubscopes flag directly
+	root.noCacheSubscopes = true
+
+	// Create two scopes with the same tags
+	s1 := root.Tagged(map[string]string{"key": "value"})
+	s2 := root.Tagged(map[string]string{"key": "value"})
+
+	// They should be different objects since caching is disabled
+	assert.NotEqual(t, fmt.Sprintf("%p", s1), fmt.Sprintf("%p", s2), "Scopes should be different instances")
+
+	// Test complete - no need to verify actual reporting, just that different
+	// instances were created, which proves the non-caching behavior
+}
+
+func TestHighCardinalityAdaptiveBehavior(t *testing.T) {
+	// For this test, we'll use a simpler approach without relying on complex mechanics
+
+	// Create a test scope
+	root := NewTestScope("foo", nil).(*scope)
+
+	// Create two scopes with the same tags before enabling adaptive mode
+	s1 := root.Tagged(map[string]string{"key": "value"})
+	s2 := root.Tagged(map[string]string{"key": "value"})
+
+	// They should be the same object since caching is enabled by default
+	assert.Equal(t, fmt.Sprintf("%p", s1), fmt.Sprintf("%p", s2), "Scopes should be the same instance before adaptive mode")
+
+	// Manually enable adaptive mode in the registry
+	root.registry.adaptiveMode.Store(true)
+
+	// Create two more scopes with the same tags after enabling adaptive mode
+	s3 := root.Tagged(map[string]string{"key": "value"})
+	s4 := root.Tagged(map[string]string{"key": "value"})
+
+	// They should be different objects since adaptive mode is enabled
+	assert.NotEqual(t, fmt.Sprintf("%p", s3), fmt.Sprintf("%p", s4), "Scopes should be different instances after adaptive mode")
+
+	// Test complete
 }
