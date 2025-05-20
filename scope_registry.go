@@ -23,8 +23,10 @@ package tally
 import (
 	"hash/maphash"
 	"runtime"
+	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 )
 
@@ -64,6 +66,12 @@ type scopeRegistry struct {
 	// High cardinality adaptive behavior
 	adaptiveMode   atomic.Bool
 	totalSubScopes atomic.Int64
+
+	// Eviction policy options
+	enableEviction             bool
+	maxInactivity              time.Duration
+	maxSubscopesBeforeEviction int
+	lastEvictionCheck          atomic.Int64
 }
 
 type scopeBucket struct {
@@ -124,6 +132,11 @@ func (r *scopeRegistry) Report(reporter StatsReporter) {
 	defer r.purgeIfRootClosed()
 	r.reportInternalMetrics()
 
+	// Check if we should run eviction
+	if r.enableEviction {
+		r.evictInactiveScopes()
+	}
+
 	for _, subscopeBucket := range r.subscopes {
 		subscopeBucket.mu.RLock()
 
@@ -143,6 +156,11 @@ func (r *scopeRegistry) Report(reporter StatsReporter) {
 func (r *scopeRegistry) CachedReport() {
 	defer r.purgeIfRootClosed()
 	r.reportInternalMetrics()
+
+	// Check if we should run eviction
+	if r.enableEviction {
+		r.evictInactiveScopes()
+	}
 
 	for _, subscopeBucket := range r.subscopes {
 		subscopeBucket.mu.RLock()
@@ -393,5 +411,165 @@ func (r *scopeRegistry) reportInternalMetrics() {
 		r.cachedGaugeCardinalityGauge.ReportGauge(float64(gauges))
 		r.cachedHistogramCardinalityGauge.ReportGauge(float64(histograms))
 		r.cachedScopeCardinalityGauge.ReportGauge(float64(scopes))
+	}
+}
+
+// newScopeRegistryWithEvictionOptions creates a new scope registry with eviction options
+func newScopeRegistryWithEvictionOptions(
+	root *scope,
+	shardCount uint,
+	omitCardinalityMetrics bool,
+	cardinalityMetricsTags map[string]string,
+	enableEviction bool,
+	maxInactivity time.Duration,
+	maxSubscopesBeforeEviction int,
+) *scopeRegistry {
+	r := newScopeRegistryWithShardCount(root, shardCount, omitCardinalityMetrics, cardinalityMetricsTags)
+
+	// Set eviction options
+	r.enableEviction = enableEviction
+	r.maxInactivity = maxInactivity
+	r.maxSubscopesBeforeEviction = maxSubscopesBeforeEviction
+	r.lastEvictionCheck.Store(time.Now().Unix())
+
+	return r
+}
+
+// evictInactiveScopes removes scopes that have been inactive for too long
+func (r *scopeRegistry) evictInactiveScopes() {
+	now := time.Now().Unix()
+
+	// Only run eviction check periodically (every 60 seconds)
+	lastCheck := r.lastEvictionCheck.Load()
+	if now-lastCheck < 60 {
+		return
+	}
+	r.lastEvictionCheck.Store(now)
+
+	// Check if we have exceeded the max number of subscopes
+	if r.maxSubscopesBeforeEviction > 0 && r.totalSubScopes.Load() > int64(r.maxSubscopesBeforeEviction) {
+		// We have too many subscopes, enforce eviction
+		r.forceEviction(now)
+		return
+	}
+
+	// If time-based eviction is disabled, return
+	if r.maxInactivity <= 0 {
+		return
+	}
+
+	// Time-based eviction: Check each subscope for inactivity
+	cutoffTime := now - int64(r.maxInactivity.Seconds())
+
+	for _, subscopeBucket := range r.subscopes {
+		subscopeBucket.mu.RLock()
+
+		var toEvict []string
+		for name, s := range subscopeBucket.s {
+			// Skip the root scope
+			if s.root {
+				continue
+			}
+
+			lastActivity := s.lastActivity.Load()
+			if lastActivity < cutoffTime {
+				toEvict = append(toEvict, name)
+			}
+		}
+
+		subscopeBucket.mu.RUnlock()
+
+		// Evict inactive scopes
+		if len(toEvict) > 0 {
+			subscopeBucket.mu.Lock()
+			for _, name := range toEvict {
+				if s, ok := subscopeBucket.s[name]; ok {
+					// Report metrics before evicting
+					if r.root.reporter != nil {
+						s.report(r.root.reporter)
+					} else if r.root.cachedReporter != nil {
+						s.cachedReport()
+					}
+					s.clearMetrics()
+					delete(subscopeBucket.s, name)
+					r.totalSubScopes.Add(-1)
+				}
+			}
+			subscopeBucket.mu.Unlock()
+		}
+	}
+}
+
+// forceEviction evicts a percentage of the least recently used scopes
+func (r *scopeRegistry) forceEviction(now int64) {
+	// Structure to track scopes for eviction
+	type scopeToEvict struct {
+		bucket *scopeBucket
+		name   string
+		scope  *scope
+	}
+
+	// Collect all non-root scopes with their activity time
+	var allScopes []scopeToEvict
+
+	// First pass: collect scopes
+	for _, subscopeBucket := range r.subscopes {
+		subscopeBucket.mu.RLock()
+		for name, s := range subscopeBucket.s {
+			if !s.root {
+				allScopes = append(allScopes, scopeToEvict{
+					bucket: subscopeBucket,
+					name:   name,
+					scope:  s,
+				})
+			}
+		}
+		subscopeBucket.mu.RUnlock()
+	}
+
+	// Sort by activity time (oldest first)
+	sort.Slice(allScopes, func(i, j int) bool {
+		return allScopes[i].scope.lastActivity.Load() < allScopes[j].scope.lastActivity.Load()
+	})
+
+	// Determine how many to evict - aim to evict 25% of scopes beyond the threshold
+	overageCount := int(r.totalSubScopes.Load()) - r.maxSubscopesBeforeEviction
+	if overageCount <= 0 {
+		return
+	}
+
+	evictionCount := overageCount / 4
+	if evictionCount < 10 {
+		evictionCount = 10 // Always evict at least 10 to avoid frequent eviction cycles
+	}
+	if evictionCount > len(allScopes)/2 {
+		evictionCount = len(allScopes) / 2 // Don't evict more than half the scopes at once
+	}
+
+	// Only consider up to evictionCount oldest scopes
+	if evictionCount > len(allScopes) {
+		evictionCount = len(allScopes)
+	}
+
+	// Second pass: evict the selected scopes
+	for i := 0; i < evictionCount; i++ {
+		toEvict := allScopes[i]
+		bucket := toEvict.bucket
+		bucket.mu.Lock()
+
+		// Check if the scope still exists (it might have been removed by another operation)
+		if s, ok := bucket.s[toEvict.name]; ok {
+			// Report metrics before evicting
+			if r.root.reporter != nil {
+				s.report(r.root.reporter)
+			} else if r.root.cachedReporter != nil {
+				s.cachedReport()
+			}
+			s.clearMetrics()
+			delete(bucket.s, toEvict.name)
+			r.totalSubScopes.Add(-1)
+		}
+
+		bucket.mu.Unlock()
 	}
 }

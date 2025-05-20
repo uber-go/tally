@@ -94,6 +94,9 @@ type scope struct {
 	root             bool
 	testScope        bool
 	noCacheSubscopes bool
+
+	// Activity tracking for eviction
+	lastActivity atomic.Int64 // Unix timestamp in seconds of last metric activity
 }
 
 // ScopeOptions is a set of options to construct a scope.
@@ -108,6 +111,11 @@ type ScopeOptions struct {
 	OmitCardinalityMetrics bool
 	CardinalityMetricsTags map[string]string
 	NoCacheSubscopes       bool // When true, subscopes won't be cached in the registry
+
+	// Eviction policy configuration
+	EnableSubscopeEviction     bool          // When true, subscopes can be evicted from the registry
+	MaxSubscopeInactivity      time.Duration // Maximum time a subscope can be inactive before eviction (0 means no time-based eviction)
+	MaxSubscopesBeforeEviction int           // Maximum number of subscopes before starting eviction (0 means no limit)
 
 	testScope          bool
 	registryShardCount uint
@@ -187,12 +195,23 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		noCacheSubscopes: opts.NoCacheSubscopes,
 	}
 
+	// Initialize lastActivity with current time
+	s.lastActivity.Store(time.Now().Unix())
+
 	// NB(r): Take a copy of the tags on creation
 	// so that it cannot be modified after set.
 	s.tags = s.copyAndSanitizeMap(opts.Tags)
 
 	// Register the root scope
-	s.registry = newScopeRegistryWithShardCount(s, opts.registryShardCount, opts.OmitCardinalityMetrics, opts.CardinalityMetricsTags)
+	s.registry = newScopeRegistryWithEvictionOptions(
+		s,
+		opts.registryShardCount,
+		opts.OmitCardinalityMetrics,
+		opts.CardinalityMetricsTags,
+		opts.EnableSubscopeEviction,
+		opts.MaxSubscopeInactivity,
+		opts.MaxSubscopesBeforeEviction,
+	)
 
 	if interval > 0 {
 		s.wg.Add(1)
@@ -284,6 +303,7 @@ func (s *scope) reportRegistry() {
 }
 
 func (s *scope) Counter(name string) Counter {
+	s.trackActivity()
 	name = s.sanitizer.Name(name)
 	if c, ok := s.counter(name); ok {
 		return c
@@ -320,6 +340,7 @@ func (s *scope) counter(sanitizedName string) (Counter, bool) {
 }
 
 func (s *scope) Gauge(name string) Gauge {
+	s.trackActivity()
 	name = s.sanitizer.Name(name)
 	if g, ok := s.gauge(name); ok {
 		return g
@@ -355,6 +376,7 @@ func (s *scope) gauge(name string) (Gauge, bool) {
 }
 
 func (s *scope) Timer(name string) Timer {
+	s.trackActivity()
 	name = s.sanitizer.Name(name)
 	if t, ok := s.timer(name); ok {
 		return t
@@ -391,6 +413,7 @@ func (s *scope) timer(sanitizedName string) (Timer, bool) {
 }
 
 func (s *scope) Histogram(name string, b Buckets) Histogram {
+	s.trackActivity()
 	name = s.sanitizer.Name(name)
 	if h, ok := s.histogram(name); ok {
 		return h
@@ -831,4 +854,9 @@ func (s *histogramSnapshot) Values() map[float64]int64 {
 
 func (s *histogramSnapshot) Durations() map[time.Duration]int64 {
 	return s.durations
+}
+
+// Helper method to track activity
+func (s *scope) trackActivity() {
+	s.lastActivity.Store(time.Now().Unix())
 }
