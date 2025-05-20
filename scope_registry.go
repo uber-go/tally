@@ -24,6 +24,7 @@ import (
 	"hash/maphash"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"go.uber.org/atomic"
@@ -42,6 +43,8 @@ var (
 const (
 	// DefaultTagRedactValue is the default tag value to use when redacting
 	DefaultTagRedactValue = "global"
+	// HighCardinalityThreshold is the number of subscopes after which caching will be disabled
+	HighCardinalityThreshold = 5000
 )
 
 type scopeRegistry struct {
@@ -60,6 +63,9 @@ type scopeRegistry struct {
 	cachedGaugeCardinalityGauge       CachedGauge
 	cachedHistogramCardinalityGauge   CachedGauge
 	cachedScopeCardinalityGauge       CachedGauge
+	// High cardinality adaptive behavior
+	adaptiveMode   atomic.Bool
+	totalSubScopes atomic.Int64
 }
 
 type scopeBucket struct {
@@ -92,6 +98,10 @@ func newScopeRegistryWithShardCount(
 			"instance": DefaultTagRedactValue,
 		},
 	}
+
+	// Initialize the adaptiveMode and totalSubScopes fields
+	r.adaptiveMode.Store(false)
+	r.totalSubScopes.Store(0)
 
 	for k, v := range cardinalityMetricsTags {
 		r.cardinalityMetricsTags[root.sanitizer.Key(k)] = root.sanitizer.Value(v)
@@ -163,8 +173,36 @@ func (r *scopeRegistry) ForEachScope(f func(*scope)) {
 }
 
 func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]string) *scope {
-	if r.root.closed.Load() || parent.closed.Load() {
+	if parent.closed.Load() || r.root.closed.Load() {
 		return NoopScope.(*scope)
+	}
+
+	// If NoCacheSubscopes is enabled on parent scope, create an ephemeral scope
+	if parent.noCacheSubscopes || r.adaptiveMode.Load() {
+		allTags := mergeRightTags(parent.tags, tags)
+		return &scope{
+			separator:      parent.separator,
+			prefix:         prefix,
+			tags:           allTags,
+			reporter:       parent.reporter,
+			cachedReporter: parent.cachedReporter,
+			baseReporter:   parent.baseReporter,
+			defaultBuckets: parent.defaultBuckets,
+			sanitizer:      parent.sanitizer,
+			registry:       r,
+			bucketCache:    parent.bucketCache,
+
+			counters:         make(map[string]*counter),
+			countersSlice:    make([]*counter, 0, _defaultInitialSliceSize),
+			gauges:           make(map[string]*gauge),
+			gaugesSlice:      make([]*gauge, 0, _defaultInitialSliceSize),
+			histograms:       make(map[string]*histogram),
+			histogramsSlice:  make([]*histogram, 0, _defaultInitialSliceSize),
+			timers:           make(map[string]*timer),
+			done:             make(chan struct{}),
+			testScope:        parent.testScope,
+			noCacheSubscopes: parent.noCacheSubscopes,
+		}
 	}
 
 	var (
@@ -249,21 +287,29 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		sanitizer:      parent.sanitizer,
 		registry:       parent.registry,
 
-		counters:        make(map[string]*counter),
-		countersSlice:   make([]*counter, 0, _defaultInitialSliceSize),
-		gauges:          make(map[string]*gauge),
-		gaugesSlice:     make([]*gauge, 0, _defaultInitialSliceSize),
-		histograms:      make(map[string]*histogram),
-		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
-		timers:          make(map[string]*timer),
-		bucketCache:     parent.bucketCache,
-		done:            make(chan struct{}),
-		testScope:       parent.testScope,
+		counters:         make(map[string]*counter),
+		countersSlice:    make([]*counter, 0, _defaultInitialSliceSize),
+		gauges:           make(map[string]*gauge),
+		gaugesSlice:      make([]*gauge, 0, _defaultInitialSliceSize),
+		histograms:       make(map[string]*histogram),
+		histogramsSlice:  make([]*histogram, 0, _defaultInitialSliceSize),
+		timers:           make(map[string]*timer),
+		bucketCache:      parent.bucketCache,
+		done:             make(chan struct{}),
+		testScope:        parent.testScope,
+		noCacheSubscopes: parent.noCacheSubscopes,
 	}
 	subscopeBucket.s[sanitizedKey] = subscope
 	if _, ok := r.lockedLookup(subscopeBucket, unsanitizedKey); !ok {
 		subscopeBucket.s[unsanitizedKey] = subscope
 	}
+
+	// Check if we've exceeded the high cardinality threshold and enable adaptive mode if so
+	numSubScopes := r.totalSubScopes.Add(1)
+	if numSubScopes > HighCardinalityThreshold && !r.adaptiveMode.Load() {
+		r.adaptiveMode.Store(true)
+	}
+
 	return subscope
 }
 
