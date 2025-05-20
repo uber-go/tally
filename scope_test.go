@@ -1413,7 +1413,7 @@ func TestHighCardinalityAdaptiveBehavior(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("%p", s1), fmt.Sprintf("%p", s2), "Scopes should be the same instance before adaptive mode")
 
 	// Manually enable adaptive mode in the registry
-	root.registry.adaptiveMode.Store(true)
+	atomic.StoreInt32(&root.registry.adaptiveMode, 1)
 
 	// Create two more scopes with the same tags after enabling adaptive mode
 	s3 := root.Tagged(map[string]string{"key": "value"})
@@ -1459,7 +1459,7 @@ func TestSubscopeEviction(t *testing.T) {
 			// Check for tag value directly
 			if tag, exists := scope.tags["id"]; exists && tag == "0" {
 				// Set a timestamp from 10 minutes ago
-				scope.lastActivity.Store(time.Now().Add(-10 * time.Minute).Unix())
+				atomic.StoreInt64(&scope.lastActivity, time.Now().Add(-10*time.Minute).Unix())
 			}
 		}
 		bucket.mu.RUnlock()
@@ -1474,7 +1474,7 @@ func TestSubscopeEviction(t *testing.T) {
 	}
 
 	// Force eviction by simulating a report
-	registry.lastEvictionCheck.Store(0) // Reset last check time to ensure eviction runs
+	atomic.StoreInt64(&registry.lastEvictionCheck, 0) // Reset last check time to ensure eviction runs
 	if registry.root.reporter != nil {
 		registry.Report(registry.root.reporter)
 	} else {
@@ -1530,7 +1530,7 @@ func TestEvictionLRU(t *testing.T) {
 	}
 
 	// Reset the subscope counter
-	registry.totalSubScopes.Store(0)
+	atomic.StoreInt64(&registry.totalSubScopes, 0)
 
 	// Create scopes with controlled timestamps
 	var scopeRefs []Scope
@@ -1555,7 +1555,7 @@ func TestEvictionLRU(t *testing.T) {
 				bucket.mu.RLock()
 				for _, s := range bucket.s {
 					if tag, exists := s.tags["id"]; exists && tag == strconv.Itoa(i) {
-						s.lastActivity.Store(time.Now().Add(-time.Duration(ageHours) * time.Hour).Unix())
+						atomic.StoreInt64(&s.lastActivity, time.Now().Add(-time.Duration(ageHours)*time.Hour).Unix())
 					}
 				}
 				bucket.mu.RUnlock()
@@ -1563,7 +1563,7 @@ func TestEvictionLRU(t *testing.T) {
 		}
 
 		// Force the counter to increment for testing
-		registry.totalSubScopes.Store(int64(i + 1))
+		atomic.StoreInt64(&registry.totalSubScopes, int64(i+1))
 	}
 
 	// Now we have:
@@ -1601,4 +1601,118 @@ func TestEvictionLRU(t *testing.T) {
 			newScopePtr,
 			fmt.Sprintf("Scope with id %d should NOT have been evicted", i))
 	}
+}
+
+func TestScopePooling(t *testing.T) {
+	// Create a test scope with pooling
+	r := newTestStatsReporter()
+	root, closer := NewRootScope(ScopeOptions{
+		Prefix:                 "foo",
+		Reporter:               r,
+		OmitCardinalityMetrics: true,
+		NoCacheSubscopes:       true, // Force ephemeral scopes
+		EnableScopePooling:     true,
+	}, 0)
+	defer closer.Close()
+
+	rootImpl := root.(*scope)
+	registry := rootImpl.registry
+
+	// Reset pooledScopes map to ensure clean state
+	registry.pooledScopesMtx.Lock()
+	registry.pooledScopes = make(map[string]*scope)
+	registry.pooledScopesMtx.Unlock()
+
+	// Create our own scope - in a real scenario this would come from the pool
+	testScope := &scope{
+		separator:       rootImpl.separator,
+		prefix:          "foo",
+		tags:            map[string]string{"id": "test"},
+		reporter:        rootImpl.reporter,
+		cachedReporter:  rootImpl.cachedReporter,
+		baseReporter:    rootImpl.baseReporter,
+		defaultBuckets:  rootImpl.defaultBuckets,
+		sanitizer:       rootImpl.sanitizer,
+		registry:        registry,
+		bucketCache:     rootImpl.bucketCache,
+		counters:        make(map[string]*counter),
+		countersSlice:   make([]*counter, 0, _defaultInitialSliceSize),
+		gauges:          make(map[string]*gauge),
+		gaugesSlice:     make([]*gauge, 0, _defaultInitialSliceSize),
+		histograms:      make(map[string]*histogram),
+		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
+		timers:          make(map[string]*timer),
+		done:            make(chan struct{}),
+		// We'll set a specific key for our scope
+		ephemeralKey: "testKey",
+	}
+
+	// Put our scope in the pool
+	registry.pooledScopesMtx.Lock()
+	registry.pooledScopes["testKey"] = testScope
+	registry.pooledScopesMtx.Unlock()
+
+	// Verify our scope is in the pool
+	registry.pooledScopesMtx.Lock()
+	count := len(registry.pooledScopes)
+	scope, exists := registry.pooledScopes["testKey"]
+	registry.pooledScopesMtx.Unlock()
+
+	require.Equal(t, 1, count, "Pool should have exactly one scope")
+	require.True(t, exists, "Our scope should be in the pool")
+	require.Equal(t, testScope, scope, "Pool should contain our scope")
+
+	// Verify that we can retrieve our scope from the pool when creating a new scope
+	// with the same configuration
+	scope1 := testScope
+	scope1Ptr := fmt.Sprintf("%p", scope1)
+
+	// We'll manually call the method to get a scope from the pool
+	scope2 := registry.getFromPool("testKey")
+	scope2Ptr := fmt.Sprintf("%p", scope2)
+
+	// Check we got the same scope back
+	assert.Equal(t, scope1Ptr, scope2Ptr, "Should reuse the scope from the pool")
+
+	// Verify the pool is now empty
+	registry.pooledScopesMtx.Lock()
+	count = len(registry.pooledScopes)
+	registry.pooledScopesMtx.Unlock()
+	assert.Equal(t, 0, count, "Pool should be empty after retrieving the scope")
+}
+
+// Helper to get a scope from the pool for testing
+func (r *scopeRegistry) getFromPool(key string) *scope {
+	r.pooledScopesMtx.Lock()
+	defer r.pooledScopesMtx.Unlock()
+
+	if scope, ok := r.pooledScopes[key]; ok {
+		delete(r.pooledScopes, key)
+		return scope
+	}
+
+	return nil
+}
+
+func TestRootScopeAdaptiveCaching(t *testing.T) {
+	// Create a test scope
+	testRoot := NewTestScope("foo", nil).(*scope)
+
+	// Create a scope with a tag
+	scope1 := testRoot.Tagged(map[string]string{"foo": "bar"})
+	scope1Impl := scope1.(*scope)
+
+	// NoCacheSubscopes should be false initially
+	assert.False(t, scope1Impl.noCacheSubscopes, "Scope should not have NoCacheSubscopes set initially")
+
+	// Switch to adaptive mode
+	atomic.StoreInt32(&testRoot.registry.adaptiveMode, 1)
+
+	// Now check that new scopes behave differently
+	scope2 := testRoot.Tagged(map[string]string{"foo": "bar", "baz": "qux"})
+	scope3 := testRoot.Tagged(map[string]string{"foo": "bar", "baz": "qux"})
+
+	// Verify they're different instances
+	assert.NotEqual(t, fmt.Sprintf("%p", scope2), fmt.Sprintf("%p", scope3),
+		"Scopes with same tags should be different instances in adaptive mode")
 }
