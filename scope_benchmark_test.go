@@ -25,6 +25,7 @@ import (
 	"io"
 	"runtime"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -818,4 +819,63 @@ func BenchmarkScopePoolingAllocations(b *testing.B) {
 		// Report direct allocation counts
 		b.ReportMetric(float64(allocsPerLoop)/float64(b.N), "allocs/op")
 	})
+}
+
+// BenchmarkSyncMapConcurrent benchmarks the sync.Map implementation for metric access with concurrent goroutines
+func BenchmarkSyncMapConcurrent(b *testing.B) {
+	root, closer := NewRootScope(ScopeOptions{}, 0)
+	defer closer.Close()
+
+	// First, create a fixed set of metrics that will be accessed
+	metricNames := []string{
+		"requests.count",
+		"requests.latency",
+		"requests.errors",
+		"requests.success",
+		"db.queries",
+		"db.latency",
+		"cache.hits",
+		"cache.misses",
+		"memory.allocated",
+		"memory.freed",
+	}
+
+	// Pre-create all metrics
+	for _, name := range metricNames {
+		root.Counter(name)
+	}
+
+	b.ResetTimer()
+
+	// Run with different levels of concurrency
+	for _, numGoroutines := range []int{1, 4, 8, 16, 32, 64} {
+		b.Run(fmt.Sprintf("Goroutines-%d", numGoroutines), func(b *testing.B) {
+			var wg sync.WaitGroup
+
+			// Launch goroutines
+			for g := 0; g < numGoroutines; g++ {
+				wg.Add(1)
+				go func(goroutineNum int) {
+					defer wg.Done()
+
+					// Each goroutine processes its share of operations
+					iterations := b.N / numGoroutines
+					if goroutineNum == 0 {
+						// First goroutine does any remainder operations
+						iterations += b.N % numGoroutines
+					}
+
+					// Repeatedly access metrics
+					for i := 0; i < iterations; i++ {
+						// Use a different metric for each iteration to simulate real-world distribution
+						name := metricNames[i%len(metricNames)]
+						counter := root.Counter(name)
+						counter.Inc(1)
+					}
+				}(g)
+			}
+
+			wg.Wait()
+		})
+	}
 }

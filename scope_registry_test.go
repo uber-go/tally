@@ -209,11 +209,10 @@ func TestForEachScopeConcurrent(t *testing.T) {
 		// Keep poking at the subscopes until the counter is written.
 		root.registry.ForEachScope(
 			func(ss *scope) {
-				ss.cm.RLock()
-				if ss.counters["hello"] != nil {
-					c = ss.counters["hello"]
+				// Use sync.Map's Load method to access counters
+				if counterValue, ok := ss.counters.Load("hello"); ok {
+					c = counterValue.(*counter)
 				}
-				ss.cm.RUnlock()
 			},
 		)
 		if c != nil {
