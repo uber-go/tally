@@ -62,6 +62,12 @@ type Scope interface {
 
 	// Capabilities returns a description of metrics reporting capabilities.
 	Capabilities() Capabilities
+	
+	// Close closes the scope and releases any resources.
+	// For root scopes, this will also close the reporter.
+	// For subscopes, this will clear all metrics and remove the scope from the registry.
+	// Returns an error if the scope is already closed.
+	Close() error
 }
 
 // Counter is the interface for emitting counter type metrics.
