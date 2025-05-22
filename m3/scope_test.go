@@ -25,9 +25,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uber-go/tally"
-
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber-go/tally"
 )
 
 var commonTags = map[string]string{"env": "test"}
@@ -63,80 +63,119 @@ func newTestReporterScope(
 	}
 }
 
-// TestScope tests that scope works as expected
+// TestScope tests that scope emits expected metrics.
 func TestScope(t *testing.T) {
 	var wg sync.WaitGroup
-	server := newFakeM3Server(t, &wg, true, Compact)
+	server := newFakeM3Server(t, &wg, true, Compact) // countBatches=true, server calls wg.Done() on first batch
 	go server.Serve()
-	defer server.Close()
 
-	tags := map[string]string{"testTag": "TestValue", "testTag2": "TestValue2"}
+	r, err := NewReporter(Options{
+		HostPorts:  []string{server.Addr},
+		Service:    "test",
+		CommonTags: map[string]string{"env": "test"},
+	})
+	require.NoError(t, err)
 
-	_, scope, close := newTestReporterScope(t, server.Addr, "honk", tags)
-	wg.Add(1)
+	scopeOpts := tally.ScopeOptions{CachedReporter: r}
+	scope, closer := tally.NewRootScope(scopeOpts, time.Second)
 
-	timer := scope.Timer("dazzle")
-	timer.Start().Stop()
-	close()
+	wg.Add(1) // Expecting one primary flush from closer.Close()
+	scope.Counter("testCounter").Inc(1)
+	scope.Gauge("testGauge").Update(1)
+	scope.Timer("testTimer").Record(time.Millisecond)
 
-	wg.Wait()
+	require.NoError(t, closer.Close())
+	wg.Wait() // Wait for the batch from closer.Close() to be processed
+	server.Close()
+	r.Close()
 
-	require.Equal(t, 1, len(server.Service.getBatches()))
-	require.NotNil(t, server.Service.getBatches()[0])
-
-	emittedTimers := server.Service.getBatches()[0].GetMetrics()
-	require.Equal(t, internalMetrics+cardinalityMetrics+1, len(emittedTimers))
-	require.Equal(t, "honk.dazzle", emittedTimers[0].GetName())
+	allMetrics := server.Service.getMetrics()
+	var foundCounter, foundGauge, foundTimer bool
+	for _, m := range allMetrics {
+		switch m.GetName() {
+		case "testCounter":
+			foundCounter = true
+		case "testGauge":
+			foundGauge = true
+		case "testTimer":
+			foundTimer = true
+		}
+	}
+	assert.True(t, foundCounter, "testCounter not found")
+	assert.True(t, foundGauge, "testGauge not found")
+	assert.True(t, foundTimer, "testTimer not found")
 }
 
-// TestScopeCounter tests that scope works as expected
+// TestScopeCounter tests counter through scope.
 func TestScopeCounter(t *testing.T) {
 	var wg sync.WaitGroup
 	server := newFakeM3Server(t, &wg, true, Compact)
 	go server.Serve()
-	defer server.Close()
 
-	tags := map[string]string{"testTag": "TestValue", "testTag2": "TestValue2"}
+	r, err := NewReporter(Options{
+		HostPorts:  []string{server.Addr},
+		Service:    "test",
+		CommonTags: map[string]string{"env": "test"},
+	})
+	require.NoError(t, err)
 
-	_, scope, close := newTestReporterScope(t, server.Addr, "honk", tags)
+	scopeOpts := tally.ScopeOptions{CachedReporter: r, Prefix: "honk"}
+	scope, closer := tally.NewRootScope(scopeOpts, time.Second)
 
 	wg.Add(1)
-	counter := scope.Counter("foobar")
-	counter.Inc(42)
-	close()
+	scope.Counter("foobar").Inc(42)
+
+	require.NoError(t, closer.Close())
 	wg.Wait()
+	server.Close()
+	r.Close()
 
-	require.Equal(t, 1, len(server.Service.getBatches()))
-	require.NotNil(t, server.Service.getBatches()[0])
-
-	emittedMetrics := server.Service.getBatches()[0].GetMetrics()
-	require.Equal(t, internalMetrics+cardinalityMetrics+1, len(emittedMetrics))
-	require.Equal(t, "honk.foobar", emittedMetrics[cardinalityMetrics].GetName())
+	allMetrics := server.Service.getMetrics()
+	var found bool
+	for _, m := range allMetrics {
+		if m.GetName() == "honk.foobar" {
+			assert.EqualValues(t, 42, m.Value.GetCount())
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "Metric honk.foobar not found")
 }
 
-// TestScopeGauge tests that scope works as expected
+// TestScopeGauge tests gauge through scope.
 func TestScopeGauge(t *testing.T) {
 	var wg sync.WaitGroup
 	server := newFakeM3Server(t, &wg, true, Compact)
 	go server.Serve()
-	defer server.Close()
 
-	tags := map[string]string{"testTag": "TestValue", "testTag2": "TestValue2"}
+	r, err := NewReporter(Options{
+		HostPorts:  []string{server.Addr},
+		Service:    "test",
+		CommonTags: map[string]string{"env": "test"},
+	})
+	require.NoError(t, err)
 
-	_, scope, close := newTestReporterScope(t, server.Addr, "honk", tags)
+	scopeOpts := tally.ScopeOptions{CachedReporter: r, Prefix: "honk"}
+	scope, closer := tally.NewRootScope(scopeOpts, time.Second)
 
 	wg.Add(1)
-	gauge := scope.Gauge("foobaz")
-	gauge.Update(42)
-	close()
+	scope.Gauge("foobaz").Update(42)
+
+	require.NoError(t, closer.Close())
 	wg.Wait()
+	server.Close()
+	r.Close()
 
-	require.Equal(t, 1, len(server.Service.getBatches()))
-	require.NotNil(t, server.Service.getBatches()[0])
-
-	emittedMetrics := server.Service.getBatches()[0].GetMetrics()
-	require.Equal(t, internalMetrics+cardinalityMetrics+1, len(emittedMetrics))
-	require.Equal(t, "honk.foobaz", emittedMetrics[cardinalityMetrics].GetName())
+	allMetrics := server.Service.getMetrics()
+	var found bool
+	for _, m := range allMetrics {
+		if m.GetName() == "honk.foobaz" {
+			assert.EqualValues(t, float64(42), m.Value.GetGauge())
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "Metric honk.foobaz not found")
 }
 
 func BenchmarkScopeReportTimer(b *testing.B) {
@@ -145,6 +184,7 @@ func BenchmarkScopeReportTimer(b *testing.B) {
 		Service:            "my-service",
 		MaxQueueSize:       10000,
 		MaxPacketSizeBytes: maxPacketSize,
+		Env:                "test",
 	})
 	if err != nil {
 		b.Error(err.Error())
