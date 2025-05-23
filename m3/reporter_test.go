@@ -544,8 +544,9 @@ func TestReporterResetTagsAfterReturnToPool(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Intentionally allocate and leak counters to exhaust metric pool.
-	for i := 0; i < metricPoolSize-2; i++ {
+	// Intentionally allocate several counters to test pooling behavior
+	// (with sync.Pool we don't need to exhaust a fixed-size pool)
+	for i := 0; i < 100; i++ {
 		r.AllocateCounter("placeholder", nil)
 	}
 
