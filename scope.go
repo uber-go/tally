@@ -101,6 +101,7 @@ type scope struct {
 	testScope        bool
 	noCacheSubscopes bool
 	ephemeralKey     string // Key used for pool looks of ephemeral scopes
+	hasReportLoop    bool   // Tracks whether this scope started a reportLoop goroutine
 
 	// Activity tracking for eviction
 	lastActivity int64 // Unix timestamp in seconds of last metric activity
@@ -226,6 +227,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 	)
 
 	if s.root && !s.testScope && interval > 0 {
+		s.hasReportLoop = true
 		s.wg.Add(1)
 		go s.reportLoop(interval)
 	}
@@ -280,6 +282,7 @@ func (s *scope) cachedReport() {
 
 // reportLoop is used by the root scope for periodic reporting
 func (s *scope) reportLoop(interval time.Duration) {
+	defer s.wg.Done()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -613,12 +616,20 @@ func (s *scope) Close() error {
 
 	if s.root {
 		s.reportRegistry()
+	}
+
+	close(s.done)
+
+	// Wait for the reportLoop goroutine to finish, but only if we started one
+	if s.hasReportLoop {
+		s.wg.Wait()
+	}
+
+	if s.root {
 		if closer, ok := s.baseReporter.(io.Closer); ok {
 			return closer.Close()
 		}
 	}
-
-	close(s.done)
 
 	// If this is an ephemeral scope (no cache), return it to the pool
 	if !s.root && (s.noCacheSubscopes || (s.registry != nil && atomic.LoadInt32(&s.registry.adaptiveMode) == 1)) {
@@ -953,6 +964,7 @@ func (s *scope) resetForPool() {
 
 	// Reset state flags
 	atomic.StoreInt32(&s.closed, 0)
+	s.hasReportLoop = false
 
 	// Reset lastActivity timestamp
 	atomic.StoreInt64(&s.lastActivity, time.Now().Unix())

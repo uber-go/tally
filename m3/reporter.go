@@ -592,150 +592,146 @@ func (r *reporter) process() {
 	mets := r.resourcePool.getMetricSlice()
 	var currentBytesInBatch int32
 
-	// Setup a ticker for periodic flushes
-	ticker := time.NewTicker(100 * time.Millisecond) // Flush at least every 100ms
+	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case report, ok := <-r.metCh:
 			if !ok {
-				// Channel closed, perform final flush if needed
-				if len(mets) > 0 {
-					mets = r.internalFlush(mets, &currentBytesInBatch)
-				}
-				r.resourcePool.releaseMetricSlice(mets)
+				r.finalFlush(mets, &currentBytesInBatch)
 				return
 			}
+			mets = r.processReport(report, mets, &currentBytesInBatch)
 
-			// Safely decrement pending counter if it was incremented for a flush signal
-			if report.cached == nil { // This was a flush signal from Flush() or tryFinalFlush()
-				if r.pending.Load() > 0 {
-					r.pending.Dec() // This is the authoritative Dec for the flush signal
-				}
-			}
-
-			if report.cached == nil {
-				// Explicit flush request from metCh (already accounted for in pending.Dec above)
-				if len(mets) > 0 {
-					mets = r.internalFlush(mets, &currentBytesInBatch)
-				}
-				continue
-			}
-
-			if report.cached.isNoop {
-				continue
-			}
-
-			metricToAddSize := report.cached.size
-
-			if len(mets) > 0 && currentBytesInBatch+metricToAddSize > r.freeBytes {
-				mets = r.internalFlush(mets, &currentBytesInBatch)
-			}
-
-			finalMetric := m3thrift.NewMetric()
-
-			hdrMemBuf := thrift.NewTMemoryBuffer()
-			if _, err := hdrMemBuf.Write(report.cached.precomputedHeader); err != nil {
-				// TODO: Log or handle error (e.g., increment a counter)
-				continue
-			}
-
-			hdrProto := r.protocolFactory.GetProtocol(hdrMemBuf)
-			if err := finalMetric.Read(hdrProto); err != nil {
-				// TODO: Log or handle error
-				continue
-			}
-
-			nowVal := r.now.Load()
-			finalMetric.Timestamp = nowVal
-
-			metricVal := m3thrift.NewMetricValue()
-			switch report.valueType {
-			case counterType:
-				metricVal.MetricType = m3thrift.MetricType_COUNTER
-				countVal := report.countVal
-				metricVal.Count = countVal
-			case gaugeType:
-				metricVal.MetricType = m3thrift.MetricType_GAUGE
-				gaugeVal := report.gaugeVal
-				metricVal.Gauge = gaugeVal
-			case timerType:
-				metricVal.MetricType = m3thrift.MetricType_TIMER
-				timerVal := int64(report.timerVal)
-				metricVal.Timer = timerVal
-			}
-			finalMetric.Value = *metricVal
-
-			mets = append(mets, *finalMetric)
-			currentBytesInBatch += metricToAddSize
 		case <-ticker.C:
-			// Periodic flush for any accumulated metrics
 			if len(mets) > 0 {
 				mets = r.internalFlush(mets, &currentBytesInBatch)
 			}
+
 		case <-r.donech:
-			// Drain metCh before exiting
-			for len(r.metCh) > 0 {
-				report, ok := <-r.metCh
-				if !ok {
-					break // Should not happen if donech is the primary signal
-				}
-				if report.cached == nil { // Flush signal
-					if r.pending.Load() > 0 {
-						r.pending.Dec()
-					}
-					if len(mets) > 0 { // Flush any accumulated before this signal
-						mets = r.internalFlush(mets, &currentBytesInBatch)
-					}
-					continue
-				}
-				if report.cached.isNoop {
-					continue
-				}
-				// Simplified metric processing for draining phase
-				metricToAddSize := report.cached.size
-				if len(mets) > 0 && currentBytesInBatch+metricToAddSize > r.freeBytes {
-					mets = r.internalFlush(mets, &currentBytesInBatch)
-				}
-				// (Code to prepare and append finalMetric as above)
-				// For brevity, assuming a function prepareAndAppendMetric(&mets, report, &currentBytesInBatch)
-				// This part needs to be filled in similar to the main select case for r.metCh
-				// Reconstruct the metric addition logic here:
-				finalMetric := m3thrift.NewMetric()
-				hdrMemBuf := thrift.NewTMemoryBuffer()
-				if _, err := hdrMemBuf.Write(report.cached.precomputedHeader); err != nil {
-					continue
-				}
-				hdrProto := r.protocolFactory.GetProtocol(hdrMemBuf)
-				if err := finalMetric.Read(hdrProto); err != nil {
-					continue
-				}
-				nowVal := r.now.Load()
-				finalMetric.Timestamp = nowVal
-				metricVal := m3thrift.NewMetricValue()
-				switch report.valueType {
-				case counterType:
-					metricVal.MetricType = m3thrift.MetricType_COUNTER
-					metricVal.Count = report.countVal
-				case gaugeType:
-					metricVal.MetricType = m3thrift.MetricType_GAUGE
-					metricVal.Gauge = report.gaugeVal
-				case timerType:
-					metricVal.MetricType = m3thrift.MetricType_TIMER
-					metricVal.Timer = int64(report.timerVal)
-				}
-				finalMetric.Value = *metricVal
-				mets = append(mets, *finalMetric)
-				currentBytesInBatch += metricToAddSize
-			}
-			// Final flush of any remaining metrics
-			if len(mets) > 0 {
-				mets = r.internalFlush(mets, &currentBytesInBatch)
-			}
-			r.resourcePool.releaseMetricSlice(mets)
+			r.drainAndFlush(mets, &currentBytesInBatch)
 			return
 		}
+	}
+}
+
+func (r *reporter) processReport(report pendingReport, mets []m3thrift.Metric, currentBytesInBatch *int32) []m3thrift.Metric {
+	if report.cached == nil {
+		r.decrementPending()
+		if len(mets) > 0 {
+			return r.internalFlush(mets, currentBytesInBatch)
+		}
+		return mets
+	}
+
+	if report.cached.isNoop {
+		return mets
+	}
+
+	if len(mets) > 0 && *currentBytesInBatch+report.cached.size > r.freeBytes {
+		mets = r.internalFlush(mets, currentBytesInBatch)
+	}
+
+	finalMetric := r.buildMetric(report)
+	if finalMetric != nil {
+		mets = append(mets, *finalMetric)
+		*currentBytesInBatch += report.cached.size
+	}
+
+	return mets
+}
+
+func (r *reporter) buildMetric(report pendingReport) *m3thrift.Metric {
+	finalMetric := m3thrift.NewMetric()
+
+	hdrMemBuf := thrift.NewTMemoryBuffer()
+	if _, err := hdrMemBuf.Write(report.cached.precomputedHeader); err != nil {
+		return nil
+	}
+
+	hdrProto := r.protocolFactory.GetProtocol(hdrMemBuf)
+	if err := finalMetric.Read(hdrProto); err != nil {
+		return nil
+	}
+
+	finalMetric.Timestamp = r.now.Load()
+	finalMetric.Value = r.buildMetricValue(report)
+	return finalMetric
+}
+
+func (r *reporter) buildMetricValue(report pendingReport) m3thrift.MetricValue {
+	metricVal := m3thrift.NewMetricValue()
+	switch report.valueType {
+	case counterType:
+		metricVal.MetricType = m3thrift.MetricType_COUNTER
+		metricVal.Count = report.countVal
+	case gaugeType:
+		metricVal.MetricType = m3thrift.MetricType_GAUGE
+		metricVal.Gauge = report.gaugeVal
+	case timerType:
+		metricVal.MetricType = m3thrift.MetricType_TIMER
+		metricVal.Timer = int64(report.timerVal)
+	}
+	return *metricVal
+}
+
+func (r *reporter) drainAndFlush(mets []m3thrift.Metric, currentBytesInBatch *int32) {
+	for len(r.metCh) > 0 {
+		report, ok := <-r.metCh
+		if !ok {
+			break
+		}
+		mets = r.processReport(report, mets, currentBytesInBatch)
+	}
+	r.finalFlush(mets, currentBytesInBatch)
+}
+
+func (r *reporter) finalFlush(mets []m3thrift.Metric, currentBytesInBatch *int32) {
+	if len(mets) > 0 {
+		r.internalFlush(mets, currentBytesInBatch)
+	}
+	r.resourcePool.releaseMetricSlice(mets)
+}
+
+func (r *reporter) decrementPending() {
+	if r.pending.Load() > 0 {
+		r.pending.Dec()
+	}
+}
+
+func (r *reporter) estimateValueSize(mType metricType) int32 {
+	switch mType {
+	case counterType, timerType:
+		return 15
+	case gaugeType:
+		return 13
+	default:
+		return 15
+	}
+}
+
+// reportMetric consolidates the common reporting pattern
+func (r *reporter) reportMetric(c *cachedMetric, valueType metricType, countVal int64, gaugeVal float64, timerVal time.Duration) {
+	if c.isNoop || c.reporter == nil || c.reporter.done.Load() || c.metricType != valueType {
+		return
+	}
+
+	c.reporter.pending.Inc()
+	report := pendingReport{
+		cached:    c,
+		valueType: valueType,
+		countVal:  countVal,
+		gaugeVal:  gaugeVal,
+		timerVal:  timerVal,
+	}
+
+	select {
+	case c.reporter.metCh <- report:
+	case <-c.reporter.donech:
+		c.reporter.pending.Dec()
+	default:
+		c.reporter.pending.Dec()
 	}
 }
 
@@ -830,78 +826,15 @@ type cachedMetric struct {
 }
 
 func (c *cachedMetric) ReportCount(value int64) {
-	if c.isNoop || c.reporter == nil || c.reporter.done.Load() {
-		return
-	}
-	if c.metricType != counterType {
-		return
-	}
-
-	c.reporter.pending.Inc()
-	select {
-	case c.reporter.metCh <- pendingReport{
-		cached:    c,
-		valueType: counterType,
-		countVal:  value,
-	}:
-		// Successfully queued
-	case <-c.reporter.donech:
-		// Reporter is shutting down, decrement counter
-		c.reporter.pending.Dec()
-	default:
-		// Channel full, drop metric to avoid blocking
-		c.reporter.pending.Dec()
-	}
+	c.reporter.reportMetric(c, counterType, value, 0, 0)
 }
 
 func (c *cachedMetric) ReportGauge(value float64) {
-	if c.isNoop || c.reporter == nil || c.reporter.done.Load() {
-		return
-	}
-	if c.metricType != gaugeType {
-		return
-	}
-
-	c.reporter.pending.Inc()
-	select {
-	case c.reporter.metCh <- pendingReport{
-		cached:    c,
-		valueType: gaugeType,
-		gaugeVal:  value,
-	}:
-		// Successfully queued
-	case <-c.reporter.donech:
-		// Reporter is shutting down, decrement counter
-		c.reporter.pending.Dec()
-	default:
-		// Channel full, drop metric to avoid blocking
-		c.reporter.pending.Dec()
-	}
+	c.reporter.reportMetric(c, gaugeType, 0, value, 0)
 }
 
 func (c *cachedMetric) ReportTimer(interval time.Duration) {
-	if c.isNoop || c.reporter == nil || c.reporter.done.Load() {
-		return
-	}
-	if c.metricType != timerType {
-		return
-	}
-
-	c.reporter.pending.Inc()
-	select {
-	case c.reporter.metCh <- pendingReport{
-		cached:    c,
-		valueType: timerType,
-		timerVal:  interval,
-	}:
-		// Successfully queued
-	case <-c.reporter.donech:
-		// Reporter is shutting down, decrement counter
-		c.reporter.pending.Dec()
-	default:
-		// Channel full, drop metric to avoid blocking
-		c.reporter.pending.Dec()
-	}
+	c.reporter.reportMetric(c, timerType, 0, 0, interval)
 }
 
 type cachedHistogram struct {

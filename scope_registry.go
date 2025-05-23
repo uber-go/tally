@@ -197,348 +197,176 @@ func (r *scopeRegistry) internString(s string) string {
 func (r *scopeRegistry) Report(reporter StatsReporter) {
 	defer r.purgeIfRootClosed()
 	r.reportInternalMetrics()
-
-	// Check if we should run eviction
-	if r.enableEviction {
-		r.evictInactiveScopes()
-	}
-
-	// Cleanup the scope pool
-	if r.scopePool.New != nil {
-		r.cleanupScopePool()
-	}
-
-	// Choose between sequential or parallel processing based on the feature flag
-	if EnableParallelFlush.Load() {
-		if MaxParallelFlushGoroutines > 0 {
-			r.workerPoolReport(reporter, MaxParallelFlushGoroutines)
-		} else {
-			r.parallelReport(reporter)
-		}
-	} else {
-		r.sequentialReport(reporter)
-	}
-}
-
-// sequentialReport processes all scopes sequentially to avoid waitgroup issues with test reporters
-func (r *scopeRegistry) sequentialReport(reporter StatsReporter) {
-	for _, subscopeBucket := range r.subscopes {
-		// Copy out scope references under lock to minimize lock duration
-		scopesToReport := make([]*scope, 0, len(subscopeBucket.s))
-		scopeKeys := make([]string, 0, len(subscopeBucket.s))
-
-		subscopeBucket.mu.RLock()
-		for name, s := range subscopeBucket.s {
-			scopesToReport = append(scopesToReport, s)
-			scopeKeys = append(scopeKeys, name)
-		}
-		subscopeBucket.mu.RUnlock()
-
-		// Process each scope without holding the lock
-		for i, s := range scopesToReport {
-			safeReportScope(s, reporter)
-
-			// Check if scope is closed after reporting
-			if atomic.LoadInt32(&s.closed) != 0 {
-				subscopeBucket.mu.Lock()
-				delete(subscopeBucket.s, scopeKeys[i])
-				subscopeBucket.mu.Unlock()
-				s.clearMetrics()
-			}
-		}
-	}
-}
-
-// safeReportScope wraps the scope.report call with panic recovery.
-func safeReportScope(s *scope, reporter StatsReporter) {
-	defer func() {
-		if err := recover(); err != nil {
-			// TODO: Consider making this logging configurable or sending to an internal metric
-			fmt.Printf("tally: panic during scope report for scope %s: %v\n", s.fullyQualifiedName("."), err)
-			// Potentially re-panic if it's a critical error, or ensure the reporter's state is clean.
-			// For now, we just log and continue, assuming the reporter can handle individual metric failures.
-		}
-	}()
-	s.report(reporter)
-}
-
-// parallelReport processes scopes in parallel with one goroutine per shard for high throughput
-func (r *scopeRegistry) parallelReport(reporter StatsReporter) {
-	var wg sync.WaitGroup
-	type closedScopeInfo struct {
-		bucket *scopeBucket
-		name   string
-		scope  *scope
-	}
-
-	// Buffer for closed scopes info
-	closedScopes := make(chan closedScopeInfo, 100)
-
-	// Process each shard concurrently
-	for _, subscopeBucket := range r.subscopes {
-		wg.Add(1)
-		go func(bucket *scopeBucket) {
-			defer wg.Done()
-
-			// Copy scope references under lock to minimize lock duration
-			scopesToReport := make([]*scope, 0, len(bucket.s))
-			scopeKeys := make([]string, 0, len(bucket.s))
-
-			bucket.mu.RLock()
-			for name, s := range bucket.s {
-				scopesToReport = append(scopesToReport, s)
-				scopeKeys = append(scopeKeys, name)
-			}
-			bucket.mu.RUnlock()
-
-			// Process each scope without holding the lock
-			for i, s := range scopesToReport {
-				safeReportScope(s, reporter)
-
-				// Check if scope is closed after reporting
-				if atomic.LoadInt32(&s.closed) != 0 {
-					closedScopes <- closedScopeInfo{
-						bucket: bucket,
-						name:   scopeKeys[i],
-						scope:  s,
-					}
-				}
-			}
-		}(subscopeBucket)
-	}
-
-	// Close channel when all reporting is done
-	go func() {
-		wg.Wait()
-		close(closedScopes)
-	}()
-
-	// Process closed scopes outside the main reporting path
-	for info := range closedScopes {
-		info.bucket.mu.Lock()
-		delete(info.bucket.s, info.name)
-		info.bucket.mu.Unlock()
-		info.scope.clearMetrics()
-	}
-}
-
-// workerPoolReport processes scopes using a fixed-size worker pool for better resource control
-func (r *scopeRegistry) workerPoolReport(reporter StatsReporter, numWorkers int) {
-	var wg sync.WaitGroup
-
-	// First gather all scope references under minimal lock contention
-	type scopeBatch struct {
-		bucket    *scopeBucket
-		scopes    []*scope
-		scopeKeys []string
-	}
-
-	// Collect all scopes across all buckets
-	var batches []scopeBatch
-
-	for _, subscopeBucket := range r.subscopes {
-		batch := scopeBatch{
-			bucket: subscopeBucket,
-		}
-
-		subscopeBucket.mu.RLock()
-		batch.scopes = make([]*scope, 0, len(subscopeBucket.s))
-		batch.scopeKeys = make([]string, 0, len(subscopeBucket.s))
-
-		for name, s := range subscopeBucket.s {
-			batch.scopes = append(batch.scopes, s)
-			batch.scopeKeys = append(batch.scopeKeys, name)
-		}
-		subscopeBucket.mu.RUnlock()
-
-		if len(batch.scopes) > 0 {
-			batches = append(batches, batch)
-		}
-	}
-
-	// If we have no scopes to process, return early
-	if len(batches) == 0 {
-		return
-	}
-
-	// Split the work evenly among workers
-	type workItem struct {
-		scope    *scope
-		scopeKey string
-		bucket   *scopeBucket
-	}
-
-	// Create work queue - estimate size based on average batch
-	var totalScopes int
-	for _, batch := range batches {
-		totalScopes += len(batch.scopes)
-	}
-
-	workChan := make(chan workItem, totalScopes)
-	closedScopesChan := make(chan workItem, totalScopes) // Channel for scopes found to be closed
-
-	// Fill work queue
-	for _, batch := range batches {
-		for scopeIdx, s := range batch.scopes {
-			workChan <- workItem{
-				scope:    s,
-				scopeKey: batch.scopeKeys[scopeIdx],
-				bucket:   batch.bucket,
-			}
-		}
-	}
-	close(workChan)
-
-	// Start worker pool
-	wg.Add(numWorkers)
-	for i := 0; i < numWorkers; i++ {
-		go func() {
-			defer wg.Done()
-			for item := range workChan {
-				safeReportScope(item.scope, reporter)
-
-				// Check if scope is closed
-				if atomic.LoadInt32(&item.scope.closed) != 0 {
-					closedScopesChan <- item
-				}
-			}
-		}()
-	}
-
-	// Close result channel when all workers are done
-	go func() {
-		wg.Wait()
-		close(closedScopesChan)
-	}()
-
-	// Process closed scopes
-	for item := range closedScopesChan {
-		item.bucket.mu.Lock()
-		delete(item.bucket.s, item.scopeKey)
-		item.bucket.mu.Unlock()
-		item.scope.clearMetrics()
-	}
+	r.performMaintenance()
+	r.processScopes(func(s *scope) { safeReportScope(s, reporter) })
 }
 
 // CachedReport processes all scopes and reports their metrics via the cached reporter
 func (r *scopeRegistry) CachedReport() {
 	defer r.purgeIfRootClosed()
 	r.reportInternalMetrics()
+	r.performMaintenance()
+	r.processScopes(func(s *scope) { safeCachedReportScope(s) })
+}
 
-	// Check if we should run eviction
+// performMaintenance consolidates maintenance tasks
+func (r *scopeRegistry) performMaintenance() {
 	if r.enableEviction {
 		r.evictInactiveScopes()
 	}
-
-	// Cleanup the scope pool
 	if r.scopePool.New != nil {
 		r.cleanupScopePool()
 	}
+}
 
-	// Choose between sequential or parallel processing based on the feature flag
+// processScopes handles scope processing with the appropriate concurrency strategy
+func (r *scopeRegistry) processScopes(processFn func(*scope)) {
 	if EnableParallelFlush.Load() {
 		if MaxParallelFlushGoroutines > 0 {
-			r.workerPoolCachedReport(MaxParallelFlushGoroutines)
+			r.workerPoolProcess(processFn, MaxParallelFlushGoroutines)
 		} else {
-			r.parallelCachedReport()
+			r.parallelProcess(processFn)
 		}
 	} else {
-		r.sequentialCachedReport()
+		r.sequentialProcess(processFn)
 	}
 }
 
-// sequentialCachedReport processes all scopes sequentially to avoid waitgroup issues
-func (r *scopeRegistry) sequentialCachedReport() {
+// sequentialProcess processes all scopes sequentially
+func (r *scopeRegistry) sequentialProcess(processFn func(*scope)) {
 	for _, subscopeBucket := range r.subscopes {
-		// Copy out scope references under lock to minimize lock duration
-		scopesToReport := make([]*scope, 0, len(subscopeBucket.s))
-		scopeKeys := make([]string, 0, len(subscopeBucket.s))
-
-		subscopeBucket.mu.RLock()
-		for name, s := range subscopeBucket.s {
-			scopesToReport = append(scopesToReport, s)
-			scopeKeys = append(scopeKeys, name)
-		}
-		subscopeBucket.mu.RUnlock()
-
-		// Process each scope without holding the lock
-		for i, s := range scopesToReport {
-			safeCachedReportScope(s)
-
-			// Check if scope is closed after reporting
-			if atomic.LoadInt32(&s.closed) != 0 {
-				subscopeBucket.mu.Lock()
-				delete(subscopeBucket.s, scopeKeys[i])
-				subscopeBucket.mu.Unlock()
-				s.clearMetrics()
-			}
-		}
+		r.processBucket(subscopeBucket, processFn)
 	}
 }
 
-// safeCachedReportScope wraps the scope.cachedReport call with panic recovery.
-func safeCachedReportScope(s *scope) {
-	defer func() {
-		if err := recover(); err != nil {
-			// TODO: Consider making this logging configurable or sending to an internal metric
-			fmt.Printf("tally: panic during scope cachedReport for scope %s: %v\n", s.fullyQualifiedName("."), err)
-		}
-	}()
-	s.cachedReport()
-}
-
-// parallelCachedReport processes scopes in parallel with one goroutine per shard
-func (r *scopeRegistry) parallelCachedReport() {
+// parallelProcess processes scopes in parallel with one goroutine per shard
+func (r *scopeRegistry) parallelProcess(processFn func(*scope)) {
 	var wg sync.WaitGroup
-	type closedScopeInfo struct {
-		bucket *scopeBucket
-		name   string
-		scope  *scope
-	}
+	closedScopes := make(chan scopeClosureInfo, 100)
 
-	// Buffer for closed scopes info
-	closedScopes := make(chan closedScopeInfo, 100)
-
-	// Process each shard concurrently
 	for _, subscopeBucket := range r.subscopes {
 		wg.Add(1)
 		go func(bucket *scopeBucket) {
 			defer wg.Done()
-
-			// Copy scope references under lock to minimize lock duration
-			scopesToReport := make([]*scope, 0, len(bucket.s))
-			scopeKeys := make([]string, 0, len(bucket.s))
-
-			bucket.mu.RLock()
-			for name, s := range bucket.s {
-				scopesToReport = append(scopesToReport, s)
-				scopeKeys = append(scopeKeys, name)
-			}
-			bucket.mu.RUnlock()
-
-			// Process each scope without holding the lock
-			for i, s := range scopesToReport {
-				safeCachedReportScope(s)
-
-				// Check if scope is closed after reporting
-				if atomic.LoadInt32(&s.closed) != 0 {
-					closedScopes <- closedScopeInfo{
-						bucket: bucket,
-						name:   scopeKeys[i],
-						scope:  s,
-					}
-				}
-			}
+			r.processBucketWithClosures(bucket, processFn, closedScopes)
 		}(subscopeBucket)
 	}
 
-	// Close channel when all reporting is done
 	go func() {
 		wg.Wait()
 		close(closedScopes)
 	}()
 
-	// Process closed scopes outside the main reporting path
+	r.handleClosedScopes(closedScopes)
+}
+
+// workerPoolProcess processes scopes using a fixed-size worker pool
+func (r *scopeRegistry) workerPoolProcess(processFn func(*scope), numWorkers int) {
+	var wg sync.WaitGroup
+	workChan := make(chan workItem, r.estimateTotalScopes())
+	closedScopesChan := make(chan workItem, cap(workChan))
+
+	r.fillWorkQueue(workChan)
+
+	wg.Add(numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			defer wg.Done()
+			for item := range workChan {
+				processFn(item.scope)
+				if atomic.LoadInt32(&item.scope.closed) != 0 {
+					closedScopesChan <- item
+				}
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(closedScopesChan)
+	}()
+
+	for item := range closedScopesChan {
+		item.bucket.mu.Lock()
+		delete(item.bucket.s, item.scopeKey)
+		item.bucket.mu.Unlock()
+		item.scope.clearMetrics()
+	}
+}
+
+// Helper methods for scope processing
+func (r *scopeRegistry) processBucket(bucket *scopeBucket, processFn func(*scope)) {
+	scopesToProcess := r.copyBucketScopes(bucket)
+
+	for i, s := range scopesToProcess.scopes {
+		processFn(s)
+		if atomic.LoadInt32(&s.closed) != 0 {
+			bucket.mu.Lock()
+			delete(bucket.s, scopesToProcess.keys[i])
+			bucket.mu.Unlock()
+			s.clearMetrics()
+		}
+	}
+}
+
+func (r *scopeRegistry) processBucketWithClosures(bucket *scopeBucket, processFn func(*scope), closedChan chan<- scopeClosureInfo) {
+	scopesToProcess := r.copyBucketScopes(bucket)
+
+	for i, s := range scopesToProcess.scopes {
+		processFn(s)
+		if atomic.LoadInt32(&s.closed) != 0 {
+			closedChan <- scopeClosureInfo{bucket: bucket, name: scopesToProcess.keys[i], scope: s}
+		}
+	}
+}
+
+type scopesToProcess struct {
+	scopes []*scope
+	keys   []string
+}
+
+func (r *scopeRegistry) copyBucketScopes(bucket *scopeBucket) scopesToProcess {
+	bucket.mu.RLock()
+	defer bucket.mu.RUnlock()
+
+	result := scopesToProcess{
+		scopes: make([]*scope, 0, len(bucket.s)),
+		keys:   make([]string, 0, len(bucket.s)),
+	}
+
+	for name, s := range bucket.s {
+		result.scopes = append(result.scopes, s)
+		result.keys = append(result.keys, name)
+	}
+
+	return result
+}
+
+func (r *scopeRegistry) estimateTotalScopes() int {
+	total := 0
+	for _, bucket := range r.subscopes {
+		bucket.mu.RLock()
+		total += len(bucket.s)
+		bucket.mu.RUnlock()
+	}
+	return total
+}
+
+func (r *scopeRegistry) fillWorkQueue(workChan chan<- workItem) {
+	for _, subscopeBucket := range r.subscopes {
+		scopesToProcess := r.copyBucketScopes(subscopeBucket)
+		for i, s := range scopesToProcess.scopes {
+			workChan <- workItem{
+				scope:    s,
+				scopeKey: scopesToProcess.keys[i],
+				bucket:   subscopeBucket,
+			}
+		}
+	}
+	close(workChan)
+}
+
+func (r *scopeRegistry) handleClosedScopes(closedScopes <-chan scopeClosureInfo) {
 	for info := range closedScopes {
 		info.bucket.mu.Lock()
 		delete(info.bucket.s, info.name)
@@ -547,100 +375,30 @@ func (r *scopeRegistry) parallelCachedReport() {
 	}
 }
 
-// workerPoolCachedReport processes scopes using a fixed-size worker pool
-func (r *scopeRegistry) workerPoolCachedReport(numWorkers int) {
-	var wg sync.WaitGroup
+type workItem struct {
+	scope    *scope
+	scopeKey string
+	bucket   *scopeBucket
+}
 
-	// First gather all scope references under minimal lock contention
-	type scopeBatch struct {
-		bucket    *scopeBucket
-		scopes    []*scope
-		scopeKeys []string
-	}
-
-	// Collect all scopes across all buckets
-	var batches []scopeBatch
-
-	for _, subscopeBucket := range r.subscopes {
-		batch := scopeBatch{
-			bucket: subscopeBucket,
+// safeReportScope wraps the scope.report call with panic recovery
+func safeReportScope(s *scope, reporter StatsReporter) {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Printf("tally: panic during scope report for scope %s: %v\n", s.fullyQualifiedName("."), err)
 		}
-
-		subscopeBucket.mu.RLock()
-		batch.scopes = make([]*scope, 0, len(subscopeBucket.s))
-		batch.scopeKeys = make([]string, 0, len(subscopeBucket.s))
-
-		for name, s := range subscopeBucket.s {
-			batch.scopes = append(batch.scopes, s)
-			batch.scopeKeys = append(batch.scopeKeys, name)
-		}
-		subscopeBucket.mu.RUnlock()
-
-		if len(batch.scopes) > 0 {
-			batches = append(batches, batch)
-		}
-	}
-
-	// If we have no scopes to process, return early
-	if len(batches) == 0 {
-		return
-	}
-
-	// Split the work evenly among workers
-	type workItem struct {
-		scope    *scope
-		scopeKey string
-		bucket   *scopeBucket
-	}
-
-	// Create work queue
-	var totalScopes int
-	for _, batch := range batches {
-		totalScopes += len(batch.scopes)
-	}
-	workChan := make(chan workItem, totalScopes)
-	closedScopesChan := make(chan workItem, totalScopes) // Channel for scopes found to be closed
-
-	// Fill work queue
-	for _, batch := range batches {
-		for scopeIdx, s := range batch.scopes {
-			workChan <- workItem{
-				scope:    s,
-				scopeKey: batch.scopeKeys[scopeIdx],
-				bucket:   batch.bucket,
-			}
-		}
-	}
-	close(workChan)
-
-	// Start worker pool
-	wg.Add(numWorkers)
-	for i := 0; i < numWorkers; i++ {
-		go func() {
-			defer wg.Done()
-			for item := range workChan {
-				safeCachedReportScope(item.scope)
-
-				if atomic.LoadInt32(&item.scope.closed) != 0 {
-					closedScopesChan <- item
-				}
-			}
-		}()
-	}
-
-	// Close result channel when all workers are done
-	go func() {
-		wg.Wait()
-		close(closedScopesChan)
 	}()
+	s.report(reporter)
+}
 
-	// Process closed scopes
-	for item := range closedScopesChan {
-		item.bucket.mu.Lock()
-		delete(item.bucket.s, item.scopeKey)
-		item.bucket.mu.Unlock()
-		item.scope.clearMetrics()
-	}
+// safeCachedReportScope wraps the scope.cachedReport call with panic recovery
+func safeCachedReportScope(s *scope) {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Printf("tally: panic during scope cachedReport for scope %s: %v\n", s.fullyQualifiedName("."), err)
+		}
+	}()
+	s.cachedReport()
 }
 
 func (r *scopeRegistry) ForEachScope(f func(*scope)) {

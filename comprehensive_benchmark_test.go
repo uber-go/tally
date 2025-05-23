@@ -330,9 +330,10 @@ func BenchmarkConcurrentPatterns(b *testing.B) {
 func BenchmarkReporterIntegration(b *testing.B) {
 	// Test with null reporter (fastest)
 	b.Run("NullReporter", func(b *testing.B) {
-		scope, _ := NewRootScope(ScopeOptions{
+		scope, closer := NewRootScope(ScopeOptions{
 			Reporter: NullStatsReporter,
 		}, time.Second)
+		defer closer.Close()
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
