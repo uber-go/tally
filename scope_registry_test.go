@@ -360,7 +360,7 @@ func BenchmarkKeyGenerationComparison(b *testing.B) {
 	})
 }
 
-// Phase 4: New benchmarks for metric slice pooling and tag map pooling optimizations
+// New benchmarks for metric slice pooling and tag map pooling optimizations
 func BenchmarkMetricSlicePooling(b *testing.B) {
 	b.Run("CounterSliceAllocation", func(b *testing.B) {
 		b.ResetTimer()
@@ -510,8 +510,8 @@ func BenchmarkSnapshotMapPooling(b *testing.B) {
 	})
 }
 
-// Benchmark the overall subscope creation with all Phase 4 optimizations
-func BenchmarkSubscopeCreationPhase4(b *testing.B) {
+// Benchmark the overall subscope creation with all optimizations
+func BenchmarkSubscopeCreationOptimized(b *testing.B) {
 	root, closer := NewRootScope(ScopeOptions{
 		Prefix:   "test",
 		Reporter: NullStatsReporter,
@@ -524,7 +524,7 @@ func BenchmarkSubscopeCreationPhase4(b *testing.B) {
 		"region":      "us-west-2",
 	}
 
-	b.Run("SubscopeCreationWithPhase4", func(b *testing.B) {
+	b.Run("SubscopeCreationOptimized", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			subscope := root.Tagged(tags).SubScope("metrics")
@@ -533,5 +533,163 @@ func BenchmarkSubscopeCreationPhase4(b *testing.B) {
 			subscope.Gauge("cpu_usage").Update(50.0)
 			subscope.Histogram("latency", MustMakeLinearValueBuckets(0, 10, 10)).RecordValue(5.0)
 		}
+	})
+}
+
+// New benchmarks for advanced tag pattern optimizations
+func BenchmarkTagPatternOptimizations(b *testing.B) {
+	root, closer := NewRootScope(ScopeOptions{
+		Prefix:   "test",
+		Reporter: NullStatsReporter,
+	}, 0)
+	defer closer.Close()
+
+	// Test data
+	emptyTags := map[string]string{}
+	singleTag := map[string]string{"method": "GET"}
+	commonTags := map[string]string{
+		"service":     "user-service",
+		"environment": "production",
+		"region":      "us-west-2",
+	}
+
+	// Create a scope with some tags for comparison tests
+	existingScope := root.Tagged(commonTags)
+
+	b.Run("EmptyTagsFastPath", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Should hit the empty tags fast path
+			_ = root.Tagged(emptyTags)
+		}
+	})
+
+	b.Run("SameTagsFastPath", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Should hit the same tags fast path
+			_ = existingScope.Tagged(commonTags)
+		}
+	})
+
+	b.Run("IdenticalTagDetection", func(b *testing.B) {
+		scope := root.Tagged(commonTags).(*scope)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Test the tagsEqual function directly
+			_ = scope.tagsEqual(commonTags)
+		}
+	})
+
+	b.Run("SingleTagCanonicalCache", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// First call creates scope and caches it
+			// Subsequent calls should hit cache
+			_ = root.Tagged(singleTag)
+		}
+	})
+
+	b.Run("MultiTagCanonicalCache", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Test caching for multi-tag scenarios
+			_ = root.Tagged(commonTags)
+		}
+	})
+
+	b.Run("TagCanonicalization", func(b *testing.B) {
+		registry := root.(*scope).registry
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Test canonical string generation speed
+			_ = registry.canonicalizeTagMap(commonTags)
+		}
+	})
+
+	b.Run("TagStringInterning", func(b *testing.B) {
+		registry := root.(*scope).registry
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Test tag string interning performance
+			_ = registry.internTagString("service", true)
+			_ = registry.internTagString("user-service", false)
+		}
+	})
+}
+
+func BenchmarkFrameworkPatterns(b *testing.B) {
+	root, closer := NewRootScope(ScopeOptions{
+		Prefix:   "http",
+		Reporter: NullStatsReporter,
+	}, 0)
+	defer closer.Close()
+
+	// Simulate common framework patterns
+	httpMethods := []string{"GET", "POST", "PUT", "DELETE", "PATCH"}
+	statusCodes := []string{"200", "201", "400", "401", "404", "500", "503"}
+	services := []string{"user-service", "order-service", "payment-service"}
+
+	b.Run("HTTPFrameworkPattern", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Simulate framework creating identical tag combinations repeatedly
+			method := httpMethods[i%len(httpMethods)]
+			status := statusCodes[i%len(statusCodes)]
+			service := services[i%len(services)]
+
+			tags := map[string]string{
+				"method":  method,
+				"status":  status,
+				"service": service,
+			}
+
+			scope := root.Tagged(tags)
+			scope.Counter("requests").Inc(1)
+			scope.Histogram("duration", MustMakeLinearDurationBuckets(0, 10*time.Millisecond, 20)).RecordDuration(time.Duration(i%100) * time.Millisecond)
+		}
+	})
+
+	b.Run("RepeatedIdenticalTags", func(b *testing.B) {
+		// Test the common case where frameworks create identical tag maps
+		tags := map[string]string{
+			"method":      "GET",
+			"status":      "200",
+			"service":     "user-service",
+			"environment": "production",
+		}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// This should hit cache after first creation
+			scope := root.Tagged(tags)
+			scope.Counter("requests").Inc(1)
+		}
+	})
+
+	b.Run("TagCreationVsPooled", func(b *testing.B) {
+		b.Run("NewMapEachTime", func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				// Simulate creating new map each time (typical framework code)
+				tags := map[string]string{
+					"method": "GET",
+					"status": "200",
+				}
+				_ = root.Tagged(tags)
+			}
+		})
+
+		b.Run("ReusedMap", func(b *testing.B) {
+			// Pre-create the map (optimal case)
+			tags := map[string]string{
+				"method": "GET",
+				"status": "200",
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = root.Tagged(tags)
+			}
+		})
 	})
 }

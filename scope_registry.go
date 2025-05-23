@@ -105,7 +105,7 @@ var (
 		},
 	}
 
-	// Phase 4: Advanced metric slice and tag map pools
+	// Advanced metric slice and tag map pools
 	// These eliminate the frequent allocation of metric tracking slices and tag maps
 	metricSlicePools = struct {
 		// Counter slice pools
@@ -396,6 +396,22 @@ type scopeRegistry struct {
 	// String interner for scope keys
 	stringInterner map[string]string
 	internerMutex  sync.Mutex
+
+	// Tag pattern optimization infrastructure
+	// Canonical tag cache for fast lookup of identical tag combinations
+	canonicalTagCache   map[string]*scope // Maps canonical tag representation to scope
+	canonicalCacheMutex sync.RWMutex      // Protects canonical tag cache
+	canonicalCacheSize  int64             // Current cache size (atomic access)
+	maxCanonicalCache   int               // Maximum cache size to prevent memory leaks
+	canonicalCacheStats struct {
+		hits   int64 // Cache hits (atomic)
+		misses int64 // Cache misses (atomic)
+	}
+
+	// Tag string interning for memory efficiency
+	tagKeyInterner   map[string]string // Intern commonly used tag keys
+	tagValueInterner map[string]string // Intern commonly used tag values
+	tagInternerMutex sync.Mutex        // Protects tag interners
 }
 
 type scopeBucket struct {
@@ -433,6 +449,10 @@ func newScopeRegistryWithShardCount(
 	// Initialize the adaptiveMode and totalSubScopes fields
 	atomic.StoreInt32(&r.adaptiveMode, 0)
 	atomic.StoreInt64(&r.totalSubScopes, 0)
+
+	// Initialize canonical tag cache
+	r.maxCanonicalCache = 1000 // Reasonable default to prevent memory leaks
+	atomic.StoreInt64(&r.canonicalCacheSize, 0)
 
 	for k, v := range cardinalityMetricsTags {
 		r.cardinalityMetricsTags[root.sanitizer.Key(k)] = root.sanitizer.Value(v)
@@ -920,6 +940,12 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		atomic.StoreInt32(&r.adaptiveMode, 1)
 	}
 
+	// Cache the newly created scope for future tag pattern lookups
+	if len(tags) > 0 {
+		canonical := r.canonicalizeTagMap(tags)
+		r.cacheTaggedScope(parent, canonical, s)
+	}
+
 	return s
 }
 
@@ -1010,7 +1036,7 @@ func (r *scopeRegistry) reportInternalMetrics() {
 
 // preAllocateEmptyMaps creates empty maps with preallocated capacity
 // to avoid frequent reallocations when adding metrics to scopes
-// Phase 4: Now uses pooled slices for better memory efficiency
+// Now uses pooled slices for better memory efficiency
 func preAllocateEmptyMaps() (
 	counters map[string]*counter,
 	countersSlice []*counter,
@@ -1390,7 +1416,7 @@ func DisableOptimizedFlush() {
 	MaxParallelFlushGoroutines = 0
 }
 
-// Phase 4: Metric slice pool management functions
+// Metric slice pool management functions
 // getCounterSlice returns an appropriately sized counter slice from pools
 func getCounterSlice(estimatedSize int) *[]*counter {
 	if estimatedSize <= smallMetricThreshold {
@@ -1549,4 +1575,156 @@ func releaseHistogramSnapshotMap(m *map[string]HistogramSnapshot) {
 		delete(*m, k)
 	}
 	snapshotMapPools.histogramMaps.Put(m)
+}
+
+// Tag pattern optimization methods
+
+// canonicalizeTagMap creates a canonical string representation of a tag map
+// for efficient caching and comparison. Uses sorted keys for deterministic output.
+func (r *scopeRegistry) canonicalizeTagMap(tags map[string]string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+
+	// For single tag, optimize with direct string building
+	if len(tags) == 1 {
+		for k, v := range tags {
+			// Intern the key and value for memory efficiency
+			internedK := r.internTagString(k, true)
+			internedV := r.internTagString(v, false)
+			return internedK + "=" + internedV
+		}
+	}
+
+	// For multiple tags, use pooled buffer and sorting
+	buf := bytesBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bytesBufferPool.Put(buf)
+
+	// Get sorted keys from pool
+	keysPtr := getStringSlice(len(tags))
+	keys := *keysPtr
+	defer releaseStringSlice(keysPtr)
+
+	// Collect and intern keys
+	for k := range tags {
+		keys = append(keys, r.internTagString(k, true))
+	}
+	sort.Strings(keys)
+
+	// Build canonical representation
+	for i, k := range keys {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		buf.WriteString(k)
+		buf.WriteByte('=')
+		buf.WriteString(r.internTagString(tags[k], false))
+	}
+
+	return buf.String()
+}
+
+// internTagString interns tag keys and values to reduce memory usage
+// isKey indicates whether this is a tag key (true) or value (false)
+func (r *scopeRegistry) internTagString(s string, isKey bool) string {
+	r.tagInternerMutex.Lock()
+	defer r.tagInternerMutex.Unlock()
+
+	var interner map[string]string
+	if isKey {
+		if r.tagKeyInterner == nil {
+			r.tagKeyInterner = make(map[string]string)
+		}
+		interner = r.tagKeyInterner
+	} else {
+		if r.tagValueInterner == nil {
+			r.tagValueInterner = make(map[string]string)
+		}
+		interner = r.tagValueInterner
+	}
+
+	if interned, exists := interner[s]; exists {
+		return interned
+	}
+
+	interner[s] = s
+	return s
+}
+
+// lookupCachedTaggedScope checks the canonical tag cache for an existing scope
+// Returns nil if not found in cache
+func (r *scopeRegistry) lookupCachedTaggedScope(parent *scope, canonical string) *scope {
+	if canonical == "" {
+		return nil // Empty tags should have been handled by fast path
+	}
+
+	// Create cache key combining parent scope prefix and canonical tags
+	cacheKey := parent.fullyQualifiedName("") + ":" + canonical
+
+	r.canonicalCacheMutex.RLock()
+	cached, exists := r.canonicalTagCache[cacheKey]
+	r.canonicalCacheMutex.RUnlock()
+
+	if exists && cached != nil && atomic.LoadInt32(&cached.closed) == 0 {
+		atomic.AddInt64(&r.canonicalCacheStats.hits, 1)
+		return cached
+	}
+
+	atomic.AddInt64(&r.canonicalCacheStats.misses, 1)
+	return nil
+}
+
+// cacheTaggedScope stores a scope in the canonical tag cache
+func (r *scopeRegistry) cacheTaggedScope(parent *scope, canonical string, targetScope *scope) {
+	if canonical == "" || targetScope == nil {
+		return
+	}
+
+	// Check cache size limit
+	currentSize := atomic.LoadInt64(&r.canonicalCacheSize)
+	if currentSize >= int64(r.maxCanonicalCache) {
+		r.evictCanonicalCache()
+	}
+
+	cacheKey := parent.fullyQualifiedName("") + ":" + canonical
+
+	r.canonicalCacheMutex.Lock()
+	if r.canonicalTagCache == nil {
+		r.canonicalTagCache = make(map[string]*scope)
+	}
+
+	// Only add if not already present (avoid duplicate counting)
+	if _, exists := r.canonicalTagCache[cacheKey]; !exists {
+		r.canonicalTagCache[cacheKey] = targetScope
+		atomic.AddInt64(&r.canonicalCacheSize, 1)
+	}
+	r.canonicalCacheMutex.Unlock()
+}
+
+// evictCanonicalCache removes stale entries from the canonical tag cache
+func (r *scopeRegistry) evictCanonicalCache() {
+	r.canonicalCacheMutex.Lock()
+	defer r.canonicalCacheMutex.Unlock()
+
+	// Simple eviction: remove closed scopes and reduce cache by 25%
+	var toRemove []string
+	count := 0
+	targetRemoval := len(r.canonicalTagCache) / 4
+
+	for key, scope := range r.canonicalTagCache {
+		if atomic.LoadInt32(&scope.closed) != 0 {
+			toRemove = append(toRemove, key)
+		} else if count < targetRemoval {
+			// Remove some active scopes too to prevent cache from growing too large
+			toRemove = append(toRemove, key)
+			count++
+		}
+	}
+
+	for _, key := range toRemove {
+		delete(r.canonicalTagCache, key)
+	}
+
+	atomic.StoreInt64(&r.canonicalCacheSize, int64(len(r.canonicalTagCache)))
 }

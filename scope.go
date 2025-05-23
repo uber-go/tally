@@ -495,7 +495,69 @@ func (s *scope) histogram(sanitizedName string) (Histogram, bool) {
 }
 
 func (s *scope) Tagged(tags map[string]string) Scope {
+	// Advanced tag pattern optimizations for better performance
+
+	// Fast path 1: Nil or empty tags - return same scope
+	if len(tags) == 0 {
+		return s
+	}
+
+	// Fast path 2: Identical tags - avoid expensive subscope creation
+	// But skip this if noCacheSubscopes is enabled
+	if !s.noCacheSubscopes && s.tagsEqual(tags) {
+		return s
+	}
+
+	// Fast path 3: Check canonical tag cache before expensive operations
+	// But skip this if noCacheSubscopes is enabled
+	if !s.noCacheSubscopes && s.registry != nil {
+		canonical := s.registry.canonicalizeTagMap(tags)
+		if cached := s.registry.lookupCachedTaggedScope(s, canonical); cached != nil {
+			return cached
+		}
+
+		// Create new subscope and cache it
+		newScope := s.subscope(s.prefix, tags)
+		s.registry.cacheTaggedScope(s, canonical, newScope.(*scope))
+		return newScope
+	}
+
+	// Slow path: Create new subscope (falls back to existing optimized path)
 	return s.subscope(s.prefix, tags)
+}
+
+// tagsEqual efficiently compares two tag maps for exact equality
+// Optimized tag comparison avoiding unnecessary allocations
+func (s *scope) tagsEqual(other map[string]string) bool {
+	if len(s.tags) != len(other) {
+		return false
+	}
+
+	// For small maps, direct comparison is fastest
+	if len(s.tags) <= 4 {
+		for k, v := range s.tags {
+			if otherV, exists := other[k]; !exists || otherV != v {
+				return false
+			}
+		}
+		return true
+	}
+
+	// For larger maps, compare in the more populated direction
+	if len(s.tags) >= len(other) {
+		for k, v := range other {
+			if selfV, exists := s.tags[k]; !exists || selfV != v {
+				return false
+			}
+		}
+	} else {
+		for k, v := range s.tags {
+			if otherV, exists := other[k]; !exists || otherV != v {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (s *scope) SubScope(prefix string) Scope {
@@ -823,7 +885,7 @@ func mergeRightTags(tagsLeft, tagsRight map[string]string) map[string]string {
 }
 
 // mergeRightTagsPooled is an optimized version that uses pooled maps
-// Phase 4: Eliminates allocations during tag merging for better performance
+// Eliminates allocations during tag merging for better performance
 func mergeRightTagsPooled(tagsLeft, tagsRight map[string]string) map[string]string {
 	if tagsLeft == nil && tagsRight == nil {
 		return nil
@@ -868,7 +930,7 @@ type snapshot struct {
 }
 
 // newSnapshot creates a snapshot using pooled maps for better performance
-// Phase 4: Uses pooled snapshot maps to reduce allocations
+// Uses pooled snapshot maps to reduce allocations
 func newSnapshot() *snapshot {
 	return &snapshot{
 		counters:   *getCounterSnapshotMap(),
@@ -879,7 +941,7 @@ func newSnapshot() *snapshot {
 }
 
 // newSnapshotPooled creates a snapshot using pooled maps and provides cleanup function
-// Phase 4: Returns cleanup function to return maps to pools when done
+// Returns cleanup function to return maps to pools when done
 func newSnapshotPooled() (*snapshot, func()) {
 	counterMapPtr := getCounterSnapshotMap()
 	gaugeMapPtr := getGaugeSnapshotMap()
@@ -1002,7 +1064,7 @@ func (s *scope) trackActivity() {
 }
 
 // resetForPool resets the scope for reuse from the object pool
-// Phase 4: Now properly returns metric slices to pools for better memory efficiency
+// Now properly returns metric slices to pools for better memory efficiency
 func (s *scope) resetForPool() {
 	// Clear maps but maintain capacity
 	s.counters.Range(func(key, value interface{}) bool {
