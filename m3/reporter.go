@@ -475,6 +475,7 @@ func (r *reporter) convertTags(tags map[string]string) []m3thrift.MetricTag {
 		return cachedTags
 	}
 
+	// Use the new specialized tag slice pool
 	newTags := r.resourcePool.getMetricTagSlice()
 	for k, v := range tags {
 		newTags = append(newTags, m3thrift.MetricTag{
@@ -486,6 +487,7 @@ func (r *reporter) convertTags(tags map[string]string) []m3thrift.MetricTag {
 		return newTags[i].Name < newTags[j].Name
 	})
 
+	// Cache the sorted result - note: we can't release newTags since it gets cached
 	cachedResult := r.tagCache.Set(key, newTags)
 	return cachedResult
 }

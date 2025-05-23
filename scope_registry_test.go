@@ -322,3 +322,216 @@ func TestCachedReporterInternalMetricsConcurrent(t *testing.T) {
 	tr.gg.Add(numInternalMetrics)
 	closer.Close()
 }
+
+func BenchmarkKeyGenerationComparison(b *testing.B) {
+	prefix := "test.metric.name"
+	tags := map[string]string{
+		"service":     "test-service",
+		"environment": "production",
+		"host":        "server-01",
+		"region":      "us-west-2",
+		"datacenter":  "pdx1",
+	}
+
+	b.Run("OriginalWithAllocation", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Simulate the old approach with manual allocation
+			_ = string(keyForPrefixedStringMapsAsKey(make([]byte, 0, 256), prefix, tags))
+		}
+	})
+
+	b.Run("NewWithPooledBuffer", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Use the new pooled buffer approach
+			_ = keyForPrefixedStringMapsWithPooledBuffer(prefix, tags)
+		}
+	})
+
+	b.Run("OptimizedWithPooledSlices", func(b *testing.B) {
+		buf := make([]byte, 0, 256)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Use the new optimized version with pooled string slices
+			buf = buf[:0] // Reset buffer
+			_ = string(keyForPrefixedStringMapsAsKeyWithPooledSlice(buf, prefix, tags))
+		}
+	})
+}
+
+// Phase 4: New benchmarks for metric slice pooling and tag map pooling optimizations
+func BenchmarkMetricSlicePooling(b *testing.B) {
+	b.Run("CounterSliceAllocation", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Old approach - always allocate
+			_ = make([]*counter, 0, 16)
+		}
+	})
+
+	b.Run("CounterSlicePooled", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// New approach - use pools
+			slice := getCounterSlice(16)
+			releaseCounterSlice(slice)
+		}
+	})
+
+	b.Run("GaugeSliceAllocation", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Old approach - always allocate
+			_ = make([]*gauge, 0, 16)
+		}
+	})
+
+	b.Run("GaugeSlicePooled", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// New approach - use pools
+			slice := getGaugeSlice(16)
+			releaseGaugeSlice(slice)
+		}
+	})
+
+	b.Run("HistogramSliceAllocation", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Old approach - always allocate
+			_ = make([]*histogram, 0, 16)
+		}
+	})
+
+	b.Run("HistogramSlicePooled", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// New approach - use pools
+			slice := getHistogramSlice(16)
+			releaseHistogramSlice(slice)
+		}
+	})
+}
+
+func BenchmarkTagMapPooling(b *testing.B) {
+	left := map[string]string{
+		"service": "test-service",
+		"region":  "us-west-2",
+	}
+	right := map[string]string{
+		"environment": "production",
+		"instance":    "instance-1",
+	}
+
+	b.Run("TagMergeAllocation", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Old approach - always allocate
+			_ = mergeRightTags(left, right)
+		}
+	})
+
+	b.Run("TagMergePooled", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// New approach - use pooled maps
+			_ = mergeRightTagsPooled(left, right)
+		}
+	})
+
+	b.Run("TagMapDirectAllocation", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Direct allocation
+			_ = make(map[string]string, 8)
+		}
+	})
+
+	b.Run("TagMapPooled", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Pooled allocation
+			tagMap := getTagMap(8)
+			releaseTagMap(tagMap)
+		}
+	})
+}
+
+func BenchmarkSnapshotMapPooling(b *testing.B) {
+	b.Run("SnapshotMapsAllocation", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Old approach - always allocate
+			_ = map[string]CounterSnapshot{}
+			_ = map[string]GaugeSnapshot{}
+			_ = map[string]TimerSnapshot{}
+			_ = map[string]HistogramSnapshot{}
+		}
+	})
+
+	b.Run("SnapshotMapsPooled", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// New approach - use pools
+			counterMap := getCounterSnapshotMap()
+			gaugeMap := getGaugeSnapshotMap()
+			timerMap := getTimerSnapshotMap()
+			histogramMap := getHistogramSnapshotMap()
+
+			releaseCounterSnapshotMap(counterMap)
+			releaseGaugeSnapshotMap(gaugeMap)
+			releaseTimerSnapshotMap(timerMap)
+			releaseHistogramSnapshotMap(histogramMap)
+		}
+	})
+
+	b.Run("SnapshotCreationOriginal", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Simulate old newSnapshot
+			_ = &snapshot{
+				counters:   make(map[string]CounterSnapshot),
+				gauges:     make(map[string]GaugeSnapshot),
+				timers:     make(map[string]TimerSnapshot),
+				histograms: make(map[string]HistogramSnapshot),
+			}
+		}
+	})
+
+	b.Run("SnapshotCreationPooled", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// New pooled approach
+			snapshot, cleanup := newSnapshotPooled()
+			_ = snapshot
+			cleanup()
+		}
+	})
+}
+
+// Benchmark the overall subscope creation with all Phase 4 optimizations
+func BenchmarkSubscopeCreationPhase4(b *testing.B) {
+	root, closer := NewRootScope(ScopeOptions{
+		Prefix:   "test",
+		Reporter: NullStatsReporter,
+	}, 0)
+	defer closer.Close()
+
+	tags := map[string]string{
+		"service":     "test-service",
+		"environment": "production",
+		"region":      "us-west-2",
+	}
+
+	b.Run("SubscopeCreationWithPhase4", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			subscope := root.Tagged(tags).SubScope("metrics")
+			// Create some metrics to trigger slice allocations
+			subscope.Counter("requests").Inc(1)
+			subscope.Gauge("cpu_usage").Update(50.0)
+			subscope.Histogram("latency", MustMakeLinearValueBuckets(0, 10, 10)).RecordValue(5.0)
+		}
+	})
+}

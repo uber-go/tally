@@ -47,6 +47,213 @@ var (
 			return new(bytes.Buffer)
 		},
 	}
+
+	// Specialized pools for tag serialization buffers
+	// These are optimized for different key building scenarios
+	keySerializationPools = struct {
+		// Small buffer pool for simple scope keys (typically < 128 bytes)
+		small sync.Pool
+		// Medium buffer pool for moderate scope keys (typically < 512 bytes)
+		medium sync.Pool
+		// Large buffer pool for complex scope keys (typically < 1024 bytes)
+		large sync.Pool
+	}{
+		small: sync.Pool{
+			New: func() interface{} {
+				buf := make([]byte, 0, 128)
+				return &buf
+			},
+		},
+		medium: sync.Pool{
+			New: func() interface{} {
+				buf := make([]byte, 0, 512)
+				return &buf
+			},
+		},
+		large: sync.Pool{
+			New: func() interface{} {
+				buf := make([]byte, 0, 1024)
+				return &buf
+			},
+		},
+	}
+
+	// String slice pools for key generation and sorting
+	// These eliminate allocations during tag key collection and sorting
+	stringSlicePools = struct {
+		small  sync.Pool // For small tag collections (< 8 keys)
+		medium sync.Pool // For medium tag collections (< 16 keys)
+		large  sync.Pool // For large tag collections (< 32 keys)
+	}{
+		small: sync.Pool{
+			New: func() interface{} {
+				slice := make([]string, 0, 8)
+				return &slice
+			},
+		},
+		medium: sync.Pool{
+			New: func() interface{} {
+				slice := make([]string, 0, 16)
+				return &slice
+			},
+		},
+		large: sync.Pool{
+			New: func() interface{} {
+				slice := make([]string, 0, 32)
+				return &slice
+			},
+		},
+	}
+
+	// Phase 4: Advanced metric slice and tag map pools
+	// These eliminate the frequent allocation of metric tracking slices and tag maps
+	metricSlicePools = struct {
+		// Counter slice pools
+		counterSmall  sync.Pool // []*counter with cap 16
+		counterMedium sync.Pool // []*counter with cap 64
+		counterLarge  sync.Pool // []*counter with cap 256
+
+		// Gauge slice pools
+		gaugeSmall  sync.Pool // []*gauge with cap 16
+		gaugeMedium sync.Pool // []*gauge with cap 64
+		gaugeLarge  sync.Pool // []*gauge with cap 256
+
+		// Histogram slice pools
+		histogramSmall  sync.Pool // []*histogram with cap 16
+		histogramMedium sync.Pool // []*histogram with cap 64
+		histogramLarge  sync.Pool // []*histogram with cap 256
+	}{
+		counterSmall: sync.Pool{
+			New: func() interface{} {
+				slice := make([]*counter, 0, 16)
+				return &slice
+			},
+		},
+		counterMedium: sync.Pool{
+			New: func() interface{} {
+				slice := make([]*counter, 0, 64)
+				return &slice
+			},
+		},
+		counterLarge: sync.Pool{
+			New: func() interface{} {
+				slice := make([]*counter, 0, 256)
+				return &slice
+			},
+		},
+		gaugeSmall: sync.Pool{
+			New: func() interface{} {
+				slice := make([]*gauge, 0, 16)
+				return &slice
+			},
+		},
+		gaugeMedium: sync.Pool{
+			New: func() interface{} {
+				slice := make([]*gauge, 0, 64)
+				return &slice
+			},
+		},
+		gaugeLarge: sync.Pool{
+			New: func() interface{} {
+				slice := make([]*gauge, 0, 256)
+				return &slice
+			},
+		},
+		histogramSmall: sync.Pool{
+			New: func() interface{} {
+				slice := make([]*histogram, 0, 16)
+				return &slice
+			},
+		},
+		histogramMedium: sync.Pool{
+			New: func() interface{} {
+				slice := make([]*histogram, 0, 64)
+				return &slice
+			},
+		},
+		histogramLarge: sync.Pool{
+			New: func() interface{} {
+				slice := make([]*histogram, 0, 256)
+				return &slice
+			},
+		},
+	}
+
+	// Tag map pools for efficient tag merging operations
+	// These eliminate allocations during tag map merging in subscope creation
+	tagMapPools = struct {
+		small  sync.Pool // map[string]string with initial capacity 8
+		medium sync.Pool // map[string]string with initial capacity 16
+		large  sync.Pool // map[string]string with initial capacity 32
+	}{
+		small: sync.Pool{
+			New: func() interface{} {
+				m := make(map[string]string, 8)
+				return &m
+			},
+		},
+		medium: sync.Pool{
+			New: func() interface{} {
+				m := make(map[string]string, 16)
+				return &m
+			},
+		},
+		large: sync.Pool{
+			New: func() interface{} {
+				m := make(map[string]string, 32)
+				return &m
+			},
+		},
+	}
+
+	// Snapshot map pools for efficient snapshot creation
+	// These eliminate allocations during Snapshot() operations
+	snapshotMapPools = struct {
+		counterMaps   sync.Pool // map[string]CounterSnapshot
+		gaugeMaps     sync.Pool // map[string]GaugeSnapshot
+		timerMaps     sync.Pool // map[string]TimerSnapshot
+		histogramMaps sync.Pool // map[string]HistogramSnapshot
+	}{
+		counterMaps: sync.Pool{
+			New: func() interface{} {
+				m := make(map[string]CounterSnapshot, 16)
+				return &m
+			},
+		},
+		gaugeMaps: sync.Pool{
+			New: func() interface{} {
+				m := make(map[string]GaugeSnapshot, 16)
+				return &m
+			},
+		},
+		timerMaps: sync.Pool{
+			New: func() interface{} {
+				m := make(map[string]TimerSnapshot, 16)
+				return &m
+			},
+		},
+		histogramMaps: sync.Pool{
+			New: func() interface{} {
+				m := make(map[string]HistogramSnapshot, 16)
+				return &m
+			},
+		},
+	}
+
+	// Buffer size thresholds for pool management
+	smallBufferThreshold  = 128
+	mediumBufferThreshold = 512
+	largeBufferThreshold  = 1024
+
+	// Metric slice size thresholds
+	smallMetricThreshold  = 16
+	mediumMetricThreshold = 64
+	largeMetricThreshold  = 256
+
+	// Tag map size thresholds
+	smallTagThreshold  = 8
+	mediumTagThreshold = 16
+	largeTagThreshold  = 32
 )
 
 const (
@@ -78,6 +285,76 @@ var EnableParallelFlush atomic.Bool
 // - 4-8: Provides good performance balance for most workloads
 // - 16+: May cause degraded performance due to contention
 var MaxParallelFlushGoroutines int
+
+// getTagSerializationBuffer returns an appropriately sized buffer for tag serialization
+// based on an estimated size of the final key
+func getTagSerializationBuffer(estimatedSize int) *[]byte {
+	if estimatedSize <= smallBufferThreshold {
+		return keySerializationPools.small.Get().(*[]byte)
+	} else if estimatedSize <= mediumBufferThreshold {
+		return keySerializationPools.medium.Get().(*[]byte)
+	} else {
+		return keySerializationPools.large.Get().(*[]byte)
+	}
+}
+
+// releaseTagSerializationBuffer returns a buffer to the appropriate pool
+// based on its capacity, or lets it be GC'd if it's oversized
+func releaseTagSerializationBuffer(buf *[]byte) {
+	// Reset length but keep capacity
+	*buf = (*buf)[:0]
+
+	capacity := cap(*buf)
+	if capacity <= smallBufferThreshold {
+		keySerializationPools.small.Put(buf)
+	} else if capacity <= mediumBufferThreshold {
+		keySerializationPools.medium.Put(buf)
+	} else if capacity <= largeBufferThreshold {
+		keySerializationPools.large.Put(buf)
+	}
+	// If capacity > largeBufferThreshold, let it be GC'd to prevent memory bloat
+}
+
+// estimateKeySize provides a rough estimate of the key size based on prefix and tag counts
+// This helps choose the right buffer pool size
+func estimateKeySize(prefix string, tagMaps ...map[string]string) int {
+	size := len(prefix) + 8 // Base size + some overhead
+
+	for _, tags := range tagMaps {
+		for k, v := range tags {
+			size += len(k) + len(v) + 3 // key=value, separators
+		}
+	}
+
+	return size
+}
+
+// getStringSlice returns an appropriately sized string slice for tag key collection
+func getStringSlice(estimatedKeyCount int) *[]string {
+	if estimatedKeyCount <= 8 {
+		return stringSlicePools.small.Get().(*[]string)
+	} else if estimatedKeyCount <= 16 {
+		return stringSlicePools.medium.Get().(*[]string)
+	} else {
+		return stringSlicePools.large.Get().(*[]string)
+	}
+}
+
+// releaseStringSlice returns a string slice to the appropriate pool
+func releaseStringSlice(slice *[]string) {
+	// Reset length but keep capacity
+	*slice = (*slice)[:0]
+
+	capacity := cap(*slice)
+	if capacity <= 8 {
+		stringSlicePools.small.Put(slice)
+	} else if capacity <= 16 {
+		stringSlicePools.medium.Put(slice)
+	} else if capacity <= 32 {
+		stringSlicePools.large.Put(slice)
+	}
+	// If capacity > 32, let it be GC'd to prevent memory bloat
+}
 
 type scopeRegistry struct {
 	seed maphash.Seed
@@ -426,7 +703,7 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 
 	// If NoCacheSubscopes is enabled on parent scope, create an ephemeral scope
 	if parent.noCacheSubscopes || atomic.LoadInt32(&r.adaptiveMode) == 1 {
-		allTags := mergeRightTags(parent.tags, tags)
+		allTags := mergeRightTagsPooled(parent.tags, tags)
 
 		// For ephemeral scopes, we'll generate a key for pooling purposes only
 		rawEphemeralKey := poolKey(prefix, allTags)
@@ -522,11 +799,11 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 			ephemeralKey:   ephemeralKey,
 
 			// sync.Map is zero-value ready and doesn't need initialization
-			countersSlice:      make([]*counter, 0, _defaultInitialSliceSize),
+			countersSlice:      *getCounterSlice(_defaultInitialSliceSize),
 			countersSliceMux:   sync.Mutex{},
-			gaugesSlice:        make([]*gauge, 0, _defaultInitialSliceSize),
+			gaugesSlice:        *getGaugeSlice(_defaultInitialSliceSize),
 			gaugesSliceMux:     sync.Mutex{},
-			histogramsSlice:    make([]*histogram, 0, _defaultInitialSliceSize),
+			histogramsSlice:    *getHistogramSlice(_defaultInitialSliceSize),
 			histogramsSliceMux: sync.Mutex{},
 			done:               make(chan struct{}),
 			testScope:          parent.testScope,
@@ -535,21 +812,29 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 	}
 
 	var (
-		buf = keyForPrefixedStringMapsAsKey(make([]byte, 0, 256), prefix, parent.tags, tags)
-		h   maphash.Hash
+		estimatedSize = estimateKeySize(prefix, parent.tags, tags)
+		buf           *[]byte
+		h             maphash.Hash
 	)
 
+	// Get appropriately sized buffer from pool
+	buf = getTagSerializationBuffer(estimatedSize)
+	defer releaseTagSerializationBuffer(buf)
+
+	// Generate the key using the optimized pooled buffer and string slice method
+	keyBytes := keyForPrefixedStringMapsAsKeyWithPooledSlice(*buf, prefix, parent.tags, tags)
+
 	h.SetSeed(r.seed)
-	_, _ = h.Write(buf)
+	_, _ = h.Write(keyBytes)
 	subscopeBucket := r.subscopes[h.Sum64()%uint64(len(r.subscopes))]
 
 	subscopeBucket.mu.RLock()
-	// buf is stack allocated and casting it to a string for lookup from the cache
+	// keyBytes is the actual byte slice and casting it to a string for lookup from the cache
 	// as the memory layout of []byte is a superset of string the below casting is safe and does not do any alloc
 	// However it cannot be used outside of the stack; a heap allocation is needed if that string needs to be stored
 	// in the map as a key
 	var (
-		unsanitizedKey = *(*string)(unsafe.Pointer(&buf))
+		unsanitizedKey = *(*string)(unsafe.Pointer(&keyBytes))
 		sanitizedKey   string
 	)
 
@@ -584,7 +869,7 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		// Sanitize the key before adding it to the bucket.
 		// This is safe as the scope key is stored only to help avoid
 		// recreating the sanitized key if we don't have to.
-		keyCandidate := string(buf)
+		keyCandidate := string(keyBytes)
 		sanitizedKey = r.internString(keyCandidate)
 	}
 
@@ -593,7 +878,7 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 	s = &scope{
 		separator:      parent.separator,
 		prefix:         prefix,
-		tags:           mergeRightTags(parent.tags, tags),
+		tags:           mergeRightTagsPooled(parent.tags, tags),
 		reporter:       parent.reporter,
 		cachedReporter: parent.cachedReporter,
 		baseReporter:   parent.baseReporter,
@@ -603,11 +888,11 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		bucketCache:    parent.bucketCache,
 
 		// sync.Map is zero-value ready and doesn't need initialization
-		countersSlice:      make([]*counter, 0, _defaultInitialSliceSize),
+		countersSlice:      *getCounterSlice(_defaultInitialSliceSize),
 		countersSliceMux:   sync.Mutex{},
-		gaugesSlice:        make([]*gauge, 0, _defaultInitialSliceSize),
+		gaugesSlice:        *getGaugeSlice(_defaultInitialSliceSize),
 		gaugesSliceMux:     sync.Mutex{},
-		histogramsSlice:    make([]*histogram, 0, _defaultInitialSliceSize),
+		histogramsSlice:    *getHistogramSlice(_defaultInitialSliceSize),
 		histogramsSliceMux: sync.Mutex{},
 		done:               make(chan struct{}),
 		testScope:          parent.testScope,
@@ -725,6 +1010,7 @@ func (r *scopeRegistry) reportInternalMetrics() {
 
 // preAllocateEmptyMaps creates empty maps with preallocated capacity
 // to avoid frequent reallocations when adding metrics to scopes
+// Phase 4: Now uses pooled slices for better memory efficiency
 func preAllocateEmptyMaps() (
 	counters map[string]*counter,
 	countersSlice []*counter,
@@ -735,12 +1021,19 @@ func preAllocateEmptyMaps() (
 	timers map[string]*timer,
 ) {
 	counters = make(map[string]*counter, _defaultInitialSliceSize)
-	countersSlice = make([]*counter, 0, _defaultInitialSliceSize)
 	gauges = make(map[string]*gauge, _defaultInitialSliceSize)
-	gaugesSlice = make([]*gauge, 0, _defaultInitialSliceSize)
 	histograms = make(map[string]*histogram, _defaultInitialSliceSize)
-	histogramsSlice = make([]*histogram, 0, _defaultInitialSliceSize)
 	timers = make(map[string]*timer, _defaultInitialSliceSize)
+
+	// Use pooled slices instead of allocating new ones
+	countersSlicePtr := getCounterSlice(_defaultInitialSliceSize)
+	countersSlice = *countersSlicePtr
+
+	gaugesSlicePtr := getGaugeSlice(_defaultInitialSliceSize)
+	gaugesSlice = *gaugesSlicePtr
+
+	histogramsSlicePtr := getHistogramSlice(_defaultInitialSliceSize)
+	histogramsSlice = *histogramsSlicePtr
 
 	return
 }
@@ -1095,4 +1388,165 @@ func EnableOptimizedFlush() {
 func DisableOptimizedFlush() {
 	EnableParallelFlush.Store(false)
 	MaxParallelFlushGoroutines = 0
+}
+
+// Phase 4: Metric slice pool management functions
+// getCounterSlice returns an appropriately sized counter slice from pools
+func getCounterSlice(estimatedSize int) *[]*counter {
+	if estimatedSize <= smallMetricThreshold {
+		return metricSlicePools.counterSmall.Get().(*[]*counter)
+	} else if estimatedSize <= mediumMetricThreshold {
+		return metricSlicePools.counterMedium.Get().(*[]*counter)
+	} else {
+		return metricSlicePools.counterLarge.Get().(*[]*counter)
+	}
+}
+
+// releaseCounterSlice returns a counter slice to the appropriate pool
+func releaseCounterSlice(slice *[]*counter) {
+	// Reset length but keep capacity
+	*slice = (*slice)[:0]
+
+	capacity := cap(*slice)
+	if capacity <= smallMetricThreshold {
+		metricSlicePools.counterSmall.Put(slice)
+	} else if capacity <= mediumMetricThreshold {
+		metricSlicePools.counterMedium.Put(slice)
+	} else if capacity <= largeMetricThreshold {
+		metricSlicePools.counterLarge.Put(slice)
+	}
+	// If capacity > largeMetricThreshold, let it be GC'd
+}
+
+// getGaugeSlice returns an appropriately sized gauge slice from pools
+func getGaugeSlice(estimatedSize int) *[]*gauge {
+	if estimatedSize <= smallMetricThreshold {
+		return metricSlicePools.gaugeSmall.Get().(*[]*gauge)
+	} else if estimatedSize <= mediumMetricThreshold {
+		return metricSlicePools.gaugeMedium.Get().(*[]*gauge)
+	} else {
+		return metricSlicePools.gaugeLarge.Get().(*[]*gauge)
+	}
+}
+
+// releaseGaugeSlice returns a gauge slice to the appropriate pool
+func releaseGaugeSlice(slice *[]*gauge) {
+	// Reset length but keep capacity
+	*slice = (*slice)[:0]
+
+	capacity := cap(*slice)
+	if capacity <= smallMetricThreshold {
+		metricSlicePools.gaugeSmall.Put(slice)
+	} else if capacity <= mediumMetricThreshold {
+		metricSlicePools.gaugeMedium.Put(slice)
+	} else if capacity <= largeMetricThreshold {
+		metricSlicePools.gaugeLarge.Put(slice)
+	}
+	// If capacity > largeMetricThreshold, let it be GC'd
+}
+
+// getHistogramSlice returns an appropriately sized histogram slice from pools
+func getHistogramSlice(estimatedSize int) *[]*histogram {
+	if estimatedSize <= smallMetricThreshold {
+		return metricSlicePools.histogramSmall.Get().(*[]*histogram)
+	} else if estimatedSize <= mediumMetricThreshold {
+		return metricSlicePools.histogramMedium.Get().(*[]*histogram)
+	} else {
+		return metricSlicePools.histogramLarge.Get().(*[]*histogram)
+	}
+}
+
+// releaseHistogramSlice returns a histogram slice to the appropriate pool
+func releaseHistogramSlice(slice *[]*histogram) {
+	// Reset length but keep capacity
+	*slice = (*slice)[:0]
+
+	capacity := cap(*slice)
+	if capacity <= smallMetricThreshold {
+		metricSlicePools.histogramSmall.Put(slice)
+	} else if capacity <= mediumMetricThreshold {
+		metricSlicePools.histogramMedium.Put(slice)
+	} else if capacity <= largeMetricThreshold {
+		metricSlicePools.histogramLarge.Put(slice)
+	}
+	// If capacity > largeMetricThreshold, let it be GC'd
+}
+
+// getTagMap returns an appropriately sized tag map from pools
+func getTagMap(estimatedSize int) *map[string]string {
+	if estimatedSize <= smallTagThreshold {
+		return tagMapPools.small.Get().(*map[string]string)
+	} else if estimatedSize <= mediumTagThreshold {
+		return tagMapPools.medium.Get().(*map[string]string)
+	} else {
+		return tagMapPools.large.Get().(*map[string]string)
+	}
+}
+
+// releaseTagMap returns a tag map to the appropriate pool after clearing it
+func releaseTagMap(m *map[string]string) {
+	// Clear the map but keep capacity
+	for k := range *m {
+		delete(*m, k)
+	}
+
+	// Return to appropriate pool based on capacity
+	// Note: Go maps don't expose capacity directly, so we estimate based on length it had
+	if len(*m) <= smallTagThreshold {
+		tagMapPools.small.Put(m)
+	} else if len(*m) <= mediumTagThreshold {
+		tagMapPools.medium.Put(m)
+	} else if len(*m) <= largeTagThreshold {
+		tagMapPools.large.Put(m)
+	}
+	// If too large, let it be GC'd
+}
+
+// Snapshot map pool management functions
+func getCounterSnapshotMap() *map[string]CounterSnapshot {
+	return snapshotMapPools.counterMaps.Get().(*map[string]CounterSnapshot)
+}
+
+func releaseCounterSnapshotMap(m *map[string]CounterSnapshot) {
+	// Clear the map
+	for k := range *m {
+		delete(*m, k)
+	}
+	snapshotMapPools.counterMaps.Put(m)
+}
+
+func getGaugeSnapshotMap() *map[string]GaugeSnapshot {
+	return snapshotMapPools.gaugeMaps.Get().(*map[string]GaugeSnapshot)
+}
+
+func releaseGaugeSnapshotMap(m *map[string]GaugeSnapshot) {
+	// Clear the map
+	for k := range *m {
+		delete(*m, k)
+	}
+	snapshotMapPools.gaugeMaps.Put(m)
+}
+
+func getTimerSnapshotMap() *map[string]TimerSnapshot {
+	return snapshotMapPools.timerMaps.Get().(*map[string]TimerSnapshot)
+}
+
+func releaseTimerSnapshotMap(m *map[string]TimerSnapshot) {
+	// Clear the map
+	for k := range *m {
+		delete(*m, k)
+	}
+	snapshotMapPools.timerMaps.Put(m)
+}
+
+func getHistogramSnapshotMap() *map[string]HistogramSnapshot {
+	return snapshotMapPools.histogramMaps.Get().(*map[string]HistogramSnapshot)
+}
+
+func releaseHistogramSnapshotMap(m *map[string]HistogramSnapshot) {
+	// Clear the map
+	for k := range *m {
+		delete(*m, k)
+	}
+	snapshotMapPools.histogramMaps.Put(m)
 }

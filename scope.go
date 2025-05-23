@@ -190,13 +190,13 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		cachedReporter: opts.CachedReporter,
 		// counters, gauges, histograms, timers are sync.Map and are zero-value ready.
 		// The explicit make(map[string]...) calls are removed for these.
-		countersSlice: make([]*counter, 0, _defaultInitialSliceSize),
+		countersSlice: *getCounterSlice(_defaultInitialSliceSize),
 		// countersSliceMux is zero-value ready.
 		defaultBuckets: opts.DefaultBuckets,
 		done:           make(chan struct{}),
-		gaugesSlice:    make([]*gauge, 0, _defaultInitialSliceSize),
+		gaugesSlice:    *getGaugeSlice(_defaultInitialSliceSize),
 		// gaugesSliceMux is zero-value ready.
-		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
+		histogramsSlice: *getHistogramSlice(_defaultInitialSliceSize),
 		// histogramsSliceMux is zero-value ready.
 		prefix:           sanitizer.Name(opts.Prefix),
 		reporter:         opts.Reporter,
@@ -508,7 +508,7 @@ func (s *scope) subscope(prefix string, tags map[string]string) Scope {
 	if s.registry != nil && s.registry.root != nil && s.registry.root.baseReporter != nil {
 		// Check if NoCacheSubscopes option is enabled on the root scope
 		if s.noCacheSubscopes {
-			allTags := mergeRightTags(s.tags, s.copyAndSanitizeMap(tags))
+			allTags := mergeRightTagsPooled(s.tags, s.copyAndSanitizeMap(tags))
 
 			// Create ephemeral scope with sync.Map instead of map[string]*timer
 			ephemeralScope := &scope{
@@ -822,6 +822,44 @@ func mergeRightTags(tagsLeft, tagsRight map[string]string) map[string]string {
 	return result
 }
 
+// mergeRightTagsPooled is an optimized version that uses pooled maps
+// Phase 4: Eliminates allocations during tag merging for better performance
+func mergeRightTagsPooled(tagsLeft, tagsRight map[string]string) map[string]string {
+	if tagsLeft == nil && tagsRight == nil {
+		return nil
+	}
+	if len(tagsRight) == 0 {
+		return tagsLeft
+	}
+	if len(tagsLeft) == 0 {
+		return tagsRight
+	}
+
+	// Get pooled map from registry functions (we'll access them via scope registry)
+	estimatedSize := len(tagsLeft) + len(tagsRight)
+	resultPtr := getTagMap(estimatedSize)
+	result := *resultPtr
+
+	// Copy values
+	for k, v := range tagsLeft {
+		result[k] = v
+	}
+	for k, v := range tagsRight {
+		result[k] = v
+	}
+
+	// Create a new map to return (since we need to return the pooled one)
+	finalResult := make(map[string]string, len(result))
+	for k, v := range result {
+		finalResult[k] = v
+	}
+
+	// Return the pooled map for reuse
+	releaseTagMap(resultPtr)
+
+	return finalResult
+}
+
 type snapshot struct {
 	counters   map[string]CounterSnapshot
 	gauges     map[string]GaugeSnapshot
@@ -829,13 +867,40 @@ type snapshot struct {
 	histograms map[string]HistogramSnapshot
 }
 
+// newSnapshot creates a snapshot using pooled maps for better performance
+// Phase 4: Uses pooled snapshot maps to reduce allocations
 func newSnapshot() *snapshot {
 	return &snapshot{
-		counters:   make(map[string]CounterSnapshot),
-		gauges:     make(map[string]GaugeSnapshot),
-		timers:     make(map[string]TimerSnapshot),
-		histograms: make(map[string]HistogramSnapshot),
+		counters:   *getCounterSnapshotMap(),
+		gauges:     *getGaugeSnapshotMap(),
+		timers:     *getTimerSnapshotMap(),
+		histograms: *getHistogramSnapshotMap(),
 	}
+}
+
+// newSnapshotPooled creates a snapshot using pooled maps and provides cleanup function
+// Phase 4: Returns cleanup function to return maps to pools when done
+func newSnapshotPooled() (*snapshot, func()) {
+	counterMapPtr := getCounterSnapshotMap()
+	gaugeMapPtr := getGaugeSnapshotMap()
+	timerMapPtr := getTimerSnapshotMap()
+	histogramMapPtr := getHistogramSnapshotMap()
+
+	s := &snapshot{
+		counters:   *counterMapPtr,
+		gauges:     *gaugeMapPtr,
+		timers:     *timerMapPtr,
+		histograms: *histogramMapPtr,
+	}
+
+	cleanup := func() {
+		releaseCounterSnapshotMap(counterMapPtr)
+		releaseGaugeSnapshotMap(gaugeMapPtr)
+		releaseTimerSnapshotMap(timerMapPtr)
+		releaseHistogramSnapshotMap(histogramMapPtr)
+	}
+
+	return s, cleanup
 }
 
 func (s *snapshot) Counters() map[string]CounterSnapshot {
@@ -937,30 +1002,47 @@ func (s *scope) trackActivity() {
 }
 
 // resetForPool resets the scope for reuse from the object pool
+// Phase 4: Now properly returns metric slices to pools for better memory efficiency
 func (s *scope) resetForPool() {
 	// Clear maps but maintain capacity
 	s.counters.Range(func(key, value interface{}) bool {
 		s.counters.Delete(key)
 		return true
 	})
-	s.countersSlice = s.countersSlice[:0]
 
 	s.gauges.Range(func(key, value interface{}) bool {
 		s.gauges.Delete(key)
 		return true
 	})
-	s.gaugesSlice = s.gaugesSlice[:0]
 
 	s.histograms.Range(func(key, value interface{}) bool {
 		s.histograms.Delete(key)
 		return true
 	})
-	s.histogramsSlice = s.histogramsSlice[:0]
 
 	s.timers.Range(func(key, value interface{}) bool {
 		s.timers.Delete(key)
 		return true
 	})
+
+	// Return metric slices to pools instead of just clearing them
+	if len(s.countersSlice) > 0 {
+		counterSlicePtr := &s.countersSlice
+		releaseCounterSlice(counterSlicePtr)
+		s.countersSlice = *getCounterSlice(_defaultInitialSliceSize)
+	}
+
+	if len(s.gaugesSlice) > 0 {
+		gaugeSlicePtr := &s.gaugesSlice
+		releaseGaugeSlice(gaugeSlicePtr)
+		s.gaugesSlice = *getGaugeSlice(_defaultInitialSliceSize)
+	}
+
+	if len(s.histogramsSlice) > 0 {
+		histogramSlicePtr := &s.histogramsSlice
+		releaseHistogramSlice(histogramSlicePtr)
+		s.histogramsSlice = *getHistogramSlice(_defaultInitialSliceSize)
+	}
 
 	// Reset state flags
 	atomic.StoreInt32(&s.closed, 0)

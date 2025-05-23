@@ -89,12 +89,88 @@ func keyForPrefixedStringMapsAsKey(buf []byte, prefix string, maps ...map[string
 	return buf
 }
 
+// keyForPrefixedStringMapsAsKeyWithPooledSlice is an optimized version that uses pooled string slices
+// to eliminate the allocation hotspot in key generation
+func keyForPrefixedStringMapsAsKeyWithPooledSlice(buf []byte, prefix string, maps ...map[string]string) []byte {
+	// Estimate key count
+	keyCount := 0
+	for _, m := range maps {
+		keyCount += len(m)
+	}
+
+	// Get pooled string slice
+	keys := getStringSlice(keyCount)
+	defer releaseStringSlice(keys)
+
+	// Collect keys
+	for _, m := range maps {
+		for k := range m {
+			*keys = append(*keys, k)
+		}
+	}
+
+	insertionSort(*keys)
+
+	if prefix != nilString {
+		buf = append(buf, prefix...)
+		buf = append(buf, prefixSplitter)
+	}
+
+	var lastKey string // last key written to the buffer
+	for _, k := range *keys {
+		if len(lastKey) > 0 {
+			if k == lastKey {
+				// Already wrote this key.
+				continue
+			}
+			buf = append(buf, keyPairSplitter)
+		}
+		lastKey = k
+
+		buf = append(buf, k...)
+		buf = append(buf, keyNameSplitter)
+
+		// Find and write the value for this key. Rightmost map takes
+		// precedence.
+		for j := len(maps) - 1; j >= 0; j-- {
+			if v, ok := maps[j][k]; ok {
+				buf = append(buf, v...)
+				break
+			}
+		}
+	}
+
+	return buf
+}
+
 // keyForPrefixedStringMaps generates a unique key for a prefix and a series
 // of maps containing tags.
 //
 // If a key occurs in multiple maps, keys on the right take precedence.
 func keyForPrefixedStringMaps(prefix string, maps ...map[string]string) string {
 	return string(keyForPrefixedStringMapsAsKey(make([]byte, 0, 256), prefix, maps...))
+}
+
+// keyForPrefixedStringMapsWithPooledBuffer generates a unique key using a pooled buffer
+// to reduce allocations. The buffer is automatically selected and returned to the pool.
+func keyForPrefixedStringMapsWithPooledBuffer(prefix string, maps ...map[string]string) string {
+	// Estimate the required buffer size
+	estimatedSize := len(prefix) + 8 // Base size + overhead
+	for _, m := range maps {
+		for k, v := range m {
+			estimatedSize += len(k) + len(v) + 3 // key=value, separators
+		}
+	}
+
+	// Get appropriately sized buffer from pool
+	buf := getTagSerializationBuffer(estimatedSize)
+	defer releaseTagSerializationBuffer(buf)
+
+	// Generate the key using the optimized pooled slice method
+	result := keyForPrefixedStringMapsAsKeyWithPooledSlice(*buf, prefix, maps...)
+
+	// Return string copy (safe since we're about to release the buffer)
+	return string(result)
 }
 
 func insertionSort(keys []string) {
