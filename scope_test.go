@@ -1160,6 +1160,179 @@ func TestTaggedExistingReturnsSameScope(t *testing.T) {
 	}
 }
 
+func TestSubScope_TypeAssertionClosableScope(t *testing.T) {
+	r := newTestStatsReporter()
+	root, closer := NewRootScope(ScopeOptions{Reporter: r, OmitCardinalityMetrics: true}, time.Hour)
+
+	sub := root.SubScope("foo").(ClosableScope)
+
+	r.cg.Add(1)
+	sub.Counter("beep").Inc(1)
+	r.gg.Add(1)
+	sub.Gauge("morp").Update(1)
+	r.tg.Add(1)
+	sub.Timer("blork").Record(time.Millisecond * 175)
+	r.hg.Add(1)
+	sub.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
+
+	sub.(*scope).report(r)
+	r.WaitAll()
+
+	counters := r.getCounters()
+	assert.EqualValues(t, 1, counters["foo.beep"].val)
+
+	subtagged := root.Tagged(map[string]string{"foo": "bar"}).(ClosableScope)
+
+	r.cg.Add(1)
+	subtagged.Counter("borp").Inc(1)
+	r.gg.Add(1)
+	subtagged.Gauge("dorp").Update(1)
+	r.tg.Add(1)
+	subtagged.Timer("blorp").Record(time.Millisecond * 175)
+	r.hg.Add(1)
+	subtagged.Histogram("fiz", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
+
+	subtagged.(*scope).report(r)
+	r.WaitAll()
+
+	counters = r.getCounters()
+	assert.EqualValues(t, 1, counters["borp"].val)
+
+	assert.NoError(t, sub.Close())
+	assert.NoError(t, subtagged.Close())
+	assert.NoError(t, closer.Close())
+}
+
+func TestNewClosableRootScopeCloser(t *testing.T) {
+	r := newTestStatsReporter()
+	root, closer := NewClosableRootScope(ScopeOptions{Reporter: r, OmitCardinalityMetrics: true}, time.Hour)
+
+	r.cg.Add(1)
+	root.Counter("foo").Inc(1)
+
+	counters := r.getCounters()
+	assert.Nil(t, counters["foo"])
+	assert.NoError(t, root.Close())
+
+	// Ensure metrics are flushed on close
+	counters = r.getCounters()
+	assert.EqualValues(t, 1, counters["foo"].val)
+	// Ensure that we can close multiple times
+	// using the closer or the exposed close method
+	// from ClosableScope
+	assert.NoError(t, closer.Close())
+}
+
+func TestTaggedSubScopeClosable(t *testing.T) {
+	r := newTestStatsReporter()
+
+	ts := map[string]string{"env": "test"}
+	root, closer := NewClosableRootScope(
+		ScopeOptions{
+			Prefix: "foo", Tags: ts, Reporter: r, OmitCardinalityMetrics: true,
+		}, 0,
+	)
+
+	s := root.(*scope)
+
+	tags := map[string]string{"service": "test"}
+	tscope := root.TaggedClosable(tags).(*scope)
+	scope := root
+
+	r.cg.Add(1)
+	scope.Counter("beep").Inc(1)
+	r.cg.Add(1)
+	tscope.Counter("boop").Inc(1)
+	r.hg.Add(1)
+	scope.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
+	r.hg.Add(1)
+	tscope.Histogram("bar", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
+
+	s.report(r)
+	tscope.report(r)
+	r.cg.Wait()
+
+	var (
+		counters   = r.getCounters()
+		histograms = r.getHistograms()
+	)
+
+	assert.EqualValues(t, 1, counters["foo.beep"].val)
+	assert.EqualValues(t, ts, counters["foo.beep"].tags)
+
+	assert.EqualValues(t, 1, counters["foo.boop"].val)
+	assert.EqualValues(
+		t, map[string]string{
+			"env":     "test",
+			"service": "test",
+		}, counters["foo.boop"].tags,
+	)
+
+	assert.EqualValues(t, 1, histograms["foo.baz"].valueSamples[50.0])
+	assert.EqualValues(t, ts, histograms["foo.baz"].tags)
+
+	assert.EqualValues(t, 1, histograms["foo.bar"].valueSamples[50.0])
+	assert.EqualValues(
+		t, map[string]string{
+			"env":     "test",
+			"service": "test",
+		}, histograms["foo.bar"].tags,
+	)
+
+	assert.NoError(t, tscope.Close())
+	assert.NoError(t, closer.Close())
+}
+
+func TestSubScopeClosable(t *testing.T) {
+	r := newTestStatsReporter()
+
+	root, _ := NewClosableRootScope(
+		ScopeOptions{Prefix: "foo", Reporter: r, OmitCardinalityMetrics: true}, 0,
+	)
+
+	tags := map[string]string{"foo": "bar"}
+	s := root.TaggedClosable(tags).SubScopeClosable("mork").(*scope)
+	r.cg.Add(1)
+	s.Counter("bar").Inc(1)
+	s.Counter("bar").Inc(20)
+	r.gg.Add(1)
+	s.Gauge("zed").Update(1)
+	r.tg.Add(1)
+	s.Timer("blork").Record(time.Millisecond * 175)
+	r.hg.Add(1)
+	s.Histogram("baz", MustMakeLinearValueBuckets(0, 10, 10)).
+		RecordValue(42.42)
+
+	s.report(r)
+	r.WaitAll()
+
+	var (
+		counters   = r.getCounters()
+		gauges     = r.getGauges()
+		timers     = r.getTimers()
+		histograms = r.getHistograms()
+	)
+
+	// Assert prefixed correctly
+	assert.EqualValues(t, 21, counters["foo.mork.bar"].val)
+	assert.EqualValues(t, 1, gauges["foo.mork.zed"].val)
+	assert.EqualValues(t, time.Millisecond*175, timers["foo.mork.blork"].val)
+	assert.EqualValues(t, 1, histograms["foo.mork.baz"].valueSamples[50.0])
+
+	// Assert tags inherited
+	assert.Equal(t, tags, counters["foo.mork.bar"].tags)
+	assert.Equal(t, tags, gauges["foo.mork.zed"].tags)
+	assert.Equal(t, tags, timers["foo.mork.blork"].tags)
+	assert.Equal(t, tags, histograms["foo.mork.baz"].tags)
+
+	assert.NoError(t, s.Close())
+	assert.NoError(t, root.Close())
+}
+
 func TestSnapshot(t *testing.T) {
 	commonTags := map[string]string{"env": "test"}
 	s := NewTestScope("foo", map[string]string{"env": "test"})
