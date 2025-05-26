@@ -62,7 +62,24 @@ type Scope interface {
 
 	// Capabilities returns a description of metrics reporting capabilities.
 	Capabilities() Capabilities
-	
+}
+
+// ClosableScope extends Scope with the ability to close the scope
+// and create closable subscopes.
+//
+//	 IMPORTANT: When using Prometheus reporters, users must take care to
+//		not create metrics from both parent scopes and subscopes
+//		that have the same metric name but different tag keys,
+//		as metric allocation will panic.
+type ClosableScope interface {
+	Scope
+
+	// TaggedClosable returns a new child scope with the given tags and current tags.
+	TaggedClosable(tags map[string]string) ClosableScope
+
+	// SubScopeClosable returns a new child scope appending a further name prefix.
+	SubScopeClosable(name string) ClosableScope
+
 	// Close closes the scope and releases any resources.
 	// For root scopes, this will also close the reporter.
 	// For subscopes, this will clear all metrics and remove the scope from the registry.

@@ -119,6 +119,14 @@ func NewRootScope(opts ScopeOptions, interval time.Duration) (Scope, io.Closer) 
 	return s, s
 }
 
+// NewClosableRootScope creates a new root ClosableScope with a set of options and
+// a reporting interval.
+// Must provide either a StatsReporter or a CachedStatsReporter.
+func NewClosableRootScope(opts ScopeOptions, interval time.Duration) (ClosableScope, io.Closer) {
+	s := newRootScope(opts, interval)
+	return s, s
+}
+
 // NewRootScopeWithDefaultInterval invokes NewRootScope with the default
 // reporting interval of 2s.
 func NewRootScopeWithDefaultInterval(opts ScopeOptions) (Scope, io.Closer) {
@@ -442,9 +450,17 @@ func (s *scope) Tagged(tags map[string]string) Scope {
 	return s.subscope(s.prefix, tags)
 }
 
+func (s *scope) TaggedClosable(tags map[string]string) ClosableScope {
+	return s.subscope(s.prefix, tags).(ClosableScope)
+}
+
 func (s *scope) SubScope(prefix string) Scope {
 	prefix = s.sanitizer.Name(prefix)
-	return s.subscope(s.fullyQualifiedName(prefix), nil)
+	return s.subscope(s.fullyQualifiedName(prefix), nil).(ClosableScope)
+}
+
+func (s *scope) SubScopeClosable(prefix string) ClosableScope {
+	return s.subscope(s.fullyQualifiedName(prefix), nil).(ClosableScope)
 }
 
 func (s *scope) subscope(prefix string, tags map[string]string) Scope {
