@@ -156,7 +156,7 @@ func TestReporter(t *testing.T) {
 			}
 
 			metricsInThisBatch := currentBatchForValidation.GetMetrics()
-			require.GreaterOrEqual(t, len(metricsInThisBatch), 1)
+			require.True(t, len(metricsInThisBatch) >= 1)
 
 			for _, emittedMetric := range metricsInThisBatch {
 				if emittedMetric.GetName() == "my-counter" {

@@ -25,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uber-go/tally"
 	m3thrift "github.com/uber-go/tally/m3/thrift/v2"
 	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
 )

@@ -31,7 +31,7 @@ import (
 	"time"
 	"unsafe"
 
-	"go.uber.org/atomic"
+	uberatomic "go.uber.org/atomic"
 )
 
 var (
@@ -276,7 +276,7 @@ const (
 //
 // The per-shard parallel approach (MaxParallelFlushGoroutines=0) should generally be
 // avoided as it can lead to too many goroutines under high-cardinality conditions.
-var EnableParallelFlush atomic.Bool
+var EnableParallelFlush uberatomic.Bool
 
 // MaxParallelFlushGoroutines controls the maximum number of goroutines to use for parallel flushing.
 // Default value of 0 means use one goroutine per shard. Setting this to a positive number
@@ -962,8 +962,8 @@ func (r *scopeRegistry) reportInternalMetrics() {
 		return
 	}
 
-	counters, gauges, histograms, scopes := atomic.Int64{}, atomic.Int64{}, atomic.Int64{}, atomic.Int64{}
-	rootCounters, rootGauges, rootHistograms := atomic.Int64{}, atomic.Int64{}, atomic.Int64{}
+	counters, gauges, histograms, scopes := uberatomic.Int64{}, uberatomic.Int64{}, uberatomic.Int64{}, uberatomic.Int64{}
+	rootCounters, rootGauges, rootHistograms := uberatomic.Int64{}, uberatomic.Int64{}, uberatomic.Int64{}
 	scopes.Inc() // Account for root scope.
 	r.ForEachScope(
 		func(ss *scope) {

@@ -23,8 +23,6 @@ package m3
 import (
 	"sync"
 
-	"github.com/uber-go/tally"
-	customtransport "github.com/uber-go/tally/m3/customtransports"
 	m3thrift "github.com/uber-go/tally/m3/thrift/v2"
 	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
 )
