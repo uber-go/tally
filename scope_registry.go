@@ -274,7 +274,7 @@ const (
 //
 // The per-shard parallel approach (MaxParallelFlushGoroutines=0) should generally be
 // avoided as it can lead to too many goroutines under high-cardinality conditions.
-var EnableParallelFlush atomic.Bool
+var EnableParallelFlush uberatomic.Bool
 
 // MaxParallelFlushGoroutines controls the maximum number of goroutines to use for parallel flushing.
 // Default value of 0 means use one goroutine per shard. Setting this to a positive number

@@ -31,7 +31,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	m3thrift "github.com/uber-go/tally/v4/m3/thrift/v2"
+	m3thrift "github.com/uber-go/tally/m3/thrift/v2"
 )
 
 var mainFileFmt = `
