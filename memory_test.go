@@ -82,7 +82,7 @@ func TestScopeRegistryMemoryLeak(t *testing.T) {
 
 	// Memory growth should be minimal after GC
 	maxGrowth := uint64(5 * 1024 * 1024) // 5MB tolerance
-	assert.Less(t, memGrowth, maxGrowth,
+	assert.True(t, memGrowth < maxGrowth,
 		"Memory growth after scope cleanup should be minimal: %d bytes", memGrowth)
 
 	t.Logf("Memory growth after scope lifecycle: %d bytes", memGrowth)
@@ -135,7 +135,7 @@ func TestMetricCacheMemoryBounds(t *testing.T) {
 
 	// Each metric should use reasonable memory (less than 1KB on average)
 	maxBytesPerMetric := uint64(1024)
-	assert.Less(t, avgBytesPerMetric, maxBytesPerMetric,
+	assert.True(t, avgBytesPerMetric < maxBytesPerMetric,
 		"Average memory per metric should be reasonable: %d bytes/metric", avgBytesPerMetric)
 
 	t.Logf("Memory usage: %d bytes for %d metrics (%.1f bytes/metric)",
@@ -174,7 +174,7 @@ func TestMetricCacheMemoryBounds(t *testing.T) {
 
 	// Reaccess should use minimal additional memory (metrics should be cached)
 	maxReaccessGrowth := memGrowth / 10 // Allow 10% of original growth
-	assert.Less(t, reaccessGrowth, maxReaccessGrowth,
+	assert.True(t, reaccessGrowth < maxReaccessGrowth,
 		"Memory growth on metric reaccess should be minimal: %d bytes", reaccessGrowth)
 }
 
@@ -231,7 +231,7 @@ func TestLongRunningMemoryStability(t *testing.T) {
 	growth := float64(lastSample) / float64(firstHalf)
 	maxGrowthRatio := 2.0 // Allow 100% growth max in test environment
 
-	assert.Less(t, growth, maxGrowthRatio,
+	assert.True(t, growth < maxGrowthRatio,
 		"Memory should remain stable over time. Growth ratio: %.2f", growth)
 
 	t.Logf("Memory stability test: %.2f growth ratio over %d samples", growth, len(samples))
@@ -288,7 +288,7 @@ func TestScopeHierarchyMemoryEfficiency(t *testing.T) {
 
 	// Each leaf scope (including its hierarchy) should be memory efficient
 	maxBytesPerLeaf := uint64(5 * 1024) // 5KB per leaf scope max
-	assert.Less(t, avgBytesPerLeaf, maxBytesPerLeaf,
+	assert.True(t, avgBytesPerLeaf < maxBytesPerLeaf,
 		"Memory per scope hierarchy should be efficient: %d bytes/leaf", avgBytesPerLeaf)
 
 	t.Logf("Hierarchy memory usage: %d bytes for %d leaf scopes (%.1f bytes/leaf)",
@@ -354,7 +354,7 @@ func TestTagMapMemoryOptimization(t *testing.T) {
 			if tc.tagCount == 0 {
 				// No tags should use minimal memory
 				maxBytes := uint64(200) // 200 bytes per scope max for no tags
-				assert.Less(t, avgBytesPerScope, maxBytes,
+				assert.True(t, avgBytesPerScope < maxBytes,
 					"No-tag scopes should use minimal memory")
 			}
 		})

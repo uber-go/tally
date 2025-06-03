@@ -452,8 +452,8 @@ func BenchmarkTagMapPooling(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			// Pooled allocation
-			pooledMap := getStringMap(8)
-			releaseStringMap(pooledMap)
+			pooledMap := getTagMap(8)
+			releaseTagMap(pooledMap)
 		}
 	})
 }

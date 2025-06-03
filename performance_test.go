@@ -168,12 +168,12 @@ func TestHighCardinalityPerformance(t *testing.T) {
 
 	// Performance should be reasonable even with high cardinality
 	maxDuration := 5 * time.Second
-	assert.Less(t, elapsed, maxDuration,
+	assert.True(t, elapsed < maxDuration,
 		"High cardinality metric creation should complete within %v, took %v", maxDuration, elapsed)
 
 	// Verify metrics were created
 	snapshot := scope.Snapshot()
-	assert.Greater(t, len(snapshot.Counters()), numUniqueMetrics/2,
+	assert.True(t, len(snapshot.Counters()) > numUniqueMetrics/2,
 		"Should have created significant number of unique counters")
 }
 
@@ -210,9 +210,9 @@ func TestMemoryGrowthBounds(t *testing.T) {
 		memGrowth = 0 // Memory usage decreased (GC occurred)
 	}
 
-	// Memory growth should be reasonable (less than 10MB for this test)
-	maxMemoryGrowth := uint64(10 * 1024 * 1024) // 10MB
-	assert.Less(t, memGrowth, maxMemoryGrowth,
+	// Memory growth should be contained
+	maxMemoryGrowth := uint64(10 * 1024 * 1024) // 10MB max growth
+	assert.True(t, memGrowth < maxMemoryGrowth,
 		"Memory growth (%d bytes) should be less than %d bytes", memGrowth, maxMemoryGrowth)
 
 	t.Logf("Memory growth: %d bytes for %d metrics", memGrowth, numMetrics)
@@ -290,7 +290,7 @@ func TestReporterStress(t *testing.T) {
 	totalErrors := atomic.LoadInt32(&errors)
 
 	assert.Equal(t, int32(0), totalErrors, "No errors should occur during stress test")
-	assert.Greater(t, totalOps, int64(numWorkers*operationsPerWorker/2),
+	assert.True(t, totalOps > int64(numWorkers*operationsPerWorker/2),
 		"Should complete significant number of operations")
 
 	opsPerSecond := float64(totalOps) / testDuration.Seconds()

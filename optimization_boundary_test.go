@@ -60,7 +60,7 @@ func TestSanitizationPerformance(t *testing.T) {
 
 			// Should complete within reasonable time
 			maxDuration := 100 * time.Millisecond
-			assert.Less(t, elapsed, maxDuration,
+			assert.True(t, elapsed < maxDuration,
 				"Sanitization for %s should be fast: %v", tc.name, elapsed)
 		})
 	}
@@ -118,7 +118,7 @@ func TestRegistryScaling(t *testing.T) {
 			}
 
 			elapsed := time.Since(start)
-			assert.Less(t, elapsed, scale.maxDuration,
+			assert.True(t, elapsed < scale.maxDuration,
 				"Registry scaling for %s should complete within %v, took %v",
 				scale.name, scale.maxDuration, elapsed)
 
@@ -159,7 +159,7 @@ func TestTagOptimizationBoundaries(t *testing.T) {
 			// Optimized cases should be faster
 			if tc.expectOptimized {
 				maxDuration := 10 * time.Millisecond
-				assert.Less(t, elapsed, maxDuration,
+				assert.True(t, elapsed < maxDuration,
 					"Optimized tag case %s should be very fast: %v", tc.name, elapsed)
 			}
 
@@ -199,7 +199,7 @@ func TestMetricNamePatterns(t *testing.T) {
 
 			// All patterns should complete within reasonable time
 			maxDuration := 200 * time.Millisecond
-			assert.Less(t, elapsed, maxDuration,
+			assert.True(t, elapsed < maxDuration,
 				"Pattern %s should be efficient: %v", pattern.name, elapsed)
 		})
 	}
@@ -230,7 +230,7 @@ func TestScopeHierarchyDepthLimits(t *testing.T) {
 			// Should be efficient even at reasonable depths
 			if depth <= 20 {
 				maxDuration := 10 * time.Millisecond
-				assert.Less(t, elapsed, maxDuration,
+				assert.True(t, elapsed < maxDuration,
 					"Hierarchy depth %d should be efficient: %v", depth, elapsed)
 			}
 		})
@@ -288,7 +288,7 @@ func TestConcurrentRegistryAccess(t *testing.T) {
 
 	// Should handle concurrent access efficiently
 	maxDuration := 2 * time.Second
-	assert.Less(t, elapsed, maxDuration,
+	assert.True(t, elapsed < maxDuration,
 		"Concurrent registry access should be efficient: %v", elapsed)
 
 	t.Logf("Concurrent access completed in %v", elapsed)
