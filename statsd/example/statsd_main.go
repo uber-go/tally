@@ -26,8 +26,8 @@ import (
 	"time"
 
 	"github.com/cactus/go-statsd-client/v5/statsd"
-	tally "github.com/uber-go/tally/v4"
-	statsdreporter "github.com/uber-go/tally/v4/statsd"
+	tally "github.com/uber-go/tally/v6"
+	statsdreporter "github.com/uber-go/tally/v6/statsd"
 )
 
 // To view statsd emitted metrics locally you can use
