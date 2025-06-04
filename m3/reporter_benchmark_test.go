@@ -22,9 +22,11 @@ package m3
 
 import (
 	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
+	"github.com/uber-go/tally/internal/cache"
 	m3thrift "github.com/uber-go/tally/m3/thrift/v2"
 	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
 )
@@ -218,4 +220,186 @@ func BenchmarkMetricEmission(b *testing.B) {
 		}
 		benchReporter.metCh <- report
 	}
+}
+
+// BenchmarkConvertTagsOptimizations tests the performance improvements of the optimized convertTags
+func BenchmarkConvertTagsOptimizations(b *testing.B) {
+	// Use the existing benchReporter instead of creating a new one
+	r := benchReporter
+
+	// Test cases for different tag scenarios
+	testCases := []struct {
+		name string
+		tags map[string]string
+	}{
+		{
+			name: "NoTags",
+			tags: map[string]string{},
+		},
+		{
+			name: "SingleTag",
+			tags: map[string]string{"service": "test"},
+		},
+		{
+			name: "TwoTags",
+			tags: map[string]string{"service": "test", "env": "prod"},
+		},
+		{
+			name: "ThreeTags",
+			tags: map[string]string{"service": "test", "env": "prod", "region": "us-west-2"},
+		},
+		{
+			name: "FiveTags",
+			tags: map[string]string{
+				"service": "test", "env": "prod", "region": "us-west-2",
+				"instance": "i-12345", "version": "1.0.0",
+			},
+		},
+		{
+			name: "TenTags",
+			tags: map[string]string{
+				"service": "test", "env": "prod", "region": "us-west-2",
+				"instance": "i-12345", "version": "1.0.0", "team": "platform",
+				"component": "api", "datacenter": "us-west-2a", "cluster": "main",
+				"deployment": "blue",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			// Clear cache before each test
+			r.tagCache = cache.NewTagCache()
+
+			b.ResetTimer()
+			b.ReportAllocs()
+
+			for i := 0; i < b.N; i++ {
+				result := r.convertTags(tc.tags)
+				_ = result // Prevent optimization
+			}
+		})
+
+		// Test cache hit performance
+		b.Run(tc.name+"_Cached", func(b *testing.B) {
+			// Warm up cache
+			r.convertTags(tc.tags)
+
+			b.ResetTimer()
+			b.ReportAllocs()
+
+			for i := 0; i < b.N; i++ {
+				result := r.convertTags(tc.tags)
+				_ = result // Prevent optimization
+			}
+		})
+	}
+}
+
+// BenchmarkGCPressure measures GC pressure under high load
+func BenchmarkGCPressure(b *testing.B) {
+	r := benchReporter
+
+	// Mix of different tag patterns that are common in practice
+	tagVariations := []map[string]string{
+		{"service": "api"},
+		{"service": "api", "env": "prod"},
+		{"service": "api", "env": "prod", "region": "us-west"},
+		{"service": "db", "env": "staging"},
+		{"service": "cache", "env": "prod", "instance": "primary"},
+	}
+
+	b.Run("HighThroughput", func(b *testing.B) {
+		// Measure GC stats
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			// Simulate high-throughput conversion with realistic tag patterns
+			for j := 0; j < 100; j++ {
+				tags := tagVariations[j%len(tagVariations)]
+				result := r.convertTags(tags)
+				_ = result
+			}
+		}
+
+		b.StopTimer()
+		runtime.GC()
+		runtime.ReadMemStats(&after)
+
+		// Report GC statistics
+		gcCycles := after.NumGC - before.NumGC
+		allocRate := float64(after.TotalAlloc-before.TotalAlloc) / float64(b.N) / 100.0
+
+		b.ReportMetric(float64(gcCycles), "gc-cycles")
+		b.ReportMetric(allocRate, "allocs-per-op")
+	})
+}
+
+// BenchmarkTagInterningOptimized tests string interning efficiency with new optimizations
+func BenchmarkTagInterningOptimized(b *testing.B) {
+	r := benchReporter
+
+	// Common strings that should be interned
+	commonKeys := []string{"service", "env", "region", "instance", "version"}
+	commonValues := []string{"api", "prod", "us-west-2", "primary", "1.0.0"}
+
+	b.Run("RepeatedStrings", func(b *testing.B) {
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			// Create tags with repeated string values
+			tags := map[string]string{
+				commonKeys[i%len(commonKeys)]:     commonValues[i%len(commonValues)],
+				commonKeys[(i+1)%len(commonKeys)]: commonValues[(i+1)%len(commonValues)],
+			}
+			result := r.convertTags(tags)
+			_ = result
+		}
+	})
+}
+
+// BenchmarkMemoryFootprint measures memory usage patterns
+func BenchmarkMemoryFootprint(b *testing.B) {
+	r := benchReporter
+
+	b.Run("LargeTagSets", func(b *testing.B) {
+		// Create large tag sets to test worst-case scenarios
+		largeTags := make(map[string]string)
+		for i := 0; i < 20; i++ {
+			largeTags[fmt.Sprintf("key_%d", i)] = fmt.Sprintf("value_%d", i)
+		}
+
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			result := r.convertTags(largeTags)
+			_ = result
+		}
+	})
+
+	b.Run("ManySmallTagSets", func(b *testing.B) {
+		// Test many small tag sets (more realistic scenario)
+		smallTagSets := make([]map[string]string, 100)
+		for i := 0; i < 100; i++ {
+			smallTagSets[i] = map[string]string{
+				"service":  fmt.Sprintf("svc_%d", i%10),
+				"instance": fmt.Sprintf("inst_%d", i%20),
+			}
+		}
+
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			for j := 0; j < 10; j++ {
+				result := r.convertTags(smallTagSets[(i+j)%100])
+				_ = result
+			}
+		}
+	})
 }

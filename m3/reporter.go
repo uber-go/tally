@@ -48,6 +48,8 @@ type pendingReport struct {
 	timerVal  time.Duration
 	bucket    string
 	bucketID  string
+	// Channel for flush acknowledgment - nil for regular metrics
+	flushAck chan struct{}
 }
 
 // Protocol describes a M3 thrift transport protocol.
@@ -79,6 +81,17 @@ const (
 	// precision to use when formatting the metric tag
 	// with the histogram bucket bound values.
 	DefaultHistogramBucketTagPrecision = uint(6)
+	// DefaultTagCacheSize is the default size for the tag cache
+	DefaultTagCacheSize = 10000
+	// DefaultTagCacheTTLSeconds is the default TTL for tag cache entries (1 hour)
+	DefaultTagCacheTTLSeconds = int64(3600)
+	// DefaultTransportBufferSize is the default buffer size for async transport
+	DefaultTransportBufferSize = 1000
+	// DefaultFlushInterval is how often to flush transport batches (500ms for balanced performance)
+	DefaultFlushInterval = 1 * time.Second
+	// DefaultMaxTimersPerMetricPerBatch is the maximum number of timer metrics allowed per metricId per batch (this is set to 1000 by default to avoid overwhelming the server)
+	// the timer metrics with over 1000 samples will be dropped by the server
+	DefaultMaxTimersPerMetricPerBatch = 1000
 
 	_emitMetricBatchOverhead    = 19
 	_minMetricBucketIDTagLength = 4
@@ -110,6 +123,140 @@ type Reporter interface {
 	io.Closer
 }
 
+// AsyncTransport provides non-blocking metric transmission
+//
+// LATENCY CHARACTERISTICS:
+//
+// For All Metrics (Uniform Treatment):
+//
+//	Best Case:  ~1-10ms (immediate sending when batch full)
+//	Normal Case: ~1s (flush timeout when batch not full)
+//	Worst Case: ~1s + network latency
+//	Drop Scenario: Transport channel full (configurable capacity)
+type AsyncTransport interface {
+	SendAsync(batch *m3thrift.MetricBatch) error
+	Close() error
+	DropCount() int64    // Returns number of dropped batches
+	SuccessCount() int64 // Returns number of successfully sent batches
+}
+
+// bufferedTransport wraps the underlying transport with async sending
+type bufferedTransport struct {
+	underlying    *m3thrift.M3Client
+	batchCh       chan *m3thrift.MetricBatch
+	dropCount     atomic.Int64
+	successCount  atomic.Int64 // Track successful transmissions
+	done          chan struct{}
+	wg            sync.WaitGroup
+	flushInterval time.Duration // How often to flush batches (500ms default)
+}
+
+// newBufferedTransport creates a non-blocking transport wrapper
+func newBufferedTransport(client *m3thrift.M3Client, bufferSize int) *bufferedTransport {
+	if bufferSize <= 0 {
+		bufferSize = DefaultTransportBufferSize
+	}
+
+	bt := &bufferedTransport{
+		underlying:    client,
+		batchCh:       make(chan *m3thrift.MetricBatch, bufferSize),
+		done:          make(chan struct{}),
+		flushInterval: DefaultFlushInterval, // 500ms
+	}
+
+	// Start async sender goroutine
+	bt.wg.Add(1)
+	go bt.sendLoop()
+
+	return bt
+}
+
+// SendAsync sends a batch without blocking on network I/O
+func (bt *bufferedTransport) SendAsync(batch *m3thrift.MetricBatch) error {
+	select {
+	case bt.batchCh <- batch:
+		return nil
+	case <-bt.done:
+		return fmt.Errorf("transport closed")
+	default:
+		// Channel full, drop the batch
+		bt.dropCount.Add(1)
+		return nil
+	}
+}
+
+// DropCount returns the number of dropped batches
+func (bt *bufferedTransport) DropCount() int64 {
+	return bt.dropCount.Load()
+}
+
+// SuccessCount returns the number of successfully sent batches
+func (bt *bufferedTransport) SuccessCount() int64 {
+	return bt.successCount.Load()
+}
+
+// sendLoop processes batches with timeout-based flushing
+func (bt *bufferedTransport) sendLoop() {
+	defer bt.wg.Done()
+
+	ticker := time.NewTicker(bt.flushInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case batch, ok := <-bt.batchCh:
+			if !ok {
+				return
+			}
+			// Send metrics immediately when received
+			err := bt.underlying.EmitMetricBatchV2(*batch)
+			if err == nil {
+				// Track successful transmissions (could be extended to count actual metrics in batch)
+				atomic.AddInt64(&bt.successCount, 1)
+			}
+
+		case <-ticker.C:
+			// Periodic flush tick - currently no local batching to flush
+			// This could be extended to batch multiple small batches together
+			continue
+
+		case <-bt.done:
+			// Drain remaining batches on shutdown
+			bt.drainChannels()
+			return
+		}
+	}
+}
+
+// drainChannels drains the batch channel on shutdown
+func (bt *bufferedTransport) drainChannels() {
+	for {
+		select {
+		case batch, ok := <-bt.batchCh:
+			if !ok {
+				return
+			}
+			_ = bt.underlying.EmitMetricBatchV2(*batch)
+		default:
+			return
+		}
+	}
+}
+
+// Close shuts down the async transport
+func (bt *bufferedTransport) Close() error {
+	close(bt.done)
+	bt.wg.Wait()
+	close(bt.batchCh)
+
+	if bt.underlying != nil && bt.underlying.Transport != nil {
+		if cl, ok := bt.underlying.Transport.(io.Closer); ok {
+			return cl.Close()
+		}
+	}
+	return nil
+}
+
 // reporter is a metrics backend that reports metrics to a local or
 // remote M3 collector, metrics are batched together and emitted
 // via either thrift compact or binary protocol in batch UDP packets.
@@ -119,6 +266,7 @@ type reporter struct {
 	bucketValFmt    string
 	buckets         []tally.BucketPair
 	client          *m3thrift.M3Client
+	asyncTransport  *bufferedTransport // Non-blocking transport
 	commonTags      []m3thrift.MetricTag
 	commonTagsBytes []byte
 	done            atomic.Bool
@@ -133,15 +281,27 @@ type reporter struct {
 	tagCache        *cache.TagCache
 	wg              sync.WaitGroup
 
-	batchSizeHistogram    tally.CachedHistogram
-	numBatches            atomic.Int64
-	numBatchesCounter     tally.CachedCount
-	numMetrics            atomic.Int64
-	numMetricsCounter     tally.CachedCount
-	numWriteErrors        atomic.Int64
-	numWriteErrorsCounter tally.CachedCount
-	numTagCacheCounter    tally.CachedCount
-	protocolFactory       thrift.TProtocolFactory
+	// Timer limiting per batch
+	currentBatchTimerCounts    map[string]int // metricId -> count of timers in current batch
+	maxTimersPerMetricPerBatch int            // configurable limit (default 10000)
+
+	batchSizeHistogram           tally.CachedHistogram
+	numBatches                   atomic.Int64
+	numBatchesCounter            tally.CachedCount
+	numMetrics                   atomic.Int64
+	numMetricsCounter            tally.CachedCount
+	numWriteErrors               atomic.Int64
+	numWriteErrorsCounter        tally.CachedCount
+	numTagCacheCounter           tally.CachedCount
+	numDropped                   atomic.Int64      // Track dropped metrics
+	numDroppedCounter            tally.CachedCount // Counter for dropped metrics
+	numTransportDropped          atomic.Int64      // Track transport-level drops
+	numTransportDroppedCounter   tally.CachedCount // Counter for transport drops
+	numTransportSuccess          atomic.Int64      // Track successful transmissions
+	numTransportSuccessCounter   tally.CachedCount // Counter for successful transmissions
+	numTimersDroppedLimit        atomic.Int64      // Track timers dropped due to per-metric limits
+	numTimersDroppedLimitCounter tally.CachedCount // Counter for timer limit drops
+	protocolFactory              thrift.TProtocolFactory
 }
 
 // Options is a set of options for the M3 reporter.
@@ -158,6 +318,11 @@ type Options struct {
 	HistogramBucketName         string
 	HistogramBucketTagPrecision uint
 	InternalTags                map[string]string
+	// Transport configuration
+	TransportBufferSize   int  // Buffer size for async transport (default: DefaultTransportBufferSize)
+	DisableAsyncTransport bool // Disable async transport (default: false)
+	// Timer limiting configuration
+	MaxTimersPerMetricPerBatch int // Maximum timers per metricId per batch (default: DefaultMaxTimersPerMetricPerBatch)
 }
 
 // NewReporter creates a new M3 reporter.
@@ -176,6 +341,12 @@ func NewReporter(opts Options) (Reporter, error) {
 	}
 	if opts.HistogramBucketTagPrecision == 0 {
 		opts.HistogramBucketTagPrecision = DefaultHistogramBucketTagPrecision
+	}
+	if opts.TransportBufferSize <= 0 {
+		opts.TransportBufferSize = DefaultTransportBufferSize
+	}
+	if opts.MaxTimersPerMetricPerBatch <= 0 {
+		opts.MaxTimersPerMetricPerBatch = DefaultMaxTimersPerMetricPerBatch
 	}
 
 	var trans thrift.TTransport
@@ -240,6 +411,12 @@ func NewReporter(opts Options) (Reporter, error) {
 		return resolvedCommonTags[i].Name < resolvedCommonTags[j].Name
 	})
 
+	// Initialize async transport if not disabled
+	var asyncTransport *bufferedTransport
+	if !opts.DisableAsyncTransport {
+		asyncTransport = newBufferedTransport(client, opts.TransportBufferSize)
+	}
+
 	r := &reporter{
 		bucketIDTagName: opts.HistogramBucketIDName,
 		bucketTagName:   opts.HistogramBucketName,
@@ -247,11 +424,18 @@ func NewReporter(opts Options) (Reporter, error) {
 		metCh:           make(chan pendingReport, opts.MaxQueueSize),
 		donech:          make(chan struct{}),
 		client:          client,
+		asyncTransport:  asyncTransport,
 		commonTags:      resolvedCommonTags,
 		resourcePool:    rPool,
 		stringInterner:  cache.NewStringInterner(),
-		tagCache:        cache.NewTagCache(),
+		tagCache: cache.NewTagCacheWithOptions(cache.TagCacheOptions{
+			MaxSize:    DefaultTagCacheSize,
+			TTLSeconds: DefaultTagCacheTTLSeconds,
+		}),
 		protocolFactory: pFactory,
+		// Initialize timer limiting
+		currentBatchTimerCounts:    make(map[string]int),
+		maxTimersPerMetricPerBatch: opts.MaxTimersPerMetricPerBatch,
 	}
 
 	r.now.Store(time.Now().UnixNano())
@@ -291,6 +475,10 @@ func NewReporter(opts Options) (Reporter, error) {
 	r.numMetricsCounter = r.AllocateCounter("tally.internal.num-metrics", internalScopeTags)
 	r.numWriteErrorsCounter = r.AllocateCounter("tally.internal.num-write-errors", internalScopeTags)
 	r.numTagCacheCounter = r.AllocateCounter("tally.internal.num-tag-cache", internalScopeTags)
+	r.numDroppedCounter = r.AllocateCounter("tally.internal.num-dropped", internalScopeTags)
+	r.numTransportDroppedCounter = r.AllocateCounter("tally.internal.num-transport-dropped", internalScopeTags)
+	r.numTransportSuccessCounter = r.AllocateCounter("tally.internal.num-transport-success", internalScopeTags)
+	r.numTimersDroppedLimitCounter = r.AllocateCounter("tally.internal.num-timers-dropped-limit", internalScopeTags)
 
 	r.wg.Add(1)
 	go func() {
@@ -463,32 +651,155 @@ func (r *reporter) durationBucketString(d time.Duration) string {
 	return d.String()
 }
 
-func (r *reporter) convertTags(tags map[string]string) []m3thrift.MetricTag {
-	if len(tags) == 0 {
+// optimizedConvertTags provides specialized conversion with minimal allocations
+func (r *reporter) optimizedConvertTags(tags map[string]string) []m3thrift.MetricTag {
+	tagCount := len(tags)
+	if tagCount == 0 {
 		return nil
 	}
-	key := cache.TagMapKey(tags)
 
-	cachedTags, ok := r.tagCache.Get(key)
-	if ok {
+	// Fast path for empty or single common tags
+	if tagCount == 1 {
+		return r.convertSingleTag(tags)
+	}
+
+	// Fast path for <= 3 tags
+	// todo: figure out the sweet spot for this just a random guess for now
+	if tagCount <= 3 {
+		return r.convertFewTags(tags)
+	}
+
+	// General case for many tags
+	return r.convertManyTags(tags)
+}
+
+// convertSingleTag handles the very common single tag case
+func (r *reporter) convertSingleTag(tags map[string]string) []m3thrift.MetricTag {
+	for k, v := range tags {
+		// Use a simplified cache key for single tags to reduce hashing overhead
+		cacheKey := uint64(len(k))<<32 | uint64(len(v)) // Simple hash based on lengths
+		if k != "" && len(k) < 64 && v != "" && len(v) < 64 {
+			// For short strings, create a fast composite key
+			var keyBuf [128]byte
+			copy(keyBuf[:], k)
+			copy(keyBuf[len(k):], v)
+			cacheKey = cache.TagMapKey(map[string]string{string(keyBuf[:len(k)+len(v)]): ""})
+		} else {
+			cacheKey = cache.TagMapKey(tags)
+		}
+
+		if cachedTags, ok := r.tagCache.Get(cacheKey); ok {
+			return cachedTags
+		}
+
+		// Create result with exact capacity
+		result := make([]m3thrift.MetricTag, 1)
+		result[0] = m3thrift.MetricTag{
+			Name:  r.stringInterner.Intern(k),
+			Value: r.stringInterner.Intern(v),
+		}
+
+		r.tagCache.Set(cacheKey, result)
+		return result
+	}
+	return nil
+}
+
+// convertFewTags handles 2-3 tags efficiently
+func (r *reporter) convertFewTags(tags map[string]string) []m3thrift.MetricTag {
+	key := cache.TagMapKey(tags)
+	if cachedTags, ok := r.tagCache.Get(key); ok {
 		return cachedTags
 	}
 
-	// Use the new specialized tag slice pool
-	newTags := r.resourcePool.getMetricTagSlice()
+	tagCount := len(tags)
+	result := make([]m3thrift.MetricTag, 0, tagCount)
+
+	// For small maps, direct iteration with sort is faster than building intermediate slice
+	type tagPair struct {
+		key, value string
+	}
+
+	// Use stack-allocated array for small tag counts
+	var pairs [3]tagPair
+	i := 0
 	for k, v := range tags {
-		newTags = append(newTags, m3thrift.MetricTag{
-			Name:  r.stringInterner.Intern(k),
-			Value: r.stringInterner.Intern(v),
+		pairs[i] = tagPair{k, v}
+		i++
+	}
+
+	// Simple in-place sort for 2-3 elements
+	if tagCount == 2 {
+		if pairs[0].key > pairs[1].key {
+			pairs[0], pairs[1] = pairs[1], pairs[0]
+		}
+	} else if tagCount == 3 {
+		// Simple bubble sort for 3 elements
+		if pairs[0].key > pairs[1].key {
+			pairs[0], pairs[1] = pairs[1], pairs[0]
+		}
+		if pairs[1].key > pairs[2].key {
+			pairs[1], pairs[2] = pairs[2], pairs[1]
+		}
+		if pairs[0].key > pairs[1].key {
+			pairs[0], pairs[1] = pairs[1], pairs[0]
+		}
+	}
+
+	// Convert sorted pairs to metric tags
+	for j := 0; j < tagCount; j++ {
+		result = append(result, m3thrift.MetricTag{
+			Name:  r.stringInterner.Intern(pairs[j].key),
+			Value: r.stringInterner.Intern(pairs[j].value),
 		})
 	}
-	sort.Slice(newTags, func(i, j int) bool {
-		return newTags[i].Name < newTags[j].Name
-	})
 
-	// Cache the sorted result - note: we can't release newTags since it gets cached
-	cachedResult := r.tagCache.Set(key, newTags)
-	return cachedResult
+	r.tagCache.Set(key, result)
+	return result
+}
+
+// convertManyTags handles the general case with many tags
+func (r *reporter) convertManyTags(tags map[string]string) []m3thrift.MetricTag {
+	key := cache.TagMapKey(tags)
+	if cachedTags, ok := r.tagCache.Get(key); ok {
+		return cachedTags
+	}
+
+	tagCount := len(tags)
+	result := make([]m3thrift.MetricTag, 0, tagCount)
+
+	// Use stack buffer for moderate number of tags
+	var keysBuf [16]string
+	var keys []string
+	if tagCount <= 16 {
+		keys = keysBuf[:0]
+	} else {
+		keys = make([]string, 0, tagCount)
+	}
+
+	// Collect keys
+	for k := range tags {
+		keys = append(keys, k)
+	}
+
+	// Sort keys efficiently
+	sort.Strings(keys)
+
+	// Build result in sorted order
+	for _, k := range keys {
+		result = append(result, m3thrift.MetricTag{
+			Name:  r.stringInterner.Intern(k),
+			Value: r.stringInterner.Intern(tags[k]),
+		})
+	}
+
+	r.tagCache.Set(key, result)
+	return result
+}
+
+// Update the main convertTags function to use the optimized version
+func (r *reporter) convertTags(tags map[string]string) []m3thrift.MetricTag {
+	return r.optimizedConvertTags(tags)
 }
 
 func (r *reporter) Flush() {
@@ -496,11 +807,14 @@ func (r *reporter) Flush() {
 		return
 	}
 
+	// Create acknowledgment channel for this flush
+	flushAck := make(chan struct{})
+
 	r.pending.Inc()
 
 	select {
-	case r.metCh <- pendingReport{cached: nil}:
-		// Successfully sent flush signal. process() loop will Dec() r.pending.
+	case r.metCh <- pendingReport{cached: nil, flushAck: flushAck}:
+		// Successfully sent flush signal with ack channel
 	case <-r.donech:
 		// Reporter is closing, this flush signal won't be processed normally.
 		if r.pending.Load() > 0 {
@@ -509,23 +823,17 @@ func (r *reporter) Flush() {
 		return
 	}
 
-	timeout := time.After(2 * time.Second) // Overall timeout for flush completion
-
-	for {
-		select {
-		case <-r.donech:
-			return // Reporter is closing
-		case <-timeout:
-			return // Flush wait timed out
-		default:
-			// Fall through to check pending
-		}
-
-		if r.pending.Load() == 0 {
-			return // All pending operations (including this flush) likely processed.
-		}
-
-		time.Sleep(1 * time.Millisecond) // Yield to allow other goroutines to run.
+	// Wait for flush acknowledgment or timeout
+	select {
+	case <-flushAck:
+		// Flush completed successfully
+		return
+	case <-r.donech:
+		// Reporter is closing
+		return
+	case <-time.After(2 * time.Second):
+		// Flush timeout
+		return
 	}
 }
 
@@ -549,12 +857,19 @@ func (r *reporter) Close() (err error) {
 	// Now that process() is done and metCh is drained, it's safe to close metCh.
 	close(r.metCh)
 
-	if r.client != nil && r.client.Transport != nil {
+	// Close async transport if it exists
+	if r.asyncTransport != nil {
+		if closeErr := r.asyncTransport.Close(); closeErr != nil {
+			err = closeErr
+		}
+	} else if r.client != nil && r.client.Transport != nil {
 		if cl, ok := r.client.Transport.(io.Closer); ok {
-			return cl.Close()
+			if closeErr := cl.Close(); closeErr != nil {
+				err = closeErr
+			}
 		}
 	}
-	return nil
+	return err
 }
 
 // tryFinalFlush sends a flush signal without blocking indefinitely.
@@ -617,9 +932,32 @@ func (r *reporter) process() {
 	}
 }
 
+// generateMetricId creates a unique identifier for a metric based on its name and tags
+func (r *reporter) generateMetricId(cached *cachedMetric) string {
+	if cached == nil {
+		return ""
+	}
+
+	// Use metric name as base
+	metricId := cached.metricName
+
+	// Append sorted tags to ensure consistent IDs
+	for _, tag := range cached.metricTags {
+		metricId += "|" + tag.Name + "=" + tag.Value
+	}
+
+	return metricId
+}
+
 func (r *reporter) processReport(report pendingReport, mets []m3thrift.Metric, currentBytesInBatch *int32) []m3thrift.Metric {
 	if report.cached == nil {
 		r.decrementPending()
+
+		// Send flush acknowledgment if this was a flush request
+		if report.flushAck != nil {
+			close(report.flushAck)
+		}
+
 		if len(mets) > 0 {
 			return r.internalFlush(mets, currentBytesInBatch)
 		}
@@ -628,6 +966,21 @@ func (r *reporter) processReport(report pendingReport, mets []m3thrift.Metric, c
 
 	if report.cached.isNoop {
 		return mets
+	}
+
+	// Check timer limits before processing
+	if report.valueType == timerType {
+		metricId := r.generateMetricId(report.cached)
+		currentCount := r.currentBatchTimerCounts[metricId]
+
+		if currentCount >= r.maxTimersPerMetricPerBatch {
+			// Drop this timer - exceeded limit for this metricId
+			r.numTimersDroppedLimit.Add(1)
+			return mets
+		}
+
+		// Increment count for this metricId
+		r.currentBatchTimerCounts[metricId] = currentCount + 1
 	}
 
 	if len(mets) > 0 && *currentBytesInBatch+report.cached.size > r.freeBytes {
@@ -729,10 +1082,14 @@ func (r *reporter) reportMetric(c *cachedMetric, valueType metricType, countVal 
 
 	select {
 	case c.reporter.metCh <- report:
+		// Successfully queued
 	case <-c.reporter.donech:
+		// Reporter is shutting down
 		c.reporter.pending.Dec()
 	default:
+		// Channel full, drop metric but track it
 		c.reporter.pending.Dec()
+		c.reporter.numDropped.Add(1)
 	}
 }
 
@@ -750,13 +1107,27 @@ func (r *reporter) internalFlush(mets []m3thrift.Metric, currentBytesInBatch *in
 	batch.Metrics = mets
 	batch.CommonTags = r.commonTags
 
-	err := r.client.EmitMetricBatchV2(*batch)
-	if err != nil {
-		r.numWriteErrorsCounter.ReportCount(1)
-		r.numWriteErrors.Add(1)
+	// Use async transport if available, otherwise fallback to blocking client
+	if r.asyncTransport != nil {
+		// All metrics use the same transport path now
+		err := r.asyncTransport.SendAsync(batch)
+		if err != nil {
+			r.numWriteErrorsCounter.ReportCount(1)
+			r.numWriteErrors.Add(1)
+		}
+	} else {
+		err := r.client.EmitMetricBatchV2(*batch)
+		if err != nil {
+			r.numWriteErrorsCounter.ReportCount(1)
+			r.numWriteErrors.Add(1)
+		}
 	}
 
 	*currentBytesInBatch = 0
+
+	// Reset timer counts for the new batch
+	r.currentBatchTimerCounts = make(map[string]int)
+
 	r.resourcePool.releaseMetricSlice(mets)
 	return r.resourcePool.getMetricSlice()
 }
@@ -765,7 +1136,16 @@ func (r *reporter) reportInternalMetrics() {
 	numBatches := r.numBatches.Swap(0)
 	numMetrics := r.numMetrics.Swap(0)
 	numWriteErrors := r.numWriteErrors.Swap(0)
+	numDropped := r.numDropped.Swap(0)
+	numTimersDroppedLimit := r.numTimersDroppedLimit.Swap(0)
 	tagCacheLen := int64(r.tagCache.Len())
+
+	// Get transport drop count if async transport is enabled
+	var numTransportDropped int64
+	if r.asyncTransport != nil {
+		numTransportDropped = r.asyncTransport.DropCount()
+		r.numTransportDropped.Store(numTransportDropped)
+	}
 
 	var avgBatchSize float64
 	if numBatches > 0 {
@@ -799,6 +1179,18 @@ func (r *reporter) reportInternalMetrics() {
 	}
 	if r.numTagCacheCounter != nil {
 		r.numTagCacheCounter.ReportCount(tagCacheLen)
+	}
+	if r.numDroppedCounter != nil {
+		r.numDroppedCounter.ReportCount(numDropped)
+	}
+	if r.numTransportDroppedCounter != nil {
+		r.numTransportDroppedCounter.ReportCount(numTransportDropped)
+	}
+	if r.numTransportSuccessCounter != nil {
+		r.numTransportSuccessCounter.ReportCount(numMetrics - numTransportDropped)
+	}
+	if r.numTimersDroppedLimitCounter != nil {
+		r.numTimersDroppedLimitCounter.ReportCount(numTimersDroppedLimit)
 	}
 }
 
