@@ -21,12 +21,10 @@
 package m3
 
 import (
-	m3thrift "github.com/uber-go/tally/v4/m3/thrift/v2"
-	"github.com/uber-go/tally/v4/thirdparty/github.com/apache/thrift/lib/go/thrift"
 	"sync"
 
-	m3thrift "github.com/uber-go/tally/m3/thrift/v2"
-	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
+	m3thrift "github.com/uber-go/tally/v6/m3/thrift/v2"
+	"github.com/uber-go/tally/v6/thirdparty/github.com/apache/thrift/lib/go/thrift"
 )
 
 const (

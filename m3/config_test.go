@@ -25,7 +25,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uber-go/tally/v4/m3/thriftudp"
+	"github.com/uber-go/tally/v6/m3/thriftudp"
 )
 
 func TestConfigSimple(t *testing.T) {

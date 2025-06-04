@@ -21,4 +21,4 @@
 package tally
 
 // Version is the current version of the library.
-const Version = "4.1.17"
+const Version = "6.0.0"

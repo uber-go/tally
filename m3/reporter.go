@@ -31,11 +31,11 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/uber-go/tally"
-	"github.com/uber-go/tally/internal/cache"
-	m3thrift "github.com/uber-go/tally/m3/thrift/v2"
-	"github.com/uber-go/tally/m3/thriftudp"
-	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
+	"github.com/uber-go/tally/v6"
+	"github.com/uber-go/tally/v6/internal/cache"
+	m3thrift "github.com/uber-go/tally/v6/m3/thrift/v2"
+	"github.com/uber-go/tally/v6/m3/thriftudp"
+	"github.com/uber-go/tally/v6/thirdparty/github.com/apache/thrift/lib/go/thrift"
 	"go.uber.org/atomic"
 )
 
@@ -212,7 +212,7 @@ func (bt *bufferedTransport) sendLoop() {
 			err := bt.underlying.EmitMetricBatchV2(*batch)
 			if err == nil {
 				// Track successful transmissions (could be extended to count actual metrics in batch)
-				atomic.AddInt64(&bt.successCount, 1)
+				bt.successCount.Add(1)
 			}
 
 		case <-ticker.C:

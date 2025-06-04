@@ -22,9 +22,10 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"time"
 
-	tally "github.com/uber-go/tally/v4"
+	tally "github.com/uber-go/tally/v6"
 )
 
 type printStatsReporter struct{}

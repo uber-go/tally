@@ -24,8 +24,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/uber-go/tally/v4/internal/identity"
-	m3thrift "github.com/uber-go/tally/v4/m3/thrift/v2"
+	"github.com/uber-go/tally/v6/internal/identity"
+	m3thrift "github.com/uber-go/tally/v6/m3/thrift/v2"
 )
 
 // LRU node for the tag cache

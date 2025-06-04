@@ -9,7 +9,7 @@ import (
 	time "time"
 
 	gomock "github.com/golang/mock/gomock"
-	tally "github.com/uber-go/tally/v4"
+	tally "github.com/uber-go/tally/v6"
 )
 
 // MockStatsReporter is a mock of StatsReporter interface.

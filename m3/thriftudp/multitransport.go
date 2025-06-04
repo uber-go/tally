@@ -23,7 +23,7 @@ package thriftudp
 import (
 	"fmt"
 
-	"github.com/uber-go/tally/v4/thirdparty/github.com/apache/thrift/lib/go/thrift"
+	"github.com/uber-go/tally/v6/thirdparty/github.com/apache/thrift/lib/go/thrift"
 )
 
 // TMultiUDPTransport does multiUDP as a thrift.TTransport
@@ -35,7 +35,8 @@ type TMultiUDPTransport struct {
 // All writes are buffered and flushed in one UDP packet. If locHostPort is not "", it
 // will be used as the local address for the connection
 // Example:
-// 	trans, err := thriftudp.NewTMultiUDPClientTransport([]string{"192.168.1.1:9090","192.168.1.2:9090"}, "")
+//
+//	trans, err := thriftudp.NewTMultiUDPClientTransport([]string{"192.168.1.1:9090","192.168.1.2:9090"}, "")
 func NewTMultiUDPClientTransport(
 	destHostPorts []string,
 	locHostPort string,

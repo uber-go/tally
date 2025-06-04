@@ -27,7 +27,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	tally "github.com/uber-go/tally/v4"
+	tally "github.com/uber-go/tally/v6"
 )
 
 var commonTags = map[string]string{"env": "test"}

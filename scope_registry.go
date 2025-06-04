@@ -30,6 +30,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	uberatomic "go.uber.org/atomic"
 )
 
 var (

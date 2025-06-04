@@ -21,13 +21,18 @@
 package statsd
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"math"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/cactus/go-statsd-client/v5/statsd"
-	tally "github.com/uber-go/tally/v4"
+
+	tally "github.com/uber-go/tally/v6"
 )
 
 const (

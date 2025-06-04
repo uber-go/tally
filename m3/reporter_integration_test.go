@@ -21,17 +21,30 @@
 package m3
 
 import (
+	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
+	"math"
+	"net"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
+	"reflect"
+	"runtime"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	m3thrift "github.com/uber-go/tally/m3/thrift/v2"
+	tally "github.com/uber-go/tally/v6"
+	m3thrift "github.com/uber-go/tally/v6/m3/thrift/v2"
 )
 
 var mainFileFmt = `
@@ -40,8 +53,8 @@ package main
 import (
 	"time"
 
-	tally "github.com/uber-go/tally/v4"
-	"github.com/uber-go/tally/v4/m3"
+	tally "github.com/uber-go/tally/v6"
+	"github.com/uber-go/tally/v6/m3"
 )
 
 func main() {

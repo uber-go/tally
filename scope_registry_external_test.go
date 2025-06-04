@@ -28,8 +28,8 @@ import (
 
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/require"
-	"github.com/uber-go/tally/v4"
-	"github.com/uber-go/tally/v4/tallymock"
+	"github.com/uber-go/tally/v6"
+	"github.com/uber-go/tally/v6/tallymock"
 	"go.uber.org/atomic"
 )
 

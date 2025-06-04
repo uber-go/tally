@@ -25,7 +25,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/uber-go/tally/v4/thirdparty/github.com/apache/thrift/lib/go/thrift"
+	"github.com/stretchr/testify/require"
+
+	"github.com/uber-go/tally/v6/thirdparty/github.com/apache/thrift/lib/go/thrift"
 )
 
 func TestNewTMultiUDPClientTransport(t *testing.T) {

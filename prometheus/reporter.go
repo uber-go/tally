@@ -21,15 +21,20 @@
 package prometheus
 
 import (
+	"fmt"
+	"math"
 	"net/http"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/pkg/errors"
-	prom "github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	tally "github.com/uber-go/tally/v4"
+	tally "github.com/uber-go/tally/v6"
 )
 
 const (
@@ -92,7 +97,7 @@ type Reporter interface {
 		name string,
 		tagKeys []string,
 		desc string,
-	) (*prom.CounterVec, error)
+	) (*prometheus.CounterVec, error)
 
 	// RegisterGauge is a helper method to initialize a gauge
 	// in the prometheus backend with a given help text.
@@ -102,7 +107,7 @@ type Reporter interface {
 		name string,
 		tagKeys []string,
 		desc string,
-	) (*prom.GaugeVec, error)
+	) (*prometheus.GaugeVec, error)
 
 	// RegisterTimer is a helper method to initialize a timer
 	// summary or histogram vector in the prometheus backend
@@ -134,36 +139,36 @@ type RegisterTimerOptions struct {
 // described by the TimerType.
 type TimerUnion struct {
 	TimerType TimerType
-	Histogram *prom.HistogramVec
-	Summary   *prom.SummaryVec
+	Histogram *prometheus.HistogramVec
+	Summary   *prometheus.SummaryVec
 }
 
 type metricID string
 
 type reporter struct {
 	sync.RWMutex
-	registerer      prom.Registerer
-	gatherer        prom.Gatherer
+	registerer      prometheus.Registerer
+	gatherer        prometheus.Gatherer
 	timerType       TimerType
 	objectives      map[float64]float64
 	buckets         []float64
 	onRegisterError func(e error)
-	counters        map[metricID]*prom.CounterVec
-	gauges          map[metricID]*prom.GaugeVec
+	counters        map[metricID]*prometheus.CounterVec
+	gauges          map[metricID]*prometheus.GaugeVec
 	timers          map[metricID]*promTimerVec
 }
 
 type promTimerVec struct {
-	summary   *prom.SummaryVec
-	histogram *prom.HistogramVec
+	summary   *prometheus.SummaryVec
+	histogram *prometheus.HistogramVec
 }
 
 type cachedMetric struct {
-	counter     prom.Counter
-	gauge       prom.Gauge
+	counter     prometheus.Counter
+	gauge       prometheus.Gauge
 	reportTimer func(d time.Duration)
-	histogram   prom.Observer
-	summary     prom.Observer
+	histogram   prometheus.Observer
+	summary     prometheus.Observer
 }
 
 func (m *cachedMetric) ReportCount(value int64) {
@@ -243,11 +248,11 @@ const (
 type Options struct {
 	// Registerer is the prometheus registerer to register
 	// metrics with. Use nil to specify the default registerer.
-	Registerer prom.Registerer
+	Registerer prometheus.Registerer
 
 	// Gatherer is the prometheus gatherer to gather
 	// metrics with. Use nil to specify the default gatherer.
-	Gatherer prom.Gatherer
+	Gatherer prometheus.Gatherer
 
 	// DefaultTimerType is the default type timer type to create
 	// when using timers. It's default value is a summary timer type.
@@ -272,16 +277,16 @@ type Options struct {
 // https://godoc.org/github.com/prometheus/client_golang/prometheus#SummaryOpts for more details.
 func NewReporter(opts Options) Reporter {
 	if opts.Registerer == nil {
-		opts.Registerer = prom.DefaultRegisterer
+		opts.Registerer = prometheus.DefaultRegisterer
 	} else {
 		// A specific registerer was set, check if it's a registry and if
 		// no gatherer was set, then use that as the gatherer
-		if reg, ok := opts.Registerer.(*prom.Registry); ok && opts.Gatherer == nil {
+		if reg, ok := opts.Registerer.(*prometheus.Registry); ok && opts.Gatherer == nil {
 			opts.Gatherer = reg
 		}
 	}
 	if opts.Gatherer == nil {
-		opts.Gatherer = prom.DefaultGatherer
+		opts.Gatherer = prometheus.DefaultGatherer
 	}
 	if opts.DefaultHistogramBuckets == nil {
 		opts.DefaultHistogramBuckets = DefaultHistogramBuckets()
@@ -314,8 +319,8 @@ func NewReporter(opts Options) Reporter {
 		buckets:         opts.DefaultHistogramBuckets,
 		objectives:      opts.DefaultSummaryObjectives,
 		onRegisterError: opts.OnRegisterError,
-		counters:        make(map[metricID]*prom.CounterVec),
-		gauges:          make(map[metricID]*prom.GaugeVec),
+		counters:        make(map[metricID]*prometheus.CounterVec),
+		gauges:          make(map[metricID]*prometheus.GaugeVec),
 		timers:          make(map[metricID]*promTimerVec),
 	}
 }
@@ -324,7 +329,7 @@ func (r *reporter) RegisterCounter(
 	name string,
 	tagKeys []string,
 	desc string,
-) (*prom.CounterVec, error) {
+) (*prometheus.CounterVec, error) {
 	return r.counterVec(name, tagKeys, desc)
 }
 
@@ -332,7 +337,7 @@ func (r *reporter) counterVec(
 	name string,
 	tagKeys []string,
 	desc string,
-) (*prom.CounterVec, error) {
+) (*prometheus.CounterVec, error) {
 	id := canonicalMetricID(name, tagKeys)
 
 	r.Lock()
@@ -342,8 +347,8 @@ func (r *reporter) counterVec(
 		return ctr, nil
 	}
 
-	ctr := prom.NewCounterVec(
-		prom.CounterOpts{
+	ctr := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
 			Name: name,
 			Help: desc,
 		},
@@ -373,7 +378,7 @@ func (r *reporter) RegisterGauge(
 	name string,
 	tagKeys []string,
 	desc string,
-) (*prom.GaugeVec, error) {
+) (*prometheus.GaugeVec, error) {
 	return r.gaugeVec(name, tagKeys, desc)
 }
 
@@ -381,7 +386,7 @@ func (r *reporter) gaugeVec(
 	name string,
 	tagKeys []string,
 	desc string,
-) (*prom.GaugeVec, error) {
+) (*prometheus.GaugeVec, error) {
 	id := canonicalMetricID(name, tagKeys)
 
 	r.Lock()
@@ -391,8 +396,8 @@ func (r *reporter) gaugeVec(
 		return g, nil
 	}
 
-	g := prom.NewGaugeVec(
-		prom.GaugeOpts{
+	g := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
 			Name: name,
 			Help: desc,
 		},
@@ -463,7 +468,7 @@ func (r *reporter) summaryVec(
 	tagKeys []string,
 	desc string,
 	objectives map[float64]float64,
-) (*prom.SummaryVec, error) {
+) (*prometheus.SummaryVec, error) {
 	id := canonicalMetricID(name, tagKeys)
 
 	r.Lock()
@@ -473,8 +478,8 @@ func (r *reporter) summaryVec(
 		return s.summary, nil
 	}
 
-	s := prom.NewSummaryVec(
-		prom.SummaryOpts{
+	s := prometheus.NewSummaryVec(
+		prometheus.SummaryOpts{
 			Name:       name,
 			Help:       desc,
 			Objectives: objectives,
@@ -495,7 +500,7 @@ func (r *reporter) histogramVec(
 	tagKeys []string,
 	desc string,
 	buckets []float64,
-) (*prom.HistogramVec, error) {
+) (*prometheus.HistogramVec, error) {
 	id := canonicalMetricID(name, tagKeys)
 
 	r.Lock()
@@ -505,8 +510,8 @@ func (r *reporter) histogramVec(
 		return h.histogram, nil
 	}
 
-	h := prom.NewHistogramVec(
-		prom.HistogramOpts{
+	h := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
 			Name:    name,
 			Help:    desc,
 			Buckets: buckets,
@@ -532,7 +537,7 @@ func (r *reporter) AllocateTimer(name string, tags map[string]string) tally.Cach
 	timerType, buckets, objectives := r.timerConfig(nil)
 	switch timerType {
 	case HistogramTimerType:
-		var histogramVec *prom.HistogramVec
+		var histogramVec *prometheus.HistogramVec
 		histogramVec, err = r.histogramVec(name, tagKeys, name+" histogram", buckets)
 		if err == nil {
 			t := &cachedMetric{histogram: histogramVec.With(tags)}
@@ -540,7 +545,7 @@ func (r *reporter) AllocateTimer(name string, tags map[string]string) tally.Cach
 			timer = t
 		}
 	case SummaryTimerType:
-		var summaryVec *prom.SummaryVec
+		var summaryVec *prometheus.SummaryVec
 		summaryVec, err = r.summaryVec(name, tagKeys, name+" summary", objectives)
 		if err == nil {
 			t := &cachedMetric{summary: summaryVec.With(tags)}

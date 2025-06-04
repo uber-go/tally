@@ -25,7 +25,7 @@ import (
 	"context"
 	"net"
 
-	"github.com/uber-go/tally/v4/thirdparty/github.com/apache/thrift/lib/go/thrift"
+	"github.com/uber-go/tally/v6/thirdparty/github.com/apache/thrift/lib/go/thrift"
 	"go.uber.org/atomic"
 )
 
@@ -49,7 +49,8 @@ type TUDPTransport struct {
 // All writes are buffered and flushed in one UDP packet. If locHostPort is not "", it
 // will be used as the local address for the connection
 // Example:
-// 	trans, err := thriftudp.NewTUDPClientTransport("192.168.1.1:9090", "")
+//
+//	trans, err := thriftudp.NewTUDPClientTransport("192.168.1.1:9090", "")
 func NewTUDPClientTransport(destHostPort string, locHostPort string) (*TUDPTransport, error) {
 	destAddr, err := net.ResolveUDPAddr("udp", destHostPort)
 	if err != nil {
@@ -79,7 +80,8 @@ func NewTUDPClientTransport(destHostPort string, locHostPort string) (*TUDPTrans
 // NewTUDPServerTransport creates a net.UDPConn-backed TTransport for Thrift servers
 // It will listen for incoming udp packets on the specified host/port
 // Example:
-// 	trans, err := thriftudp.NewTUDPClientTransport("localhost:9001")
+//
+//	trans, err := thriftudp.NewTUDPClientTransport("localhost:9001")
 func NewTUDPServerTransport(hostPort string) (*TUDPTransport, error) {
 	return NewTUDPServerTransportWithListenConfig(hostPort, net.ListenConfig{})
 }
