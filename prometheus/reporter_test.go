@@ -22,9 +22,6 @@ package prometheus
 
 import (
 	"fmt"
-	"net/http"
-	"sort"
-	"strings"
 	"testing"
 	"time"
 

@@ -21,9 +21,6 @@
 package m3
 
 import (
-	"regexp"
-	"strings"
-
 	tally "github.com/uber-go/tally/v6"
 )
 

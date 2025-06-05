@@ -22,7 +22,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"time"
 
 	tally "github.com/uber-go/tally/v6"

@@ -23,7 +23,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"net"
 	"sync/atomic"
 

@@ -21,7 +21,6 @@
 package instrument
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"

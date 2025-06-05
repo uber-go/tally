@@ -22,28 +22,19 @@ package m3
 
 import (
 	"bytes"
-	"encoding/binary"
-	"encoding/json"
-	"fmt"
-	"log"
-	"math"
 	"math/rand"
 	"net"
 	"os"
-	"reflect"
-	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	tally "github.com/uber-go/tally/v6"
+	"github.com/uber-go/tally/v6"
 	customtransport "github.com/uber-go/tally/v6/m3/customtransports"
 	m3thrift "github.com/uber-go/tally/v6/m3/thrift/v2"
 	"github.com/uber-go/tally/v6/m3/thriftudp"
@@ -573,14 +564,8 @@ func TestReporterResetTagsAfterReturnToPool(t *testing.T) {
 
 	// Empty flush to ensure the copied metric is released.
 	r.Flush()
-	// Wait for metric channels to be empty
-	for {
-		rep := r.(*reporter)
-		if len(rep.metCh) == 0 {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	// Wait for metrics to be processed - simplified approach just waits a bit
+	time.Sleep(50 * time.Millisecond)
 
 	// Allocate a new counter with no tags reusing the metric
 	// just released to the pool.
@@ -790,7 +775,10 @@ type fakeM3Service struct {
 func (m *fakeM3Service) getBatches() []m3thrift.MetricBatch {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
-	return m.batches
+	// Return a copy to avoid race conditions if the underlying slice is modified.
+	cp := make([]m3thrift.MetricBatch, len(m.batches))
+	copy(cp, m.batches)
+	return cp
 }
 
 func (m *fakeM3Service) getMetrics() []m3thrift.Metric {

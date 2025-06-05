@@ -21,13 +21,9 @@
 package statsd
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"math"
 	"strconv"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/cactus/go-statsd-client/v5/statsd"

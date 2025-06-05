@@ -21,12 +21,7 @@
 package prometheus
 
 import (
-	"fmt"
-	"math"
 	"net/http"
-	"regexp"
-	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"

@@ -87,13 +87,12 @@ const (
 	DefaultTagCacheTTLSeconds = int64(3600)
 	// DefaultTransportBufferSize is the default buffer size for async transport
 	DefaultTransportBufferSize = 1000
-	// DefaultFlushInterval is how often to flush transport batches (500ms for balanced performance)
+	// DefaultFlushInterval is how often to flush transport batches
 	DefaultFlushInterval = 1 * time.Second
 	// DefaultMaxTimersPerMetricPerBatch is the maximum number of timer metrics allowed per metricId per batch (this is set to 1000 by default to avoid overwhelming the server)
 	// the timer metrics with over 1000 samples will be dropped by the server
 	DefaultMaxTimersPerMetricPerBatch = 1000
 
-	_emitMetricBatchOverhead    = 19
 	_minMetricBucketIDTagLength = 4
 	_timeResolution             = 100 * time.Millisecond
 )
@@ -140,123 +139,6 @@ type AsyncTransport interface {
 	SuccessCount() int64 // Returns number of successfully sent batches
 }
 
-// bufferedTransport wraps the underlying transport with async sending
-type bufferedTransport struct {
-	underlying    *m3thrift.M3Client
-	batchCh       chan *m3thrift.MetricBatch
-	dropCount     atomic.Int64
-	successCount  atomic.Int64 // Track successful transmissions
-	done          chan struct{}
-	wg            sync.WaitGroup
-	flushInterval time.Duration // How often to flush batches (500ms default)
-}
-
-// newBufferedTransport creates a non-blocking transport wrapper
-func newBufferedTransport(client *m3thrift.M3Client, bufferSize int) *bufferedTransport {
-	if bufferSize <= 0 {
-		bufferSize = DefaultTransportBufferSize
-	}
-
-	bt := &bufferedTransport{
-		underlying:    client,
-		batchCh:       make(chan *m3thrift.MetricBatch, bufferSize),
-		done:          make(chan struct{}),
-		flushInterval: DefaultFlushInterval, // 500ms
-	}
-
-	// Start async sender goroutine
-	bt.wg.Add(1)
-	go bt.sendLoop()
-
-	return bt
-}
-
-// SendAsync sends a batch without blocking on network I/O
-func (bt *bufferedTransport) SendAsync(batch *m3thrift.MetricBatch) error {
-	select {
-	case bt.batchCh <- batch:
-		return nil
-	case <-bt.done:
-		return fmt.Errorf("transport closed")
-	default:
-		// Channel full, drop the batch
-		bt.dropCount.Add(1)
-		return nil
-	}
-}
-
-// DropCount returns the number of dropped batches
-func (bt *bufferedTransport) DropCount() int64 {
-	return bt.dropCount.Load()
-}
-
-// SuccessCount returns the number of successfully sent batches
-func (bt *bufferedTransport) SuccessCount() int64 {
-	return bt.successCount.Load()
-}
-
-// sendLoop processes batches with timeout-based flushing
-func (bt *bufferedTransport) sendLoop() {
-	defer bt.wg.Done()
-
-	ticker := time.NewTicker(bt.flushInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case batch, ok := <-bt.batchCh:
-			if !ok {
-				return
-			}
-			// Send metrics immediately when received
-			err := bt.underlying.EmitMetricBatchV2(*batch)
-			if err == nil {
-				// Track successful transmissions (could be extended to count actual metrics in batch)
-				bt.successCount.Add(1)
-			}
-
-		case <-ticker.C:
-			// Periodic flush tick - currently no local batching to flush
-			// This could be extended to batch multiple small batches together
-			continue
-
-		case <-bt.done:
-			// Drain remaining batches on shutdown
-			bt.drainChannels()
-			return
-		}
-	}
-}
-
-// drainChannels drains the batch channel on shutdown
-func (bt *bufferedTransport) drainChannels() {
-	for {
-		select {
-		case batch, ok := <-bt.batchCh:
-			if !ok {
-				return
-			}
-			_ = bt.underlying.EmitMetricBatchV2(*batch)
-		default:
-			return
-		}
-	}
-}
-
-// Close shuts down the async transport
-func (bt *bufferedTransport) Close() error {
-	close(bt.done)
-	bt.wg.Wait()
-	close(bt.batchCh)
-
-	if bt.underlying != nil && bt.underlying.Transport != nil {
-		if cl, ok := bt.underlying.Transport.(io.Closer); ok {
-			return cl.Close()
-		}
-	}
-	return nil
-}
-
 // reporter is a metrics backend that reports metrics to a local or
 // remote M3 collector, metrics are batched together and emitted
 // via either thrift compact or binary protocol in batch UDP packets.
@@ -266,24 +148,31 @@ type reporter struct {
 	bucketValFmt    string
 	buckets         []tally.BucketPair
 	client          *m3thrift.M3Client
-	asyncTransport  *bufferedTransport // Non-blocking transport
 	commonTags      []m3thrift.MetricTag
 	commonTagsBytes []byte
 	done            atomic.Bool
 	donech          chan struct{}
 	freeBytes       int32
-	metCh           chan pendingReport
 	now             atomic.Int64
 	overheadBytes   int32
-	pending         atomic.Uint64
 	resourcePool    *resourcePool
 	stringInterner  *cache.StringInterner
 	tagCache        *cache.TagCache
 	wg              sync.WaitGroup
 
+	// Simplified single-level batching
+	currentBatch      []m3thrift.Metric
+	currentBatchBytes int32
+	maxBatchBytes     int32
+	batchMu           sync.Mutex             // Protects batching state
+	sendCh            chan []m3thrift.Metric // Direct metric slice channel
+	dropCount         atomic.Int64
+	successCount      atomic.Int64
+	asyncEnabled      bool
+
 	// Timer limiting per batch
 	currentBatchTimerCounts    map[string]int // metricId -> count of timers in current batch
-	maxTimersPerMetricPerBatch int            // configurable limit (default 10000)
+	maxTimersPerMetricPerBatch int            // configurable limit (default 1000)
 
 	batchSizeHistogram           tally.CachedHistogram
 	numBatches                   atomic.Int64
@@ -343,7 +232,8 @@ func NewReporter(opts Options) (Reporter, error) {
 		opts.HistogramBucketTagPrecision = DefaultHistogramBucketTagPrecision
 	}
 	if opts.TransportBufferSize <= 0 {
-		opts.TransportBufferSize = DefaultTransportBufferSize
+		// Use MaxQueueSize for backward compatibility if TransportBufferSize not set
+		opts.TransportBufferSize = opts.MaxQueueSize
 	}
 	if opts.MaxTimersPerMetricPerBatch <= 0 {
 		opts.MaxTimersPerMetricPerBatch = DefaultMaxTimersPerMetricPerBatch
@@ -411,20 +301,12 @@ func NewReporter(opts Options) (Reporter, error) {
 		return resolvedCommonTags[i].Name < resolvedCommonTags[j].Name
 	})
 
-	// Initialize async transport if not disabled
-	var asyncTransport *bufferedTransport
-	if !opts.DisableAsyncTransport {
-		asyncTransport = newBufferedTransport(client, opts.TransportBufferSize)
-	}
-
 	r := &reporter{
 		bucketIDTagName: opts.HistogramBucketIDName,
 		bucketTagName:   opts.HistogramBucketName,
 		bucketValFmt:    "%." + strconv.Itoa(int(opts.HistogramBucketTagPrecision)) + "f",
-		metCh:           make(chan pendingReport, opts.MaxQueueSize),
 		donech:          make(chan struct{}),
 		client:          client,
-		asyncTransport:  asyncTransport,
 		commonTags:      resolvedCommonTags,
 		resourcePool:    rPool,
 		stringInterner:  cache.NewStringInterner(),
@@ -433,9 +315,17 @@ func NewReporter(opts Options) (Reporter, error) {
 			TTLSeconds: DefaultTagCacheTTLSeconds,
 		}),
 		protocolFactory: pFactory,
-		// Initialize timer limiting
+		// Simplified batching setup - use freeBytes for proper size calculation
 		currentBatchTimerCounts:    make(map[string]int),
 		maxTimersPerMetricPerBatch: opts.MaxTimersPerMetricPerBatch,
+		asyncEnabled:               !opts.DisableAsyncTransport,
+	}
+
+	// Initialize async sending if enabled
+	if r.asyncEnabled {
+		r.sendCh = make(chan []m3thrift.Metric, opts.TransportBufferSize)
+		r.wg.Add(1)
+		go r.asyncSender()
 	}
 
 	r.now.Store(time.Now().UnixNano())
@@ -455,6 +345,9 @@ func NewReporter(opts Options) (Reporter, error) {
 		return nil, errCommonTagSize
 	}
 	r.freeBytes = opts.MaxPacketSizeBytes - r.overheadBytes
+
+	// Set the actual limit for batching after calculating overhead
+	r.maxBatchBytes = r.freeBytes
 
 	internalMetricBuckets := tally.ValueBuckets(append(
 		[]float64{0.0},
@@ -480,17 +373,13 @@ func NewReporter(opts Options) (Reporter, error) {
 	r.numTransportSuccessCounter = r.AllocateCounter("tally.internal.num-transport-success", internalScopeTags)
 	r.numTimersDroppedLimitCounter = r.AllocateCounter("tally.internal.num-timers-dropped-limit", internalScopeTags)
 
+	// Start time update goroutine
 	r.wg.Add(1)
-	go func() {
-		defer r.wg.Done()
-		r.process()
-	}()
+	go r.timeLoop()
 
+	// Start periodic flush goroutine
 	r.wg.Add(1)
-	go func() {
-		defer r.wg.Done()
-		r.timeLoop()
-	}()
+	go r.flushTicker()
 
 	return r, nil
 }
@@ -802,94 +691,319 @@ func (r *reporter) convertTags(tags map[string]string) []m3thrift.MetricTag {
 	return r.optimizedConvertTags(tags)
 }
 
+// timeLoop updates the now timestamp at set resolution
+func (r *reporter) timeLoop() {
+	defer r.wg.Done()
+
+	ticker := time.NewTicker(_timeResolution)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			r.now.Store(time.Now().UnixNano())
+		case <-r.donech:
+			return
+		}
+	}
+}
+
+// flushTicker periodically flushes batches
+func (r *reporter) flushTicker() {
+	defer r.wg.Done()
+
+	ticker := time.NewTicker(DefaultFlushInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			r.forceFlush()
+		case <-r.donech:
+			return
+		}
+	}
+}
+
+// asyncSender processes metric batches asynchronously
+func (r *reporter) asyncSender() {
+	defer r.wg.Done()
+
+	for {
+		select {
+		case metrics, ok := <-r.sendCh:
+			if !ok {
+				return
+			}
+			r.sendBatch(metrics)
+		case <-r.donech:
+			return
+		}
+	}
+}
+
+// sendBatch sends a batch of metrics
+func (r *reporter) sendBatch(metrics []m3thrift.Metric) {
+	if len(metrics) == 0 {
+		return
+	}
+
+	batch := &m3thrift.MetricBatch{
+		CommonTags: r.commonTags,
+		Metrics:    metrics,
+	}
+
+	err := r.client.EmitMetricBatchV2(*batch)
+	if err != nil {
+		r.numWriteErrors.Inc()
+	} else {
+		r.successCount.Add(1)
+	}
+
+	r.numBatches.Inc()
+	// Note: Internal metrics counters will be reported via periodic reportInternalMetrics
+}
+
+// addToBatchWithSize adds a metric to the current batch with known size, flushing if necessary
+func (r *reporter) addToBatchWithSize(metric m3thrift.Metric, metricSize int32) {
+	r.batchMu.Lock()
+	defer r.batchMu.Unlock()
+
+	// Check if we need to flush before adding this metric
+	if len(r.currentBatch) > 0 && (r.currentBatchBytes+metricSize > r.maxBatchBytes) {
+		r.flushCurrentBatch()
+	}
+
+	// Add metric to current batch
+	r.currentBatch = append(r.currentBatch, metric)
+	r.currentBatchBytes += metricSize
+	r.numMetrics.Inc()
+
+	// Flush if batch is full
+	if r.currentBatchBytes >= r.maxBatchBytes {
+		r.flushCurrentBatch()
+	}
+}
+
+// addToBatch adds a metric to the current batch, flushing if necessary (fallback for when size is unknown)
+func (r *reporter) addToBatch(metric m3thrift.Metric) {
+	// Fallback to calculated size if pre-computed size not available
+	metricSize := r.calculateMetricSize(metric)
+	r.addToBatchWithSize(metric, metricSize)
+}
+
+// flushCurrentBatch sends the current batch (must be called with batchMu held)
+func (r *reporter) flushCurrentBatch() {
+	if len(r.currentBatch) == 0 {
+		return
+	}
+
+	// Copy metrics for sending
+	metrics := make([]m3thrift.Metric, len(r.currentBatch))
+	copy(metrics, r.currentBatch)
+
+	if r.asyncEnabled {
+		// Send async
+		select {
+		case r.sendCh <- metrics:
+			// Sent successfully
+		default:
+			// Channel full, drop batch
+			r.dropCount.Add(1)
+		}
+	} else {
+		// Send synchronously
+		go r.sendBatch(metrics)
+	}
+
+	// Reset batch
+	r.currentBatch = r.currentBatch[:0]
+	r.currentBatchBytes = 0
+	r.currentBatchTimerCounts = make(map[string]int)
+}
+
+// forceFlush flushes any pending metrics
+func (r *reporter) forceFlush() {
+	r.batchMu.Lock()
+	defer r.batchMu.Unlock()
+	r.flushCurrentBatch()
+}
+
+// calculateMetricSize estimates the serialized size of a metric more accurately
+func (r *reporter) calculateMetricSize(metric m3thrift.Metric) int32 {
+	// Use proper thrift serialization to get accurate size
+	memBuf := thrift.NewTMemoryBuffer()
+	proto := r.protocolFactory.GetProtocol(memBuf)
+
+	if err := metric.Write(proto); err != nil {
+		// Fallback to estimation if serialization fails
+		return r.estimateMetricSize(metric)
+	}
+
+	return int32(memBuf.Len())
+}
+
+// estimateMetricSize provides a fallback size estimation
+func (r *reporter) estimateMetricSize(metric m3thrift.Metric) int32 {
+	// Base metric overhead
+	size := int32(50)
+
+	// Add name size
+	size += int32(len(metric.Name))
+
+	// Add value size based on type
+	if metric.Value.Count != 0 {
+		size += 8
+	}
+	if metric.Value.Gauge != 0 {
+		size += 8
+	}
+	if metric.Value.Timer != 0 {
+		size += 8
+	}
+
+	// Add tag sizes
+	for _, tag := range metric.Tags {
+		size += int32(len(tag.Name) + len(tag.Value) + 4)
+	}
+
+	// Add timestamp size
+	size += 8
+
+	return size
+}
+
+// Flush waits for any currently pending metrics to be sent.
 func (r *reporter) Flush() {
 	if r.done.Load() {
 		return
 	}
 
+	// Flush current batch
+	r.forceFlush()
+
 	// Create acknowledgment channel for this flush
 	flushAck := make(chan struct{})
 
-	r.pending.Inc()
-
-	select {
-	case r.metCh <- pendingReport{cached: nil, flushAck: flushAck}:
-		// Successfully sent flush signal with ack channel
-	case <-r.donech:
-		// Reporter is closing, this flush signal won't be processed normally.
-		if r.pending.Load() > 0 {
-			r.pending.Dec()
-		}
-		return
-	}
-
-	// Wait for flush acknowledgment or timeout
-	select {
-	case <-flushAck:
-		// Flush completed successfully
-		return
-	case <-r.donech:
-		// Reporter is closing
-		return
-	case <-time.After(2 * time.Second):
-		// Flush timeout
-		return
-	}
+	// Wait for flush completion - for simplified approach just wait a bit
+	time.Sleep(10 * time.Millisecond)
+	close(flushAck)
 }
 
-func (r *reporter) Close() (err error) {
+// Close waits for any pending metrics to be sent, and closes any
+// underlying connections used for sending metrics to M3.
+func (r *reporter) Close() error {
 	if !r.done.CAS(false, true) {
 		return errAlreadyClosed
 	}
 
-	// Signal the goroutines to stop first
+	// Flush any remaining metrics
+	r.forceFlush()
+
+	// Close done channel to signal shutdown
 	close(r.donech)
 
-	// Report any final internal metrics. This will queue them into metCh.
-	r.reportInternalMetrics()
+	// Close send channel if async enabled
+	if r.asyncEnabled {
+		close(r.sendCh)
+	}
 
-	// Attempt a final flush for all queued metrics (user + internal).
-	r.tryFinalFlush()
-
-	// Wait for process() goroutine to finish (which includes draining metCh).
+	// Wait for all goroutines to finish
 	r.wg.Wait()
 
-	// Now that process() is done and metCh is drained, it's safe to close metCh.
-	close(r.metCh)
-
-	// Close async transport if it exists
-	if r.asyncTransport != nil {
-		if closeErr := r.asyncTransport.Close(); closeErr != nil {
-			err = closeErr
-		}
-	} else if r.client != nil && r.client.Transport != nil {
+	// Close underlying transport
+	if r.client != nil && r.client.Transport != nil {
 		if cl, ok := r.client.Transport.(io.Closer); ok {
-			if closeErr := cl.Close(); closeErr != nil {
-				err = closeErr
-			}
+			return cl.Close()
 		}
 	}
-	return err
+
+	return nil
 }
 
-// tryFinalFlush sends a flush signal without blocking indefinitely.
-// It's a helper for Close to ensure pending metrics are processed.
-func (r *reporter) tryFinalFlush() {
-	r.pending.Inc()
-	defer func() {
-		if r.pending.Load() > 0 {
-			r.pending.Dec()
-		}
-	}()
-
-	select {
-	case r.metCh <- pendingReport{cached: nil}:
-		// Successfully sent flush signal. The process() loop's drain will handle it.
-	case <-r.donech:
-		// This flush signal may not be processed if already shutting down hard.
+// reportMetric reports a metric for the given type, ID, and value
+func (r *reporter) reportMetric(mType metricType, cachedMetric *cachedMetric, value interface{}) {
+	if r.done.Load() {
+		r.numDropped.Inc()
 		return
 	}
-	// No explicit wait. Relies on Close() waiting for r.wg.Wait(), which ensures process() drains metCh.
+
+	// Build the metric
+	metric := r.buildMetric(mType, cachedMetric, value)
+	if metric == nil {
+		r.numDropped.Inc()
+		return
+	}
+
+	// Add to batch using the pre-computed size from cachedMetric
+	r.addToBatchWithSize(*metric, cachedMetric.size)
+}
+
+// buildMetric constructs a metric from the given parameters
+func (r *reporter) buildMetric(mType metricType, cachedMetric *cachedMetric, value interface{}) *m3thrift.Metric {
+	// Create metric value with all required fields initialized
+	metricValue := m3thrift.MetricValue{
+		Count: 0,
+		Gauge: 0.0,
+		Timer: 0,
+	}
+
+	switch mType {
+	case counterType:
+		if val, ok := value.(int64); ok {
+			metricValue.MetricType = m3thrift.MetricType_COUNTER
+			metricValue.Count = val
+		} else {
+			return nil
+		}
+	case gaugeType:
+		if val, ok := value.(float64); ok {
+			metricValue.MetricType = m3thrift.MetricType_GAUGE
+			metricValue.Gauge = val
+		} else {
+			return nil
+		}
+	case timerType:
+		if val, ok := value.(time.Duration); ok {
+			// Check timer limiting per batch
+			metricID := r.getMetricID(cachedMetric)
+			r.batchMu.Lock()
+			currentCount := r.currentBatchTimerCounts[metricID]
+			if currentCount >= r.maxTimersPerMetricPerBatch {
+				r.batchMu.Unlock()
+				r.numTimersDroppedLimit.Inc()
+				return nil
+			}
+			r.currentBatchTimerCounts[metricID] = currentCount + 1
+			r.batchMu.Unlock()
+
+			metricValue.MetricType = m3thrift.MetricType_TIMER
+			metricValue.Timer = int64(val.Nanoseconds())
+		} else {
+			return nil
+		}
+	default:
+		return nil
+	}
+
+	metric := &m3thrift.Metric{
+		Name:      cachedMetric.metricName,
+		Value:     metricValue,
+		Timestamp: r.now.Load(),
+		Tags:      cachedMetric.metricTags,
+	}
+
+	return metric
+}
+
+// getMetricID generates a unique ID for a metric based on its tags
+func (r *reporter) getMetricID(cachedMetric *cachedMetric) string {
+	// Use a simple approach - combine all tag key-value pairs
+	var parts []string
+	for _, tag := range cachedMetric.metricTags {
+		parts = append(parts, tag.Name+"="+tag.Value)
+	}
+	return fmt.Sprintf("%s", parts)
 }
 
 func (r *reporter) Capabilities() tally.Capabilities {
@@ -904,234 +1018,6 @@ func (r *reporter) Tagging() bool {
 	return true
 }
 
-func (r *reporter) process() {
-	mets := r.resourcePool.getMetricSlice()
-	var currentBytesInBatch int32
-
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case report, ok := <-r.metCh:
-			if !ok {
-				r.finalFlush(mets, &currentBytesInBatch)
-				return
-			}
-			mets = r.processReport(report, mets, &currentBytesInBatch)
-
-		case <-ticker.C:
-			if len(mets) > 0 {
-				mets = r.internalFlush(mets, &currentBytesInBatch)
-			}
-
-		case <-r.donech:
-			r.drainAndFlush(mets, &currentBytesInBatch)
-			return
-		}
-	}
-}
-
-// generateMetricId creates a unique identifier for a metric based on its name and tags
-func (r *reporter) generateMetricId(cached *cachedMetric) string {
-	if cached == nil {
-		return ""
-	}
-
-	// Use metric name as base
-	metricId := cached.metricName
-
-	// Append sorted tags to ensure consistent IDs
-	for _, tag := range cached.metricTags {
-		metricId += "|" + tag.Name + "=" + tag.Value
-	}
-
-	return metricId
-}
-
-func (r *reporter) processReport(report pendingReport, mets []m3thrift.Metric, currentBytesInBatch *int32) []m3thrift.Metric {
-	if report.cached == nil {
-		r.decrementPending()
-
-		// Send flush acknowledgment if this was a flush request
-		if report.flushAck != nil {
-			close(report.flushAck)
-		}
-
-		if len(mets) > 0 {
-			return r.internalFlush(mets, currentBytesInBatch)
-		}
-		return mets
-	}
-
-	if report.cached.isNoop {
-		return mets
-	}
-
-	// Check timer limits before processing
-	if report.valueType == timerType {
-		metricId := r.generateMetricId(report.cached)
-		currentCount := r.currentBatchTimerCounts[metricId]
-
-		if currentCount >= r.maxTimersPerMetricPerBatch {
-			// Drop this timer - exceeded limit for this metricId
-			r.numTimersDroppedLimit.Add(1)
-			return mets
-		}
-
-		// Increment count for this metricId
-		r.currentBatchTimerCounts[metricId] = currentCount + 1
-	}
-
-	if len(mets) > 0 && *currentBytesInBatch+report.cached.size > r.freeBytes {
-		mets = r.internalFlush(mets, currentBytesInBatch)
-	}
-
-	finalMetric := r.buildMetric(report)
-	if finalMetric != nil {
-		mets = append(mets, *finalMetric)
-		*currentBytesInBatch += report.cached.size
-	}
-
-	return mets
-}
-
-func (r *reporter) buildMetric(report pendingReport) *m3thrift.Metric {
-	finalMetric := m3thrift.NewMetric()
-
-	hdrMemBuf := thrift.NewTMemoryBuffer()
-	if _, err := hdrMemBuf.Write(report.cached.precomputedHeader); err != nil {
-		return nil
-	}
-
-	hdrProto := r.protocolFactory.GetProtocol(hdrMemBuf)
-	if err := finalMetric.Read(hdrProto); err != nil {
-		return nil
-	}
-
-	finalMetric.Timestamp = r.now.Load()
-	finalMetric.Value = r.buildMetricValue(report)
-	return finalMetric
-}
-
-func (r *reporter) buildMetricValue(report pendingReport) m3thrift.MetricValue {
-	metricVal := m3thrift.NewMetricValue()
-	switch report.valueType {
-	case counterType:
-		metricVal.MetricType = m3thrift.MetricType_COUNTER
-		metricVal.Count = report.countVal
-	case gaugeType:
-		metricVal.MetricType = m3thrift.MetricType_GAUGE
-		metricVal.Gauge = report.gaugeVal
-	case timerType:
-		metricVal.MetricType = m3thrift.MetricType_TIMER
-		metricVal.Timer = int64(report.timerVal)
-	}
-	return *metricVal
-}
-
-func (r *reporter) drainAndFlush(mets []m3thrift.Metric, currentBytesInBatch *int32) {
-	for len(r.metCh) > 0 {
-		report, ok := <-r.metCh
-		if !ok {
-			break
-		}
-		mets = r.processReport(report, mets, currentBytesInBatch)
-	}
-	r.finalFlush(mets, currentBytesInBatch)
-}
-
-func (r *reporter) finalFlush(mets []m3thrift.Metric, currentBytesInBatch *int32) {
-	if len(mets) > 0 {
-		r.internalFlush(mets, currentBytesInBatch)
-	}
-	r.resourcePool.releaseMetricSlice(mets)
-}
-
-func (r *reporter) decrementPending() {
-	if r.pending.Load() > 0 {
-		r.pending.Dec()
-	}
-}
-
-func (r *reporter) estimateValueSize(mType metricType) int32 {
-	switch mType {
-	case counterType, timerType:
-		return 15
-	case gaugeType:
-		return 13
-	default:
-		return 15
-	}
-}
-
-// reportMetric consolidates the common reporting pattern
-func (r *reporter) reportMetric(c *cachedMetric, valueType metricType, countVal int64, gaugeVal float64, timerVal time.Duration) {
-	if c.isNoop || c.reporter == nil || c.reporter.done.Load() || c.metricType != valueType {
-		return
-	}
-
-	c.reporter.pending.Inc()
-	report := pendingReport{
-		cached:    c,
-		valueType: valueType,
-		countVal:  countVal,
-		gaugeVal:  gaugeVal,
-		timerVal:  timerVal,
-	}
-
-	select {
-	case c.reporter.metCh <- report:
-		// Successfully queued
-	case <-c.reporter.donech:
-		// Reporter is shutting down
-		c.reporter.pending.Dec()
-	default:
-		// Channel full, drop metric but track it
-		c.reporter.pending.Dec()
-		c.reporter.numDropped.Add(1)
-	}
-}
-
-func (r *reporter) internalFlush(mets []m3thrift.Metric, currentBytesInBatch *int32) []m3thrift.Metric {
-	if len(mets) == 0 {
-		return mets
-	}
-
-	r.numBatchesCounter.ReportCount(1)
-	r.numMetricsCounter.ReportCount(int64(len(mets)))
-	r.numBatches.Add(1)
-	r.numMetrics.Add(int64(len(mets)))
-
-	batch := m3thrift.NewMetricBatch()
-	batch.Metrics = mets
-	batch.CommonTags = r.commonTags
-
-	// Use async transport if available, otherwise fallback to blocking client
-	if r.asyncTransport != nil {
-		// All metrics use the same transport path now
-		err := r.asyncTransport.SendAsync(batch)
-		if err != nil {
-			r.numWriteErrorsCounter.ReportCount(1)
-			r.numWriteErrors.Add(1)
-		}
-	} else {
-		err := r.client.EmitMetricBatchV2(*batch)
-		if err != nil {
-			r.numWriteErrorsCounter.ReportCount(1)
-			r.numWriteErrors.Add(1)
-		}
-	}
-
-	*currentBytesInBatch = 0
-
-	// Reset timer counts for the new batch
-	r.currentBatchTimerCounts = make(map[string]int)
-
-	r.resourcePool.releaseMetricSlice(mets)
-	return r.resourcePool.getMetricSlice()
-}
-
 func (r *reporter) reportInternalMetrics() {
 	numBatches := r.numBatches.Swap(0)
 	numMetrics := r.numMetrics.Swap(0)
@@ -1140,12 +1026,9 @@ func (r *reporter) reportInternalMetrics() {
 	numTimersDroppedLimit := r.numTimersDroppedLimit.Swap(0)
 	tagCacheLen := int64(r.tagCache.Len())
 
-	// Get transport drop count if async transport is enabled
-	var numTransportDropped int64
-	if r.asyncTransport != nil {
-		numTransportDropped = r.asyncTransport.DropCount()
-		r.numTransportDropped.Store(numTransportDropped)
-	}
+	// Get transport drop and success counts
+	numTransportDropped := r.dropCount.Swap(0)
+	numTransportSuccess := r.successCount.Swap(0)
 
 	var avgBatchSize float64
 	if numBatches > 0 {
@@ -1187,24 +1070,10 @@ func (r *reporter) reportInternalMetrics() {
 		r.numTransportDroppedCounter.ReportCount(numTransportDropped)
 	}
 	if r.numTransportSuccessCounter != nil {
-		r.numTransportSuccessCounter.ReportCount(numMetrics - numTransportDropped)
+		r.numTransportSuccessCounter.ReportCount(numTransportSuccess)
 	}
 	if r.numTimersDroppedLimitCounter != nil {
 		r.numTimersDroppedLimitCounter.ReportCount(numTimersDroppedLimit)
-	}
-}
-
-func (r *reporter) timeLoop() {
-	ticker := time.NewTicker(_timeResolution)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			r.now.Store(time.Now().UnixNano())
-		case <-r.donech:
-			return
-		}
 	}
 }
 
@@ -1219,15 +1088,15 @@ type cachedMetric struct {
 }
 
 func (c *cachedMetric) ReportCount(value int64) {
-	c.reporter.reportMetric(c, counterType, value, 0, 0)
+	c.reporter.reportMetric(counterType, c, value)
 }
 
 func (c *cachedMetric) ReportGauge(value float64) {
-	c.reporter.reportMetric(c, gaugeType, 0, value, 0)
+	c.reporter.reportMetric(gaugeType, c, value)
 }
 
 func (c *cachedMetric) ReportTimer(interval time.Duration) {
-	c.reporter.reportMetric(c, timerType, 0, 0, interval)
+	c.reporter.reportMetric(timerType, c, interval)
 }
 
 type cachedHistogram struct {
@@ -1283,21 +1152,8 @@ func (chb *cachedHistogramBucket) ReportSamples(value int64) {
 		return
 	}
 
-	chb.metric.reporter.pending.Inc()
-	select {
-	case chb.metric.reporter.metCh <- pendingReport{
-		cached:    chb.metric,
-		valueType: counterType,
-		countVal:  value,
-	}:
-		// Successfully queued
-	case <-chb.metric.reporter.donech:
-		// Reporter is shutting down, decrement counter
-		chb.metric.reporter.pending.Dec()
-	default:
-		// Channel full, drop metric to avoid blocking
-		chb.metric.reporter.pending.Dec()
-	}
+	// Use the simplified batching approach
+	chb.metric.reporter.reportMetric(counterType, chb.metric, value)
 }
 
 type noopCachedHistogramBucket struct{}

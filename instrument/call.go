@@ -21,9 +21,6 @@
 package instrument
 
 import (
-	"context"
-	"time"
-
 	tally "github.com/uber-go/tally/v6"
 )
 

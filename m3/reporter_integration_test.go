@@ -21,29 +21,16 @@
 package m3
 
 import (
-	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
-	"math"
-	"net"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
-	"reflect"
-	"runtime"
-	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
-	"time"
 
-	"github.com/golang/mock/gomock"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	tally "github.com/uber-go/tally/v6"
 	m3thrift "github.com/uber-go/tally/v6/m3/thrift/v2"
 )
 

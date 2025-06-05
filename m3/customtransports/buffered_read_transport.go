@@ -22,9 +22,6 @@ package customtransport
 
 import (
 	"bytes"
-	"context"
-	"io"
-	"time"
 
 	"github.com/uber-go/tally/v6/thirdparty/github.com/apache/thrift/lib/go/thrift"
 )

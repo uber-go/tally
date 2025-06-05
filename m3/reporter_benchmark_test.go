@@ -26,9 +26,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uber-go/tally/internal/cache"
-	m3thrift "github.com/uber-go/tally/m3/thrift/v2"
-	"github.com/uber-go/tally/thirdparty/github.com/apache/thrift/lib/go/thrift"
+	"github.com/uber-go/tally/v6/internal/cache"
+	m3thrift "github.com/uber-go/tally/v6/m3/thrift/v2"
+	"github.com/uber-go/tally/v6/thirdparty/github.com/apache/thrift/lib/go/thrift"
 )
 
 // Common test data
@@ -203,22 +203,11 @@ func BenchmarkTagConversion(b *testing.B) {
 func BenchmarkMetricEmission(b *testing.B) {
 	cachedMet := benchReporter.allocateMetric("benchmark.metric", testTags, counterType)
 
-	// Start consumer to prevent channel blocking
-	go func() {
-		for range benchReporter.metCh {
-			// Consume reports
-		}
-	}()
-
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		report := pendingReport{
-			cached:    cachedMet,
-			valueType: counterType,
-			countVal:  int64(i + 1),
-		}
-		benchReporter.metCh <- report
+		// Use the simplified batching approach directly
+		cachedMet.ReportCount(int64(i + 1))
 	}
 }
 

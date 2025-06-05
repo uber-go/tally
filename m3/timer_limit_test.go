@@ -6,7 +6,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	tally "github.com/uber-go/tally/v6"
 )
 
 // TestTimerLimiting tests that the M3 reporter correctly limits timer metrics per metricId per batch

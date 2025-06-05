@@ -21,8 +21,6 @@
 package multi
 
 import (
-	"fmt"
-	"io"
 	"time"
 
 	tally "github.com/uber-go/tally/v6"
