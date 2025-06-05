@@ -94,7 +94,6 @@ const (
 	DefaultMaxTimersPerMetricPerBatch = 1000
 
 	_minMetricBucketIDTagLength = 4
-	_timeResolution             = 100 * time.Millisecond
 )
 
 var (
@@ -375,11 +374,7 @@ func NewReporter(opts Options) (Reporter, error) {
 
 	// Start time update goroutine
 	r.wg.Add(1)
-	go r.timeLoop()
-
-	// Start periodic flush goroutine
-	r.wg.Add(1)
-	go r.flushTicker()
+	go r.maintenanceLoop()
 
 	return r, nil
 }
@@ -440,6 +435,8 @@ func (r *reporter) allocateMetric(
 		estimatedValueAndTimestampSize = 13
 	}
 
+	metricID := r.getMetricID(canonicalTags)
+
 	return &cachedMetric{
 		reporter:          r,
 		metricName:        internedName,
@@ -448,6 +445,7 @@ func (r *reporter) allocateMetric(
 		size:              int32(len(precomputedData)) + estimatedValueAndTimestampSize,
 		metricType:        mType,
 		isNoop:            false,
+		metricID:          metricID,
 	}
 }
 
@@ -691,40 +689,6 @@ func (r *reporter) convertTags(tags map[string]string) []m3thrift.MetricTag {
 	return r.optimizedConvertTags(tags)
 }
 
-// timeLoop updates the now timestamp at set resolution
-func (r *reporter) timeLoop() {
-	defer r.wg.Done()
-
-	ticker := time.NewTicker(_timeResolution)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			r.now.Store(time.Now().UnixNano())
-		case <-r.donech:
-			return
-		}
-	}
-}
-
-// flushTicker periodically flushes batches
-func (r *reporter) flushTicker() {
-	defer r.wg.Done()
-
-	ticker := time.NewTicker(DefaultFlushInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			r.forceFlush()
-		case <-r.donech:
-			return
-		}
-	}
-}
-
 // asyncSender processes metric batches asynchronously
 func (r *reporter) asyncSender() {
 	defer r.wg.Done()
@@ -966,7 +930,7 @@ func (r *reporter) buildMetric(mType metricType, cachedMetric *cachedMetric, val
 	case timerType:
 		if val, ok := value.(time.Duration); ok {
 			// Check timer limiting per batch
-			metricID := r.getMetricID(cachedMetric)
+			metricID := cachedMetric.metricID
 			r.batchMu.Lock()
 			currentCount := r.currentBatchTimerCounts[metricID]
 			if currentCount >= r.maxTimersPerMetricPerBatch {
@@ -997,10 +961,10 @@ func (r *reporter) buildMetric(mType metricType, cachedMetric *cachedMetric, val
 }
 
 // getMetricID generates a unique ID for a metric based on its tags
-func (r *reporter) getMetricID(cachedMetric *cachedMetric) string {
+func (r *reporter) getMetricID(tags []m3thrift.MetricTag) string {
 	// Use a simple approach - combine all tag key-value pairs
 	var parts []string
-	for _, tag := range cachedMetric.metricTags {
+	for _, tag := range tags {
 		parts = append(parts, tag.Name+"="+tag.Value)
 	}
 	return fmt.Sprintf("%s", parts)
@@ -1085,6 +1049,7 @@ type cachedMetric struct {
 	metricTags        []m3thrift.MetricTag
 	metricType        metricType
 	isNoop            bool
+	metricID          string
 }
 
 func (c *cachedMetric) ReportCount(value int64) {
@@ -1170,4 +1135,22 @@ func ndigits(i int) int {
 		i /= 10
 	}
 	return n
+}
+
+func (r *reporter) maintenanceLoop() {
+	defer r.wg.Done()
+
+	ticker := time.NewTicker(DefaultFlushInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			r.now.Store(time.Now().UnixNano())
+			r.forceFlush()
+			r.reportInternalMetrics()
+		case <-r.donech:
+			return
+		}
+	}
 }
