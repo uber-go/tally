@@ -687,12 +687,9 @@ func (r *reporter) flushBatch() {
 		select {
 		case r.sendCh <- metrics:
 			// Sent successfully
-		case <-r.donech:
-			// Reporter is closing, don't block on sending. Drop the batch.
-			r.dropCount.Add(1)
 		default:
-			// Transport is full, and we are not shutting down. Drop the batch.
-			r.dropCount.Add(1) // Tracks transport drops (sendCh full)
+			// Transport is full. Drop the batch.
+			r.dropCount.Add(1)
 		}
 	} else {
 		go r.sendBatch(metrics)
@@ -872,6 +869,12 @@ func (r *reporter) Tagging() bool {
 // reportInternalMetrics sends metrics about the reporter's own operational state.
 // It directly calls ReportCount/ReportSamples on the pre-allocated cached metric handles.
 func (r *reporter) reportInternalMetrics() {
+	// Check if reporter is closed before trying to report internal metrics
+	// This prevents deadlocks during shutdown
+	if r.done.Load() {
+		return
+	}
+
 	numBatches := r.numBatches.Swap(0)
 	numMetricsProcessedByBatcher := r.numMetrics.Swap(0)
 	numWriteErrors := r.numWriteErrors.Swap(0)
