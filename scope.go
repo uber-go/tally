@@ -90,6 +90,7 @@ type scope struct {
 
 	histogramsSlice    []*histogram
 	histogramsSliceMux sync.Mutex
+	clearMux           sync.Mutex // Protects clearMetrics operations
 
 	// timersSlice is deliberately skipped. No dedicated mux for it for now.
 
@@ -297,7 +298,7 @@ func (s *scope) reportLoop(interval time.Duration) {
 }
 
 func (s *scope) reportLoopRun() {
-	if s.closed != 0 {
+	if atomic.LoadInt32(&s.closed) != 0 {
 		return
 	}
 
@@ -508,7 +509,12 @@ func (s *scope) subscope(prefix string, tags map[string]string) Scope {
 	if s.registry != nil && s.registry.root != nil && s.registry.root.baseReporter != nil {
 		// Check if NoCacheSubscopes option is enabled on the root scope
 		if s.noCacheSubscopes {
-			allTags := mergeRightTagsPooled(s.tags, s.copyAndSanitizeMap(tags))
+			pooledTags := mergeRightTagsPooled(s.tags, s.copyAndSanitizeMap(tags))
+			allTags := make(map[string]string, len(pooledTags))
+			for k, v := range pooledTags {
+				allTags[k] = v
+			}
+			releaseTagMap(&pooledTags)
 
 			// Create ephemeral scope with sync.Map instead of map[string]*timer
 			ephemeralScope := &scope{
@@ -675,6 +681,9 @@ func (s *scope) Close() error {
 }
 
 func (s *scope) clearMetrics() {
+	s.clearMux.Lock()
+	defer s.clearMux.Unlock()
+
 	s.counters.Range(func(key, value interface{}) bool {
 		s.counters.Delete(key)
 		return true
@@ -848,16 +857,7 @@ func mergeRightTagsPooled(tagsLeft, tagsRight map[string]string) map[string]stri
 		result[k] = v
 	}
 
-	// Create a new map to return (since we need to return the pooled one)
-	finalResult := make(map[string]string, len(result))
-	for k, v := range result {
-		finalResult[k] = v
-	}
-
-	// Return the pooled map for reuse
-	releaseTagMap(resultPtr)
-
-	return finalResult
+	return result
 }
 
 type snapshot struct {
