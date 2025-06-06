@@ -208,7 +208,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 	}
 
 	// Initialize lastActivity with current time
-	s.lastActivity = time.Now().Unix()
+	atomic.StoreInt64(&s.lastActivity, time.Now().Unix())
 
 	// NB(r): Take a copy of the tags on creation
 	// so that it cannot be modified after set.
@@ -532,7 +532,7 @@ func (s *scope) subscope(prefix string, tags map[string]string) Scope {
 			}
 
 			// Initialize lastActivity timestamp
-			ephemeralScope.lastActivity = time.Now().Unix()
+			atomic.StoreInt64(&ephemeralScope.lastActivity, time.Now().Unix())
 
 			return ephemeralScope
 		}
@@ -998,12 +998,14 @@ func (s *histogramSnapshot) Durations() map[time.Duration]int64 {
 
 // Helper method to track activity
 func (s *scope) trackActivity() {
-	s.lastActivity = time.Now().Unix()
+	atomic.StoreInt64(&s.lastActivity, time.Now().Unix())
 }
 
 // resetForPool resets the scope for reuse from the object pool
 // Phase 4: Now properly returns metric slices to pools for better memory efficiency
 func (s *scope) resetForPool() {
+	s.prefix = ""
+
 	// Clear maps but maintain capacity
 	s.counters.Range(func(key, value interface{}) bool {
 		s.counters.Delete(key)
