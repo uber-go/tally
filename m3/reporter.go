@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+// Package m3 implements a Tally reporter for M3 metrics.
 package m3
 
 import (
@@ -39,20 +40,7 @@ import (
 	"go.uber.org/atomic"
 )
 
-// pendingReport is used to send metric data to the processing goroutine.
-type pendingReport struct {
-	cached    *cachedMetric
-	valueType metricType
-	countVal  int64
-	gaugeVal  float64
-	timerVal  time.Duration
-	bucket    string
-	bucketID  string
-	// Channel for flush acknowledgment - nil for regular metrics
-	flushAck chan struct{}
-}
-
-// Protocol describes a M3 thrift transport protocol.
+// Protocol describes an M3 Thrift transport protocol.
 type Protocol int
 
 // Compact and Binary represent the compact and
@@ -63,37 +51,37 @@ const (
 )
 
 const (
-	// ServiceTag is the name of the M3 service tag.
+	// ServiceTag is the M3 service tag name.
 	ServiceTag = "service"
-	// EnvTag is the name of the M3 env tag.
+	// EnvTag is the M3 env tag name.
 	EnvTag = "env"
-	// HostTag is the name of the M3 host tag.
+	// HostTag is the M3 host tag name.
 	HostTag = "host"
-	// DefaultMaxQueueSize is the default M3 reporter queue size.
+	// DefaultMaxQueueSize is the default reporter queue size for backward compatibility,
+	// mapping to transport buffer size in the current implementation.
 	DefaultMaxQueueSize = 4096
-	// DefaultMaxPacketSize is the default M3 reporter max packet size.
+	// DefaultMaxPacketSize is the default reporter max packet size.
 	DefaultMaxPacketSize = int32(32768)
-	// DefaultHistogramBucketIDName is the default histogram bucket ID tag name
+	// DefaultHistogramBucketIDName is the default histogram bucket ID tag name.
 	DefaultHistogramBucketIDName = "bucketid"
-	// DefaultHistogramBucketName is the default histogram bucket name tag name
+	// DefaultHistogramBucketName is the default histogram bucket name tag name.
 	DefaultHistogramBucketName = "bucket"
-	// DefaultHistogramBucketTagPrecision is the default
-	// precision to use when formatting the metric tag
-	// with the histogram bucket bound values.
+	// DefaultHistogramBucketTagPrecision is the default precision for formatting
+	// histogram bucket bound values in metric tags.
 	DefaultHistogramBucketTagPrecision = uint(6)
-	// DefaultTagCacheSize is the default size for the tag cache
+	// DefaultTagCacheSize is the default size for the tag map to canonical []MetricTag cache.
 	DefaultTagCacheSize = 10000
-	// DefaultTagCacheTTLSeconds is the default TTL for tag cache entries (1 hour)
+	// DefaultTagCacheTTLSeconds is the default TTL for tag cache entries (1 hour).
 	DefaultTagCacheTTLSeconds = int64(3600)
-	// DefaultTransportBufferSize is the default buffer size for async transport
+	// DefaultTransportBufferSize is the default buffer size for the asynchronous metric transport channel.
 	DefaultTransportBufferSize = 1000
-	// DefaultFlushInterval is how often to flush transport batches
+	// DefaultFlushInterval is the interval at which to flush metric batches.
 	DefaultFlushInterval = 1 * time.Second
-	// DefaultMaxTimersPerMetricPerBatch is the maximum number of timer metrics allowed per metricId per batch (this is set to 1000 by default to avoid overwhelming the server)
-	// the timer metrics with over 1000 samples will be dropped by the server
+	// DefaultMaxTimersPerMetricPerBatch is the maximum number of timer samples allowed
+	// per metric ID per batch. Samples exceeding this limit are dropped.
 	DefaultMaxTimersPerMetricPerBatch = 1000
 
-	_minMetricBucketIDTagLength = 4
+	_minMetricBucketIDTagLength = 4 // Minimum length for bucket ID strings.
 )
 
 var (
@@ -115,7 +103,9 @@ var (
 	errAlreadyClosed = errors.New("reporter already closed")
 )
 
-// Reporter is an M3 reporter.
+// Reporter is a Tally CachedStatsReporter that sends metrics to M3.
+// Metrics are batched and emitted via UDP using
+// either Thrift compact or binary protocol.
 type Reporter interface {
 	tally.CachedStatsReporter
 	io.Closer
@@ -138,61 +128,92 @@ type AsyncTransport interface {
 	SuccessCount() int64 // Returns number of successfully sent batches
 }
 
+type pendingMetric struct {
+	cached     *cachedMetric
+	metricType metricType
+	value      interface{}
+}
+
+type batchOperationType int
+
+const (
+	opMetric batchOperationType = iota
+	opFlush
+	opShutdown
+)
+
+type batchOperation struct {
+	opType batchOperationType
+	metric *pendingMetric // Only used for opMetric
+	done   chan struct{}  // Only used for opFlush
+}
+
 // reporter is a metrics backend that reports metrics to a local or
 // remote M3 collector, metrics are batched together and emitted
 // via either thrift compact or binary protocol in batch UDP packets.
 type reporter struct {
-	bucketIDTagName string
-	bucketTagName   string
-	bucketValFmt    string
-	buckets         []tally.BucketPair
-	client          *m3thrift.M3Client
-	commonTags      []m3thrift.MetricTag
-	commonTagsBytes []byte
-	done            atomic.Bool
-	donech          chan struct{}
-	freeBytes       int32
-	now             atomic.Int64
-	overheadBytes   int32
-	resourcePool    *resourcePool
-	stringInterner  *cache.StringInterner
-	tagCache        *cache.TagCache
-	wg              sync.WaitGroup
+	bucketIDTagName string               // Tag name for histogram bucket ID.
+	bucketTagName   string               // Tag name for histogram bucket name/bound.
+	bucketValFmt    string               // Format string for histogram bucket float values.
+	buckets         []tally.BucketPair   // Pre-calculated bucket pairs for internal batch size histogram.
+	client          *m3thrift.M3Client   // M3 Thrift client.
+	commonTags      []m3thrift.MetricTag // Pre-serialized common tags for all metrics.
+	commonTagsBytes []byte               // Serialized common tags part of the batch prefix.
+	done            atomic.Bool          // Indicates if the reporter has been closed.
+	donech          chan struct{}        // Signals goroutines to stop.
+	freeBytes       int32                // Remaining bytes available in a packet after common tags and batch overhead.
+	now             atomic.Int64         // Cached current time in nanoseconds, updated periodically.
+	overheadBytes   int32                // Size of common tags and basic batch overhead in bytes.
+	// resourcePool    *resourcePool // This field was part of a previous implementation and is no longer used.
+	stringInterner *cache.StringInterner // Interner for tag keys and values to reduce allocations.
+	tagCache       *cache.TagCache       // Cache for tag map to []m3thrift.MetricTag conversion.
+	wg             sync.WaitGroup        // Coordinates goroutine shutdown.
 
 	// Simplified single-level batching
-	currentBatch      []m3thrift.Metric
-	currentBatchBytes int32
-	maxBatchBytes     int32
-	batchMu           sync.Mutex             // Protects batching state
-	sendCh            chan []m3thrift.Metric // Direct metric slice channel
-	dropCount         atomic.Int64
-	successCount      atomic.Int64
-	asyncEnabled      bool
+	currentBatch      []m3thrift.Metric      // Current batch of metrics being built.
+	currentBatchBytes int32                  // Current size of metrics in currentBatch (serialized size, excluding common tags).
+	maxBatchBytes     int32                  // Maximum size of metrics in a batch (derived from freeBytes).
+	sendCh            chan []m3thrift.Metric // Channel for sending batches to the asyncSender.
+	operationCh       chan batchOperation    // Single channel for all batch operations (metrics, flushes, shutdown).
+	dropCount         atomic.Int64           // Atomic counter for batches dropped by asyncSender (channel full).
+	inputQueueDrops   atomic.Int64           // Atomic counter for operations dropped if operationCh is full.
+	successCount      atomic.Int64           // Atomic counter for batches successfully sent by asyncSender.
+	asyncEnabled      bool                   // True if asynchronous sending via sendCh is enabled.
 
 	// Timer limiting per batch
-	currentBatchTimerCounts    map[string]int // metricId -> count of timers in current batch
-	maxTimersPerMetricPerBatch int            // configurable limit (default 1000)
+	currentBatchTimerCounts    map[string]int // metricId -> count of timer samples in current batch.
+	maxTimersPerMetricPerBatch int            // Configurable limit for timer samples per metric ID per batch.
 
-	batchSizeHistogram           tally.CachedHistogram
-	numBatches                   atomic.Int64
-	numBatchesCounter            tally.CachedCount
-	numMetrics                   atomic.Int64
-	numMetricsCounter            tally.CachedCount
-	numWriteErrors               atomic.Int64
-	numWriteErrorsCounter        tally.CachedCount
-	numTagCacheCounter           tally.CachedCount
-	numDropped                   atomic.Int64      // Track dropped metrics
-	numDroppedCounter            tally.CachedCount // Counter for dropped metrics
-	numTransportDropped          atomic.Int64      // Track transport-level drops
-	numTransportDroppedCounter   tally.CachedCount // Counter for transport drops
-	numTransportSuccess          atomic.Int64      // Track successful transmissions
-	numTransportSuccessCounter   tally.CachedCount // Counter for successful transmissions
-	numTimersDroppedLimit        atomic.Int64      // Track timers dropped due to per-metric limits
-	numTimersDroppedLimitCounter tally.CachedCount // Counter for timer limit drops
-	protocolFactory              thrift.TProtocolFactory
+	// Internal metrics reported by this library
+	batchSizeHistogram    tally.CachedHistogram // Histogram of batch sizes sent.
+	numBatches            atomic.Int64          // Total batches processed, periodically reported.
+	numBatchesCounter     tally.CachedCount
+	numMetrics            atomic.Int64 // Total metrics processed, periodically reported.
+	numMetricsCounter     tally.CachedCount
+	numWriteErrors        atomic.Int64 // Total M3 write errors, periodically reported.
+	numWriteErrorsCounter tally.CachedCount
+	numTagCacheCounter    tally.CachedCount // Current size of the tag cache, periodically reported.
+	numDropped            atomic.Int64      // Metrics dropped due to reporter being closed, periodically reported.
+
+	// Consolidated Drop Counters with reason tag
+	dropsReporterDoneCounter       tally.CachedCount // Metric for numDropped (reason="reporter_done").
+	dropsTransportFullCounter      tally.CachedCount // Metric for dropCount (reason="transport_full").
+	dropsTimerLimitExceededCounter tally.CachedCount // Metric for numTimersDroppedLimit (reason="timer_limit_exceeded").
+	dropsInputQueueFullCounter     tally.CachedCount // Metric for inputQueueDrops (reason="input_queue_full")
+
+	// Atomics for accumulating counts
+	// dropCount (defined above) accumulates batches dropped by asyncSender (channel full).
+	// numDropped (defined above) accumulates metrics dropped due to reporter being closed.
+	numTimersDroppedLimit atomic.Int64 // Accumulates timers dropped due to per-metric limits per batch.
+
+	// Transport success
+	numTransportSuccess        atomic.Int64      // Batches successfully sent by asyncSender, periodically reported.
+	numTransportSuccessCounter tally.CachedCount // Metric for numTransportSuccess.
+
+	protocolFactory thrift.TProtocolFactory // Thrift protocol factory for serialization.
 }
 
-// Options is a set of options for the M3 reporter.
+// Options configures an M3 reporter.
 type Options struct {
 	HostPorts                   []string
 	Service                     string
@@ -210,10 +231,10 @@ type Options struct {
 	TransportBufferSize   int  // Buffer size for async transport (default: DefaultTransportBufferSize)
 	DisableAsyncTransport bool // Disable async transport (default: false)
 	// Timer limiting configuration
-	MaxTimersPerMetricPerBatch int // Maximum timers per metricId per batch (default: DefaultMaxTimersPerMetricPerBatch)
+	MaxTimersPerMetricPerBatch int // Maximum timer samples per metricId per batch.
 }
 
-// NewReporter creates a new M3 reporter.
+// NewReporter creates and starts a new M3 reporter.
 func NewReporter(opts Options) (Reporter, error) {
 	if opts.MaxQueueSize <= 0 {
 		opts.MaxQueueSize = DefaultMaxQueueSize
@@ -259,27 +280,27 @@ func NewReporter(opts Options) (Reporter, error) {
 	}
 
 	client := m3thrift.NewM3ClientFactory(trans, pFactory)
-	rPool := newResourcePool(pFactory)
+	// rPool := newResourcePool(pFactory) // Part of a previous implementation, no longer used.
 
 	tagm := make(map[string]string)
 	for k, v := range opts.CommonTags {
 		tagm[k] = v
 	}
 
-	if opts.CommonTags[ServiceTag] == "" {
+	if tagm[ServiceTag] == "" {
 		if opts.Service == "" {
 			return nil, fmt.Errorf("%s common tag is required", ServiceTag)
 		}
 		tagm[ServiceTag] = opts.Service
 	}
-	if opts.CommonTags[EnvTag] == "" {
+	if tagm[EnvTag] == "" {
 		if opts.Env == "" {
 			return nil, fmt.Errorf("%s common tag is required", EnvTag)
 		}
 		tagm[EnvTag] = opts.Env
 	}
 	if opts.IncludeHost {
-		if opts.CommonTags[HostTag] == "" {
+		if tagm[HostTag] == "" {
 			hostname, hostErr := os.Hostname()
 			if hostErr != nil {
 				return nil, errors.WithMessage(hostErr, "error resolving host tag")
@@ -307,17 +328,16 @@ func NewReporter(opts Options) (Reporter, error) {
 		donech:          make(chan struct{}),
 		client:          client,
 		commonTags:      resolvedCommonTags,
-		resourcePool:    rPool,
-		stringInterner:  cache.NewStringInterner(),
+		stringInterner:  tempInterner, // Use the interner created for common tags
 		tagCache: cache.NewTagCacheWithOptions(cache.TagCacheOptions{
 			MaxSize:    DefaultTagCacheSize,
 			TTLSeconds: DefaultTagCacheTTLSeconds,
 		}),
-		protocolFactory: pFactory,
-		// Simplified batching setup - use freeBytes for proper size calculation
+		protocolFactory:            pFactory,
 		currentBatchTimerCounts:    make(map[string]int),
 		maxTimersPerMetricPerBatch: opts.MaxTimersPerMetricPerBatch,
 		asyncEnabled:               !opts.DisableAsyncTransport,
+		operationCh:                make(chan batchOperation, opts.TransportBufferSize),
 	}
 
 	// Initialize async sending if enabled
@@ -326,8 +346,6 @@ func NewReporter(opts Options) (Reporter, error) {
 		r.wg.Add(1)
 		go r.asyncSender()
 	}
-
-	r.now.Store(time.Now().UnixNano())
 
 	tempBatchForOverhead := m3thrift.NewMetricBatch()
 	tempBatchForOverhead.CommonTags = r.commonTags
@@ -367,14 +385,23 @@ func NewReporter(opts Options) (Reporter, error) {
 	r.numMetricsCounter = r.AllocateCounter("tally.internal.num-metrics", internalScopeTags)
 	r.numWriteErrorsCounter = r.AllocateCounter("tally.internal.num-write-errors", internalScopeTags)
 	r.numTagCacheCounter = r.AllocateCounter("tally.internal.num-tag-cache", internalScopeTags)
-	r.numDroppedCounter = r.AllocateCounter("tally.internal.num-dropped", internalScopeTags)
-	r.numTransportDroppedCounter = r.AllocateCounter("tally.internal.num-transport-dropped", internalScopeTags)
-	r.numTransportSuccessCounter = r.AllocateCounter("tally.internal.num-transport-success", internalScopeTags)
-	r.numTimersDroppedLimitCounter = r.AllocateCounter("tally.internal.num-timers-dropped-limit", internalScopeTags)
 
-	// Start time update goroutine
+	// Allocate consolidated drop counters
+	r.dropsReporterDoneCounter = r.AllocateCounter("tally.internal.drops", addReasonTag(internalScopeTags, "reporter_done"))
+	r.dropsTransportFullCounter = r.AllocateCounter("tally.internal.drops", addReasonTag(internalScopeTags, "transport_full"))
+	r.dropsTimerLimitExceededCounter = r.AllocateCounter("tally.internal.drops", addReasonTag(internalScopeTags, "timer_limit_exceeded"))
+	r.dropsInputQueueFullCounter = r.AllocateCounter("tally.internal.drops", addReasonTag(internalScopeTags, "input_queue_full"))
+
+	// Keep non-drop specific counters like transport success
+	r.numTransportSuccessCounter = r.AllocateCounter("tally.internal.num-transport-success", internalScopeTags)
+
+	// Start maintenance goroutine (handles now, flush, internal metrics reporting)
 	r.wg.Add(1)
 	go r.maintenanceLoop()
+
+	// Start the batch builder goroutine
+	r.wg.Add(1)
+	go r.batchBuilderLoop()
 
 	return r, nil
 }
@@ -403,8 +430,7 @@ func (r *reporter) AllocateTimer(
 	return r.allocateMetric(name, tags, timerType)
 }
 
-// allocateMetric is the new central allocation function.
-// It pre-serializes the metric name and tags.
+// allocateMetric pre-serializes metric name and tags, preparing a cachedMetric.
 func (r *reporter) allocateMetric(
 	name string,
 	tagMap map[string]string,
@@ -449,7 +475,7 @@ func (r *reporter) allocateMetric(
 	}
 }
 
-// AllocateHistogram implements tally.CachedStatsReporter.
+// AllocateHistogram pre-allocates histogram buckets as individual counters.
 func (r *reporter) AllocateHistogram(
 	name string,
 	tags map[string]string,
@@ -538,114 +564,27 @@ func (r *reporter) durationBucketString(d time.Duration) string {
 	return d.String()
 }
 
-// optimizedConvertTags provides specialized conversion with minimal allocations
-func (r *reporter) optimizedConvertTags(tags map[string]string) []m3thrift.MetricTag {
+// convertTags converts a tag map to a canonical, sorted slice of M3 MetricTags,
+// utilizing a cache for performance.
+func (r *reporter) convertTags(tags map[string]string) []m3thrift.MetricTag {
 	tagCount := len(tags)
 	if tagCount == 0 {
 		return nil
 	}
 
-	// Fast path for empty or single common tags
-	if tagCount == 1 {
-		return r.convertSingleTag(tags)
-	}
-
-	// Fast path for <= 3 tags
-	// todo: figure out the sweet spot for this just a random guess for now
-	if tagCount <= 3 {
-		return r.convertFewTags(tags)
-	}
-
-	// General case for many tags
-	return r.convertManyTags(tags)
-}
-
-// convertSingleTag handles the very common single tag case
-func (r *reporter) convertSingleTag(tags map[string]string) []m3thrift.MetricTag {
-	for k, v := range tags {
-		// Use a simplified cache key for single tags to reduce hashing overhead
-		cacheKey := uint64(len(k))<<32 | uint64(len(v)) // Simple hash based on lengths
-		if k != "" && len(k) < 64 && v != "" && len(v) < 64 {
-			// For short strings, create a fast composite key
-			var keyBuf [128]byte
-			copy(keyBuf[:], k)
-			copy(keyBuf[len(k):], v)
-			cacheKey = cache.TagMapKey(map[string]string{string(keyBuf[:len(k)+len(v)]): ""})
-		} else {
-			cacheKey = cache.TagMapKey(tags)
-		}
-
-		if cachedTags, ok := r.tagCache.Get(cacheKey); ok {
-			return cachedTags
-		}
-
-		// Create result with exact capacity
-		result := make([]m3thrift.MetricTag, 1)
-		result[0] = m3thrift.MetricTag{
-			Name:  r.stringInterner.Intern(k),
-			Value: r.stringInterner.Intern(v),
-		}
-
-		r.tagCache.Set(cacheKey, result)
-		return result
-	}
-	return nil
-}
-
-// convertFewTags handles 2-3 tags efficiently
-func (r *reporter) convertFewTags(tags map[string]string) []m3thrift.MetricTag {
+	// Key for the cache
 	key := cache.TagMapKey(tags)
 	if cachedTags, ok := r.tagCache.Get(key); ok {
 		return cachedTags
 	}
 
-	tagCount := len(tags)
-	result := make([]m3thrift.MetricTag, 0, tagCount)
-
-	// For small maps, direct iteration with sort is faster than building intermediate slice
-	type tagPair struct {
-		key, value string
-	}
-
-	// Use stack-allocated array for small tag counts
-	var pairs [3]tagPair
-	i := 0
-	for k, v := range tags {
-		pairs[i] = tagPair{k, v}
-		i++
-	}
-
-	// Simple in-place sort for 2-3 elements
-	if tagCount == 2 {
-		if pairs[0].key > pairs[1].key {
-			pairs[0], pairs[1] = pairs[1], pairs[0]
-		}
-	} else if tagCount == 3 {
-		// Simple bubble sort for 3 elements
-		if pairs[0].key > pairs[1].key {
-			pairs[0], pairs[1] = pairs[1], pairs[0]
-		}
-		if pairs[1].key > pairs[2].key {
-			pairs[1], pairs[2] = pairs[2], pairs[1]
-		}
-		if pairs[0].key > pairs[1].key {
-			pairs[0], pairs[1] = pairs[1], pairs[0]
-		}
-	}
-
-	// Convert sorted pairs to metric tags
-	for j := 0; j < tagCount; j++ {
-		result = append(result, m3thrift.MetricTag{
-			Name:  r.stringInterner.Intern(pairs[j].key),
-			Value: r.stringInterner.Intern(pairs[j].value),
-		})
-	}
-
-	r.tagCache.Set(key, result)
-	return result
+	// If it's a cache miss, convertManyTags will handle it and update the cache.
+	// convertManyTags is capable of handling all tag counts (1 to many).
+	return r.convertManyTags(tags)
 }
 
-// convertManyTags handles the general case with many tags
+// convertManyTags handles tag map to []MetricTag conversion for any number of tags.
+// It sorts tags by name and interns strings for efficiency, caching the result.
 func (r *reporter) convertManyTags(tags map[string]string) []m3thrift.MetricTag {
 	key := cache.TagMapKey(tags)
 	if cachedTags, ok := r.tagCache.Get(key); ok {
@@ -684,29 +623,16 @@ func (r *reporter) convertManyTags(tags map[string]string) []m3thrift.MetricTag 
 	return result
 }
 
-// Update the main convertTags function to use the optimized version
-func (r *reporter) convertTags(tags map[string]string) []m3thrift.MetricTag {
-	return r.optimizedConvertTags(tags)
-}
-
-// asyncSender processes metric batches asynchronously
+// asyncSender processes metric batches from sendCh for asynchronous transmission.
 func (r *reporter) asyncSender() {
 	defer r.wg.Done()
-
-	for {
-		select {
-		case metrics, ok := <-r.sendCh:
-			if !ok {
-				return
-			}
-			r.sendBatch(metrics)
-		case <-r.donech:
-			return
-		}
+	// This loop will naturally terminate when sendCh is closed by batchBuilderLoop.
+	for metrics := range r.sendCh {
+		r.sendBatch(metrics)
 	}
 }
 
-// sendBatch sends a batch of metrics
+// sendBatch transmits a single M3 MetricBatch to the configured collector.
 func (r *reporter) sendBatch(metrics []m3thrift.Metric) {
 	if len(metrics) == 0 {
 		return
@@ -728,14 +654,12 @@ func (r *reporter) sendBatch(metrics []m3thrift.Metric) {
 	// Note: Internal metrics counters will be reported via periodic reportInternalMetrics
 }
 
-// addToBatchWithSize adds a metric to the current batch with known size, flushing if necessary
+// addToBatchWithSize adds a metric with a pre-calculated size to the current batch,
+// flushing the batch if it would exceed maxBatchBytes.
 func (r *reporter) addToBatchWithSize(metric m3thrift.Metric, metricSize int32) {
-	r.batchMu.Lock()
-	defer r.batchMu.Unlock()
-
 	// Check if we need to flush before adding this metric
 	if len(r.currentBatch) > 0 && (r.currentBatchBytes+metricSize > r.maxBatchBytes) {
-		r.flushCurrentBatch()
+		r.flushBatch()
 	}
 
 	// Add metric to current batch
@@ -745,167 +669,134 @@ func (r *reporter) addToBatchWithSize(metric m3thrift.Metric, metricSize int32) 
 
 	// Flush if batch is full
 	if r.currentBatchBytes >= r.maxBatchBytes {
-		r.flushCurrentBatch()
+		r.flushBatch()
 	}
 }
 
-// addToBatch adds a metric to the current batch, flushing if necessary (fallback for when size is unknown)
-func (r *reporter) addToBatch(metric m3thrift.Metric) {
-	// Fallback to calculated size if pre-computed size not available
-	metricSize := r.calculateMetricSize(metric)
-	r.addToBatchWithSize(metric, metricSize)
-}
-
-// flushCurrentBatch sends the current batch (must be called with batchMu held)
-func (r *reporter) flushCurrentBatch() {
+// flushBatch sends the current batch and resets batching state.
+// It is called ONLY by batchBuilderLoop. It does not use batchMu.
+func (r *reporter) flushBatch() {
 	if len(r.currentBatch) == 0 {
 		return
 	}
 
-	// Copy metrics for sending
 	metrics := make([]m3thrift.Metric, len(r.currentBatch))
 	copy(metrics, r.currentBatch)
 
 	if r.asyncEnabled {
-		// Send async
 		select {
 		case r.sendCh <- metrics:
 			// Sent successfully
-		default:
-			// Channel full, drop batch
+		case <-r.donech:
+			// Reporter is closing, don't block on sending. Drop the batch.
 			r.dropCount.Add(1)
+		default:
+			// Transport is full, and we are not shutting down. Drop the batch.
+			r.dropCount.Add(1) // Tracks transport drops (sendCh full)
 		}
 	} else {
-		// Send synchronously
 		go r.sendBatch(metrics)
 	}
 
-	// Reset batch
+	// Reset batch state
 	r.currentBatch = r.currentBatch[:0]
 	r.currentBatchBytes = 0
-	r.currentBatchTimerCounts = make(map[string]int)
+	for k := range r.currentBatchTimerCounts {
+		delete(r.currentBatchTimerCounts, k)
+	}
 }
 
-// forceFlush flushes any pending metrics
+// This is a non-blocking operation.
 func (r *reporter) forceFlush() {
-	r.batchMu.Lock()
-	defer r.batchMu.Unlock()
-	r.flushCurrentBatch()
+	if r.done.Load() {
+		return
+	}
+	select {
+	case r.operationCh <- batchOperation{opType: opFlush}:
+		// Signal sent successfully.
+	default:
+		// Do nothing. If the batcher is busy, we don't block.
+		// The periodic flush or shutdown sequence will handle flushing.
+	}
 }
 
-// calculateMetricSize estimates the serialized size of a metric more accurately
-func (r *reporter) calculateMetricSize(metric m3thrift.Metric) int32 {
-	// Use proper thrift serialization to get accurate size
-	memBuf := thrift.NewTMemoryBuffer()
-	proto := r.protocolFactory.GetProtocol(memBuf)
-
-	if err := metric.Write(proto); err != nil {
-		// Fallback to estimation if serialization fails
-		return r.estimateMetricSize(metric)
-	}
-
-	return int32(memBuf.Len())
-}
-
-// estimateMetricSize provides a fallback size estimation
-func (r *reporter) estimateMetricSize(metric m3thrift.Metric) int32 {
-	// Base metric overhead
-	size := int32(50)
-
-	// Add name size
-	size += int32(len(metric.Name))
-
-	// Add value size based on type
-	if metric.Value.Count != 0 {
-		size += 8
-	}
-	if metric.Value.Gauge != 0 {
-		size += 8
-	}
-	if metric.Value.Timer != 0 {
-		size += 8
-	}
-
-	// Add tag sizes
-	for _, tag := range metric.Tags {
-		size += int32(len(tag.Name) + len(tag.Value) + 4)
-	}
-
-	// Add timestamp size
-	size += 8
-
-	return size
-}
-
-// Flush waits for any currently pending metrics to be sent.
+// Flush ensures any buffered metrics are sent. It waits for the flush to complete synchronously.
 func (r *reporter) Flush() {
 	if r.done.Load() {
 		return
 	}
 
-	// Flush current batch
-	r.forceFlush()
+	// Create a completion channel for this flush
+	done := make(chan struct{})
 
-	// Create acknowledgment channel for this flush
-	flushAck := make(chan struct{})
-
-	// Wait for flush completion - for simplified approach just wait a bit
-	time.Sleep(10 * time.Millisecond)
-	close(flushAck)
+	// Send the completion channel to the batch builder
+	select {
+	case r.operationCh <- batchOperation{opType: opFlush, done: done}:
+		// Wait for flush completion
+		<-done
+	default:
+		// Channel is full, fallback to async flush
+		r.forceFlush()
+	}
 }
 
-// Close waits for any pending metrics to be sent, and closes any
-// underlying connections used for sending metrics to M3.
+// Close flushes any pending metrics, closes channels, and releases resources.
 func (r *reporter) Close() error {
 	if !r.done.CAS(false, true) {
 		return errAlreadyClosed
 	}
 
-	// Flush any remaining metrics
-	r.forceFlush()
-
-	// Close done channel to signal shutdown
+	// 1. Signal all goroutines to stop their loops and begin shutdown.
 	close(r.donech)
 
-	// Close send channel if async enabled
-	if r.asyncEnabled {
-		close(r.sendCh)
-	}
+	// 2. Close the operation channel. Since donech is closed, no new metrics
+	// will be produced by maintenanceLoop, making this safe. batchBuilderLoop
+	// will see this closure as it drains.
+	close(r.operationCh)
 
-	// Wait for all goroutines to finish
+	// 3. Wait for all goroutines to finish.
+	// - maintenanceLoop exits because donech is closed.
+	// - batchBuilderLoop drains operationCh, flushes, closes sendCh, and exits.
+	// - asyncSender sees sendCh is closed, drains it, and exits.
 	r.wg.Wait()
 
-	// Close underlying transport
+	// 4. Close underlying transport.
 	if r.client != nil && r.client.Transport != nil {
 		if cl, ok := r.client.Transport.(io.Closer); ok {
 			return cl.Close()
 		}
 	}
-
 	return nil
 }
 
-// reportMetric reports a metric for the given type, ID, and value
+// reportMetric is the internal entry point for recording any metric type.
+// With the single-writer goroutine, this now sends the metric to operationCh.
 func (r *reporter) reportMetric(mType metricType, cachedMetric *cachedMetric, value interface{}) {
 	if r.done.Load() {
-		r.numDropped.Inc()
+		r.numDropped.Inc() // Drops due to reporter already closed
 		return
 	}
 
-	// Build the metric
-	metric := r.buildMetric(mType, cachedMetric, value)
-	if metric == nil {
-		r.numDropped.Inc()
-		return
+	pMetric := pendingMetric{
+		cached:     cachedMetric,
+		metricType: mType,
+		value:      value,
 	}
 
-	// Add to batch using the pre-computed size from cachedMetric
-	r.addToBatchWithSize(*metric, cachedMetric.size)
+	select {
+	case r.operationCh <- batchOperation{opType: opMetric, metric: &pMetric}:
+		// Metric successfully enqueued for batching
+	default:
+		// operationCh is full, drop the metric
+		r.inputQueueDrops.Inc()
+	}
 }
 
-// buildMetric constructs a metric from the given parameters
+// buildMetric constructs an M3 Metric from cached data and a reported value.
+// This function will be called by the batchBuilderLoop.
+// It also enforces timer sample limits.
 func (r *reporter) buildMetric(mType metricType, cachedMetric *cachedMetric, value interface{}) *m3thrift.Metric {
-	// Create metric value with all required fields initialized
+	// Create metric value
 	metricValue := m3thrift.MetricValue{
 		Count: 0,
 		Gauge: 0.0,
@@ -929,17 +820,13 @@ func (r *reporter) buildMetric(mType metricType, cachedMetric *cachedMetric, val
 		}
 	case timerType:
 		if val, ok := value.(time.Duration); ok {
-			// Check timer limiting per batch
 			metricID := cachedMetric.metricID
-			r.batchMu.Lock()
-			currentCount := r.currentBatchTimerCounts[metricID]
+			currentCount := r.currentBatchTimerCounts[metricID] // Accessed only by batchBuilderLoop
 			if currentCount >= r.maxTimersPerMetricPerBatch {
-				r.batchMu.Unlock()
 				r.numTimersDroppedLimit.Inc()
 				return nil
 			}
-			r.currentBatchTimerCounts[metricID] = currentCount + 1
-			r.batchMu.Unlock()
+			r.currentBatchTimerCounts[metricID] = currentCount + 1 // Accessed only by batchBuilderLoop
 
 			metricValue.MetricType = m3thrift.MetricType_TIMER
 			metricValue.Timer = int64(val.Nanoseconds())
@@ -956,11 +843,11 @@ func (r *reporter) buildMetric(mType metricType, cachedMetric *cachedMetric, val
 		Timestamp: r.now.Load(),
 		Tags:      cachedMetric.metricTags,
 	}
-
 	return metric
 }
 
-// getMetricID generates a unique ID for a metric based on its tags
+// getMetricID generates a unique string ID for a metric based on its canonical tags.
+// This ID is used for per-metric timer sample limiting.
 func (r *reporter) getMetricID(tags []m3thrift.MetricTag) string {
 	// Use a simple approach - combine all tag key-value pairs
 	var parts []string
@@ -982,44 +869,43 @@ func (r *reporter) Tagging() bool {
 	return true
 }
 
+// reportInternalMetrics sends metrics about the reporter's own operational state.
+// It directly calls ReportCount/ReportSamples on the pre-allocated cached metric handles.
 func (r *reporter) reportInternalMetrics() {
 	numBatches := r.numBatches.Swap(0)
-	numMetrics := r.numMetrics.Swap(0)
+	numMetricsProcessedByBatcher := r.numMetrics.Swap(0)
 	numWriteErrors := r.numWriteErrors.Swap(0)
-	numDropped := r.numDropped.Swap(0)
-	numTimersDroppedLimit := r.numTimersDroppedLimit.Swap(0)
 	tagCacheLen := int64(r.tagCache.Len())
 
-	// Get transport drop and success counts
-	numTransportDropped := r.dropCount.Swap(0)
-	numTransportSuccess := r.successCount.Swap(0)
-
-	var avgBatchSize float64
-	if numBatches > 0 {
-		avgBatchSize = float64(numMetrics) / float64(numBatches)
-	}
-
-	idx := sort.Search(len(r.buckets), func(i int) bool {
-		return r.buckets[i].UpperBoundValue() >= avgBatchSize
-	})
-
-	var bucketValueToReport float64
-	if idx < len(r.buckets) {
-		bucketValueToReport = r.buckets[idx].UpperBoundValue()
-	} else if len(r.buckets) > 0 {
-		bucketValueToReport = r.buckets[len(r.buckets)-1].UpperBoundValue()
-	} else {
-		bucketValueToReport = 0
-	}
+	reporterDoneDrops := r.numDropped.Swap(0)
+	transportFullDrops := r.dropCount.Swap(0)
+	timerLimitExceededDrops := r.numTimersDroppedLimit.Swap(0)
+	inputQueueFullDrops := r.inputQueueDrops.Swap(0)
+	transportSuccesses := r.successCount.Swap(0)
 
 	if r.batchSizeHistogram != nil {
+		var avgBatchSize float64
+		if numBatches > 0 {
+			avgBatchSize = float64(numMetricsProcessedByBatcher) / float64(numBatches)
+		}
+		// Corrected bucket reporting logic
+		var bucketValueToReport float64
+		if len(r.buckets) > 0 {
+			idx := sort.Search(len(r.buckets), func(i int) bool { return r.buckets[i].UpperBoundValue() >= avgBatchSize })
+			if idx < len(r.buckets) {
+				bucketValueToReport = r.buckets[idx].UpperBoundValue()
+			} else {
+				bucketValueToReport = r.buckets[len(r.buckets)-1].UpperBoundValue()
+			}
+		} // If r.buckets is empty, bucketValueToReport remains 0.0, which is acceptable.
 		r.batchSizeHistogram.ValueBucket(0, bucketValueToReport).ReportSamples(1)
 	}
+
 	if r.numBatchesCounter != nil {
 		r.numBatchesCounter.ReportCount(numBatches)
 	}
 	if r.numMetricsCounter != nil {
-		r.numMetricsCounter.ReportCount(numMetrics)
+		r.numMetricsCounter.ReportCount(numMetricsProcessedByBatcher)
 	}
 	if r.numWriteErrorsCounter != nil {
 		r.numWriteErrorsCounter.ReportCount(numWriteErrors)
@@ -1027,19 +913,106 @@ func (r *reporter) reportInternalMetrics() {
 	if r.numTagCacheCounter != nil {
 		r.numTagCacheCounter.ReportCount(tagCacheLen)
 	}
-	if r.numDroppedCounter != nil {
-		r.numDroppedCounter.ReportCount(numDropped)
+
+	if r.dropsReporterDoneCounter != nil {
+		r.dropsReporterDoneCounter.ReportCount(reporterDoneDrops)
 	}
-	if r.numTransportDroppedCounter != nil {
-		r.numTransportDroppedCounter.ReportCount(numTransportDropped)
+	if r.dropsTransportFullCounter != nil {
+		r.dropsTransportFullCounter.ReportCount(transportFullDrops)
 	}
+	if r.dropsTimerLimitExceededCounter != nil {
+		r.dropsTimerLimitExceededCounter.ReportCount(timerLimitExceededDrops)
+	}
+	if r.dropsInputQueueFullCounter != nil {
+		r.dropsInputQueueFullCounter.ReportCount(inputQueueFullDrops)
+	}
+
 	if r.numTransportSuccessCounter != nil {
-		r.numTransportSuccessCounter.ReportCount(numTransportSuccess)
-	}
-	if r.numTimersDroppedLimitCounter != nil {
-		r.numTimersDroppedLimitCounter.ReportCount(numTimersDroppedLimit)
+		r.numTransportSuccessCounter.ReportCount(transportSuccesses)
 	}
 }
+
+// maintenanceLoop periodically updates the reporter's notion of the current time,
+// reports internal metrics, and signals for a time-based batch flush.
+func (r *reporter) maintenanceLoop() {
+	defer r.wg.Done()
+	ticker := time.NewTicker(DefaultFlushInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			r.now.Store(time.Now().UnixNano())
+			r.forceFlush()            // Flush any pending user metrics first
+			r.reportInternalMetrics() // Report internal metrics (will be in separate batch)
+			r.forceFlush()            // Flush internal metrics
+		case <-r.donech:
+			return
+		}
+	}
+}
+
+// batchBuilderLoop is the single writer goroutine responsible for building and flushing batches.
+func (r *reporter) batchBuilderLoop() {
+	defer r.wg.Done()
+	// As the sole producer for sendCh, batchBuilderLoop is responsible for closing it.
+	if r.asyncEnabled {
+		defer close(r.sendCh)
+	}
+
+	for {
+		select {
+		case op, ok := <-r.operationCh:
+			if !ok { // operationCh has been closed
+				r.flushBatch() // Final flush
+				return
+			}
+
+			switch op.opType {
+			case opMetric:
+				metric := r.buildMetric(op.metric.metricType, op.metric.cached, op.metric.value)
+				if metric == nil {
+					continue
+				}
+
+				metricSize := op.metric.cached.size
+				if len(r.currentBatch) > 0 && (r.currentBatchBytes+metricSize > r.maxBatchBytes) {
+					r.flushBatch()
+				}
+
+				r.currentBatch = append(r.currentBatch, *metric)
+				r.currentBatchBytes += metricSize
+				r.numMetrics.Inc()
+
+				if r.currentBatchBytes >= r.maxBatchBytes {
+					r.flushBatch()
+				}
+
+			case opFlush:
+				r.flushBatch()
+				// Signal completion if this was a synchronous flush
+				if op.done != nil {
+					close(op.done)
+				}
+
+			}
+		}
+	}
+}
+
+// addReasonTag is a helper to create a new tag map with an added 'reason' tag.
+func addReasonTag(baseTags map[string]string, reason string) map[string]string {
+	newTags := make(map[string]string, len(baseTags)+1)
+	for k, v := range baseTags {
+		newTags[k] = v
+	}
+	newTags["reason"] = reason
+	return newTags
+}
+
+//
+// Definitions restored from previous state
+//
 
 type cachedMetric struct {
 	reporter          *reporter
@@ -1116,8 +1089,6 @@ func (chb *cachedHistogramBucket) ReportSamples(value int64) {
 	if chb.metric == nil || chb.metric.isNoop || chb.metric.reporter == nil || chb.metric.reporter.done.Load() {
 		return
 	}
-
-	// Use the simplified batching approach
 	chb.metric.reporter.reportMetric(counterType, chb.metric, value)
 }
 
@@ -1135,22 +1106,4 @@ func ndigits(i int) int {
 		i /= 10
 	}
 	return n
-}
-
-func (r *reporter) maintenanceLoop() {
-	defer r.wg.Done()
-
-	ticker := time.NewTicker(DefaultFlushInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			r.now.Store(time.Now().UnixNano())
-			r.forceFlush()
-			r.reportInternalMetrics()
-		case <-r.donech:
-			return
-		}
-	}
 }
