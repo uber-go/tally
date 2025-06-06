@@ -50,7 +50,7 @@ func TestHighCardinalityEndToEnd(t *testing.T) {
 		t.Skip("Skipping end-to-end integration test in short mode")
 	}
 
-	// Test parameters - Designed to trigger scope eviction at 500 scopes
+	// Test parameters - Optimized for CI environments (including ARM)
 	const (
 		numCounters             = 1000 // Each creates unique scope
 		numGauges               = 1000 // Each creates unique scope
@@ -81,6 +81,11 @@ func TestHighCardinalityEndToEnd(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer r.Close()
+
+	// Enable optimized flush for better performance with high cardinality
+	// Race condition in worker pool has been fixed
+	tally.EnableOptimizedFlush()
+	defer tally.DisableOptimizedFlush() // Reset after test
 
 	// Create tally scope with eviction enabled to trigger the bug scenario
 	scope, closer := tally.NewRootScope(tally.ScopeOptions{
@@ -422,27 +427,13 @@ func TestHighCardinalityEndToEnd(t *testing.T) {
 	// SENT vs RECEIVED VALIDATION
 	t.Logf("=== SENT vs RECEIVED VALIDATION ===")
 
-	// Get sent counts
+	// Get sent counts and check for missing metrics while holding lock
 	sentMutex.Lock()
 	sentCountersCount := len(sentCounterIds)
 	sentGaugesCount := len(sentGaugeIds)
 	sentTimersCount := len(sentTimerIds)
 	sentHistogramsCount := len(sentHistogramIds)
-	sentMutex.Unlock()
 
-	// Compare sent vs received for test metrics
-	receivedCountersCount := len(receivedCounterIds)
-	receivedGaugesCount := len(receivedGaugeIds)
-	receivedTimersCount := len(receivedTimerIds)
-	receivedHistogramsCount := len(receivedHistogramIds)
-
-	t.Logf("Counters - Sent unique: %d, Received unique: %d", sentCountersCount, receivedCountersCount)
-	t.Logf("Gauges - Sent unique: %d, Received unique: %d", sentGaugesCount, receivedGaugesCount)
-	t.Logf("Timers - Sent unique: %d, Received unique: %d", sentTimersCount, receivedTimersCount)
-	t.Logf("Histograms - Sent unique: %d, Received unique: %d", sentHistogramsCount, receivedHistogramsCount)
-
-	// Check for missing metrics
-	sentMutex.Lock()
 	missingCounters := 0
 	for sentId := range sentCounterIds {
 		if !receivedCounterIds[sentId] {
@@ -462,6 +453,17 @@ func TestHighCardinalityEndToEnd(t *testing.T) {
 		}
 	}
 	sentMutex.Unlock()
+
+	// Compare sent vs received for test metrics
+	receivedCountersCount := len(receivedCounterIds)
+	receivedGaugesCount := len(receivedGaugeIds)
+	receivedTimersCount := len(receivedTimerIds)
+	receivedHistogramsCount := len(receivedHistogramIds)
+
+	t.Logf("Counters - Sent unique: %d, Received unique: %d", sentCountersCount, receivedCountersCount)
+	t.Logf("Gauges - Sent unique: %d, Received unique: %d", sentGaugesCount, receivedGaugesCount)
+	t.Logf("Timers - Sent unique: %d, Received unique: %d", sentTimersCount, receivedTimersCount)
+	t.Logf("Histograms - Sent unique: %d, Received unique: %d", sentHistogramsCount, receivedHistogramsCount)
 
 	t.Logf("Missing metrics - Counters: %d, Gauges: %d, Timers: %d",
 		missingCounters, missingGauges, missingTimers)

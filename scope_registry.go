@@ -540,11 +540,31 @@ func (r *scopeRegistry) parallelProcess(processFn func(*scope)) {
 // workerPoolProcess processes scopes using a fixed-size worker pool
 func (r *scopeRegistry) workerPoolProcess(processFn func(*scope), numWorkers int) {
 	var wg sync.WaitGroup
-	workChan := make(chan workItem, r.estimateTotalScopes())
-	closedScopesChan := make(chan workItem, cap(workChan))
 
-	r.fillWorkQueue(workChan)
+	// Collect all work items synchronously to avoid races
+	var allWorkItems []workItem
+	for _, subscopeBucket := range r.subscopes {
+		scopesToProcess := r.copyBucketScopes(subscopeBucket)
+		for i, s := range scopesToProcess.scopes {
+			allWorkItems = append(allWorkItems, workItem{
+				scope:    s,
+				scopeKey: scopesToProcess.keys[i],
+				bucket:   subscopeBucket,
+			})
+		}
+	}
 
+	// Create channels with exact capacity
+	workChan := make(chan workItem, len(allWorkItems))
+	closedScopesChan := make(chan workItem, len(allWorkItems))
+
+	// Fill work queue synchronously
+	for _, item := range allWorkItems {
+		workChan <- item
+	}
+	close(workChan)
+
+	// Start worker goroutines
 	wg.Add(numWorkers)
 	for i := 0; i < numWorkers; i++ {
 		go func() {
@@ -558,11 +578,13 @@ func (r *scopeRegistry) workerPoolProcess(processFn func(*scope), numWorkers int
 		}()
 	}
 
+	// Wait for workers and close the closed scopes channel
 	go func() {
 		wg.Wait()
 		close(closedScopesChan)
 	}()
 
+	// Handle closed scopes
 	for item := range closedScopesChan {
 		item.bucket.mu.Lock()
 		delete(item.bucket.s, item.scopeKey)
@@ -627,20 +649,6 @@ func (r *scopeRegistry) estimateTotalScopes() int {
 		bucket.mu.RUnlock()
 	}
 	return total
-}
-
-func (r *scopeRegistry) fillWorkQueue(workChan chan<- workItem) {
-	for _, subscopeBucket := range r.subscopes {
-		scopesToProcess := r.copyBucketScopes(subscopeBucket)
-		for i, s := range scopesToProcess.scopes {
-			workChan <- workItem{
-				scope:    s,
-				scopeKey: scopesToProcess.keys[i],
-				bucket:   subscopeBucket,
-			}
-		}
-	}
-	close(workChan)
 }
 
 func (r *scopeRegistry) handleClosedScopes(closedScopes <-chan scopeClosureInfo) {
