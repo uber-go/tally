@@ -152,22 +152,22 @@ type batchOperation struct {
 // remote M3 collector, metrics are batched together and emitted
 // via either thrift compact or binary protocol in batch UDP packets.
 type reporter struct {
-	bucketIDTagName string               // Tag name for histogram bucket ID.
-	bucketTagName   string               // Tag name for histogram bucket name/bound.
-	bucketValFmt    string               // Format string for histogram bucket float values.
-	buckets         []tally.BucketPair   // Pre-calculated bucket pairs for internal batch size histogram.
-	client          *m3thrift.M3Client   // M3 Thrift client.
-	commonTags      []m3thrift.MetricTag // Pre-serialized common tags for all metrics.
-	commonTagsBytes []byte               // Serialized common tags part of the batch prefix.
-	done            atomic.Bool          // Indicates if the reporter has been closed.
-	donech          chan struct{}        // Signals goroutines to stop.
-	freeBytes       int32                // Remaining bytes available in a packet after common tags and batch overhead.
-	now             atomic.Int64         // Cached current time in nanoseconds, updated periodically.
-	overheadBytes   int32                // Size of common tags and basic batch overhead in bytes.
-	// resourcePool    *resourcePool // This field was part of a previous implementation and is no longer used.
-	stringInterner *cache.StringInterner // Interner for tag keys and values to reduce allocations.
-	tagCache       *cache.TagCache       // Cache for tag map to []m3thrift.MetricTag conversion.
-	wg             sync.WaitGroup        // Coordinates goroutine shutdown.
+	bucketIDTagName string                // Tag name for histogram bucket ID.
+	bucketTagName   string                // Tag name for histogram bucket name/bound.
+	bucketValFmt    string                // Format string for histogram bucket float values.
+	buckets         []tally.BucketPair    // Pre-calculated bucket pairs for internal batch size histogram.
+	client          *m3thrift.M3Client    // M3 Thrift client.
+	commonTags      []m3thrift.MetricTag  // Pre-serialized common tags for all metrics.
+	commonTagsBytes []byte                // Serialized common tags part of the batch prefix.
+	done            atomic.Bool           // Indicates if the reporter has been closed.
+	donech          chan struct{}         // Signals goroutines to stop.
+	freeBytes       int32                 // Remaining bytes available in a packet after common tags and batch overhead.
+	now             atomic.Int64          // Cached current time in nanoseconds, updated periodically.
+	overheadBytes   int32                 // Size of common tags and basic batch overhead in bytes.
+	resourcePool    *resourcePool         // Resource pool for thrift objects to prevent allocation pressure
+	stringInterner  *cache.StringInterner // Interner for tag keys and values to reduce allocations.
+	tagCache        *cache.TagCache       // Cache for tag map to []m3thrift.MetricTag conversion.
+	wg              sync.WaitGroup        // Coordinates goroutine shutdown.
 
 	// Simplified single-level batching
 	currentBatch      []m3thrift.Metric      // Current batch of metrics being built.
@@ -280,7 +280,7 @@ func NewReporter(opts Options) (Reporter, error) {
 	}
 
 	client := m3thrift.NewM3ClientFactory(trans, pFactory)
-	// rPool := newResourcePool(pFactory) // Part of a previous implementation, no longer used.
+	resourcePool := newResourcePool(pFactory) // Resource pool to prevent thrift allocation pressure
 
 	tagm := make(map[string]string)
 	for k, v := range opts.CommonTags {
@@ -328,6 +328,7 @@ func NewReporter(opts Options) (Reporter, error) {
 		donech:          make(chan struct{}),
 		client:          client,
 		commonTags:      resolvedCommonTags,
+		resourcePool:    resourcePool,
 		stringInterner:  tempInterner, // Use the interner created for common tags
 		tagCache: cache.NewTagCacheWithOptions(cache.TagCacheOptions{
 			MaxSize:    DefaultTagCacheSize,
@@ -443,8 +444,12 @@ func (r *reporter) allocateMetric(
 	headerMetric.Name = internedName
 	headerMetric.Tags = canonicalTags
 
-	memBuf := thrift.NewTMemoryBuffer()
-	proto := r.protocolFactory.GetProtocol(memBuf)
+	// Use pooled buffer and protocol to prevent allocation pressure
+	buf := r.resourcePool.getOutputBatch()
+	defer r.resourcePool.releaseOutputBatch(buf)
+
+	memBuf := thrift.NewTMemoryBufferLen(len(*buf))
+	proto := r.resourcePool.getProto(memBuf)
 
 	var precomputedData []byte
 	var estimatedValueAndTimestampSize int32
