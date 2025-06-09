@@ -342,6 +342,12 @@ func (s *scope) Counter(name string) Counter {
 		s.countersSliceMux.Lock()
 		s.countersSlice = append(s.countersSlice, c)
 		s.countersSliceMux.Unlock()
+
+		// Atomically increment the counter cardinality for the registry.
+		if s.registry != nil {
+			s.registry.numCounters.Inc()
+		}
+
 		return c
 	}
 
@@ -383,6 +389,12 @@ func (s *scope) Gauge(name string) Gauge {
 		s.gaugesSliceMux.Lock()
 		s.gaugesSlice = append(s.gaugesSlice, g)
 		s.gaugesSliceMux.Unlock()
+
+		// Atomically increment the gauge cardinality for the registry.
+		if s.registry != nil {
+			s.registry.numGauges.Inc()
+		}
+
 		return g
 	}
 
@@ -480,6 +492,12 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 		s.histogramsSliceMux.Lock()
 		s.histogramsSlice = append(s.histogramsSlice, h)
 		s.histogramsSliceMux.Unlock()
+
+		// Atomically increment the histogram cardinality for the registry.
+		if s.registry != nil {
+			s.registry.numHistograms.Inc()
+		}
+
 		return h
 	}
 
@@ -684,13 +702,17 @@ func (s *scope) clearMetrics() {
 	s.clearMux.Lock()
 	defer s.clearMux.Unlock()
 
+	var numCounters, numGauges, numHistograms int64
+
 	s.counters.Range(func(key, value interface{}) bool {
+		numCounters++
 		s.counters.Delete(key)
 		return true
 	})
 	s.countersSlice = nil
 
 	s.gauges.Range(func(key, value interface{}) bool {
+		numGauges++
 		s.gauges.Delete(key)
 		return true
 	})
@@ -702,10 +724,18 @@ func (s *scope) clearMetrics() {
 	})
 
 	s.histograms.Range(func(key, value interface{}) bool {
+		numHistograms++
 		s.histograms.Delete(key)
 		return true
 	})
 	s.histogramsSlice = nil
+
+	// Atomically decrement the cardinality counters in the registry.
+	if s.registry != nil {
+		s.registry.numCounters.Sub(numCounters)
+		s.registry.numGauges.Sub(numGauges)
+		s.registry.numHistograms.Sub(numHistograms)
+	}
 }
 
 // NB(prateek): We assume concatenation of sanitized inputs is

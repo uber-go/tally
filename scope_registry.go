@@ -374,6 +374,12 @@ type scopeRegistry struct {
 	cachedGaugeCardinalityGauge       CachedGauge
 	cachedHistogramCardinalityGauge   CachedGauge
 	cachedScopeCardinalityGauge       CachedGauge
+
+	// Cardinality counters updated atomically to avoid iteration.
+	numCounters   uberatomic.Int64
+	numGauges     uberatomic.Int64
+	numHistograms uberatomic.Int64
+
 	// High cardinality adaptive behavior
 	adaptiveMode   int32 // Used as atomic boolean
 	totalSubScopes int64 // Used with atomic operations
@@ -970,39 +976,13 @@ func (r *scopeRegistry) reportInternalMetrics() {
 		return
 	}
 
-	var counters, gauges, histograms int64
-	var rootCounters, rootGauges, rootHistograms int64
-	scopes := 1 // Account for root scope.
-	r.ForEachScope(
-		func(ss *scope) {
-			ss.countersSliceMux.Lock()
-			counterSliceLen := int64(len(ss.countersSlice))
-			ss.countersSliceMux.Unlock()
+	// Read metric counts atomically. This is fast and avoids the race condition
+	// caused by iterating over scopes while they might be cleared.
+	counters := r.numCounters.Load()
+	gauges := r.numGauges.Load()
+	histograms := r.numHistograms.Load()
+	scopes := atomic.LoadInt64(&r.totalSubScopes) + 1 // +1 for the root scope.
 
-			ss.gaugesSliceMux.Lock()
-			gaugeSliceLen := int64(len(ss.gaugesSlice))
-			ss.gaugesSliceMux.Unlock()
-
-			ss.histogramsSliceMux.Lock()
-			histogramSliceLen := int64(len(ss.histogramsSlice))
-			ss.histogramsSliceMux.Unlock()
-
-			if ss.root { // Root scope is referenced across all buckets.
-				rootCounters = counterSliceLen
-				rootGauges = gaugeSliceLen
-				rootHistograms = histogramSliceLen
-				return
-			}
-			counters += counterSliceLen
-			gauges += gaugeSliceLen
-			histograms += histogramSliceLen
-			scopes++
-		},
-	)
-
-	counters += rootCounters
-	gauges += rootGauges
-	histograms += rootHistograms
 	if r.root.reporter != nil {
 		r.root.reporter.ReportGauge(r.sanitizedCounterCardinalityName, r.cardinalityMetricsTags, float64(counters))
 		r.root.reporter.ReportGauge(r.sanitizedGaugeCardinalityName, r.cardinalityMetricsTags, float64(gauges))
