@@ -400,10 +400,6 @@ type scopeRegistry struct {
 	poolSize        int64             // Current size of the pool, accessed atomically
 	poolHits        int64             // Track hits for stats
 	poolMisses      int64             // Track misses for stats
-
-	// String interner for scope keys
-	stringInterner map[string]string
-	internerMutex  sync.Mutex
 }
 
 type scopeBucket struct {
@@ -435,7 +431,6 @@ func newScopeRegistryWithShardCount(
 			"host":     DefaultTagRedactValue,
 			"instance": DefaultTagRedactValue,
 		},
-		stringInterner: make(map[string]string),
 	}
 
 	// Initialize the adaptiveMode and totalSubScopes fields
@@ -459,21 +454,6 @@ func newScopeRegistryWithShardCount(
 		r.cachedScopeCardinalityGauge = r.root.cachedReporter.AllocateGauge(r.sanitizedScopeCardinalityName, r.cardinalityMetricsTags)
 	}
 	return r
-}
-
-// internString returns a canonical representation of the given string,
-// reducing allocations if the same string value appears multiple times.
-func (r *scopeRegistry) internString(s string) string {
-	r.internerMutex.Lock()
-	defer r.internerMutex.Unlock()
-
-	interned, ok := r.stringInterner[s]
-	if ok {
-		return interned
-	}
-
-	r.stringInterner[s] = s
-	return s
 }
 
 // Report processes all scopes and reports their metrics to the provided reporter
@@ -723,7 +703,7 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 
 		// For ephemeral scopes, we'll generate a key for pooling purposes only
 		rawEphemeralKey := poolKey(prefix, allTags)
-		ephemeralKey := r.internString(rawEphemeralKey)
+		ephemeralKey := rawEphemeralKey
 
 		// Get a scope from the pool if available
 		if r.scopePool.New != nil {
@@ -886,7 +866,7 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		// This is safe as the scope key is stored only to help avoid
 		// recreating the sanitized key if we don't have to.
 		keyCandidate := string(keyBytes)
-		sanitizedKey = r.internString(keyCandidate)
+		sanitizedKey = keyCandidate
 	}
 
 	// A sanitized key is a new heap allocation, so it's safe to put

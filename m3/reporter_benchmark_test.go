@@ -101,7 +101,7 @@ func BenchmarkThriftSerialization(b *testing.B) {
 	})
 
 	b.Run("OnDemandSerialization", func(b *testing.B) {
-		internedName := benchReporter.stringInterner.Intern("benchmark.metric")
+		internedName := "benchmark.metric"
 		canonicalTags := benchReporter.convertTags(testTags)
 
 		b.ReportAllocs()
@@ -158,29 +158,6 @@ func BenchmarkFullSerializationCycle(b *testing.B) {
 		finalMetric.Write(outProto)
 		_ = outBuf.Bytes()
 	}
-}
-
-func BenchmarkStringInterning(b *testing.B) {
-	metricNames := []string{
-		"benchmark.metric.1", "benchmark.metric.2", "benchmark.metric.3",
-		"benchmark.metric.4", "benchmark.metric.5", "benchmark.metric.6",
-	}
-
-	b.Run("WithInterning", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			name := metricNames[i%len(metricNames)]
-			_ = benchReporter.stringInterner.Intern(name)
-		}
-	})
-
-	b.Run("WithoutInterning", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			name := metricNames[i%len(metricNames)]
-			_ = name
-		}
-	})
 }
 
 func BenchmarkTagConversion(b *testing.B) {

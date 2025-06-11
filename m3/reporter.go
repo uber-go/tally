@@ -152,22 +152,21 @@ type batchOperation struct {
 // remote M3 collector, metrics are batched together and emitted
 // via either thrift compact or binary protocol in batch UDP packets.
 type reporter struct {
-	bucketIDTagName string                // Tag name for histogram bucket ID.
-	bucketTagName   string                // Tag name for histogram bucket name/bound.
-	bucketValFmt    string                // Format string for histogram bucket float values.
-	buckets         []tally.BucketPair    // Pre-calculated bucket pairs for internal batch size histogram.
-	client          *m3thrift.M3Client    // M3 Thrift client.
-	commonTags      []m3thrift.MetricTag  // Pre-serialized common tags for all metrics.
-	commonTagsBytes []byte                // Serialized common tags part of the batch prefix.
-	done            atomic.Bool           // Indicates if the reporter has been closed.
-	donech          chan struct{}         // Signals goroutines to stop.
-	freeBytes       int32                 // Remaining bytes available in a packet after common tags and batch overhead.
-	now             atomic.Int64          // Cached current time in nanoseconds, updated periodically.
-	overheadBytes   int32                 // Size of common tags and basic batch overhead in bytes.
-	resourcePool    *resourcePool         // Resource pool for thrift objects to prevent allocation pressure
-	stringInterner  *cache.StringInterner // Interner for tag keys and values to reduce allocations.
-	tagCache        *cache.TagCache       // Cache for tag map to []m3thrift.MetricTag conversion.
-	wg              sync.WaitGroup        // Coordinates goroutine shutdown.
+	bucketIDTagName string               // Tag name for histogram bucket ID.
+	bucketTagName   string               // Tag name for histogram bucket name/bound.
+	bucketValFmt    string               // Format string for histogram bucket float values.
+	buckets         []tally.BucketPair   // Pre-calculated bucket pairs for internal batch size histogram.
+	client          *m3thrift.M3Client   // M3 Thrift client.
+	commonTags      []m3thrift.MetricTag // Pre-serialized common tags for all metrics.
+	commonTagsBytes []byte               // Serialized common tags part of the batch prefix.
+	done            atomic.Bool          // Indicates if the reporter has been closed.
+	donech          chan struct{}        // Signals goroutines to stop.
+	freeBytes       int32                // Remaining bytes available in a packet after common tags and batch overhead.
+	now             atomic.Int64         // Cached current time in nanoseconds, updated periodically.
+	overheadBytes   int32                // Size of common tags and basic batch overhead in bytes.
+	resourcePool    *resourcePool        // Resource pool for thrift objects to prevent allocation pressure
+	tagCache        *cache.TagCache      // Cache for tag map to []m3thrift.MetricTag conversion.
+	wg              sync.WaitGroup       // Coordinates goroutine shutdown.
 
 	// Simplified single-level batching
 	currentBatch      []m3thrift.Metric      // Current batch of metrics being built.
@@ -309,12 +308,11 @@ func NewReporter(opts Options) (Reporter, error) {
 		}
 	}
 
-	tempInterner := cache.NewStringInterner()
 	resolvedCommonTags := make([]m3thrift.MetricTag, 0, len(tagm))
 	for k, v := range tagm {
 		resolvedCommonTags = append(resolvedCommonTags, m3thrift.MetricTag{
-			Name:  tempInterner.Intern(k),
-			Value: tempInterner.Intern(v),
+			Name:  k,
+			Value: v,
 		})
 	}
 	sort.Slice(resolvedCommonTags, func(i, j int) bool {
@@ -329,7 +327,6 @@ func NewReporter(opts Options) (Reporter, error) {
 		client:          client,
 		commonTags:      resolvedCommonTags,
 		resourcePool:    resourcePool,
-		stringInterner:  tempInterner, // Use the interner created for common tags
 		tagCache: cache.NewTagCacheWithOptions(cache.TagCacheOptions{
 			MaxSize:    DefaultTagCacheSize,
 			TTLSeconds: DefaultTagCacheTTLSeconds,
@@ -437,7 +434,7 @@ func (r *reporter) allocateMetric(
 	tagMap map[string]string,
 	mType metricType,
 ) *cachedMetric {
-	internedName := r.stringInterner.Intern(name)
+	internedName := name
 	canonicalTags := r.convertTags(tagMap)
 
 	headerMetric := m3thrift.NewMetric()
@@ -486,7 +483,7 @@ func (r *reporter) AllocateHistogram(
 	tags map[string]string,
 	bucketsTally tally.Buckets,
 ) tally.CachedHistogram {
-	internedBaseName := r.stringInterner.Intern(name)
+	internedBaseName := name
 	baseTags := r.convertTags(tags)
 
 	_, isDuration := bucketsTally.(tally.DurationBuckets)
@@ -513,14 +510,14 @@ func (r *reporter) AllocateHistogram(
 			bucketSpecificTagMap[baseTag.Name] = baseTag.Value
 		}
 
-		bucketIDStr := r.stringInterner.Intern(fmt.Sprintf(bucketIDFmt, i))
+		bucketIDStr := fmt.Sprintf(bucketIDFmt, i)
 		bucketSpecificTagMap[r.bucketIDTagName] = bucketIDStr
 
 		var boundValueStr string
 		if isDuration {
-			boundValueStr = r.stringInterner.Intern(r.durationBucketString(prevDuration) + "-" + r.durationBucketString(pair.UpperBoundDuration()))
+			boundValueStr = r.durationBucketString(prevDuration) + "-" + r.durationBucketString(pair.UpperBoundDuration())
 		} else {
-			boundValueStr = r.stringInterner.Intern(r.valueBucketString(prevValue) + "-" + r.valueBucketString(pair.UpperBoundValue()))
+			boundValueStr = r.valueBucketString(prevValue) + "-" + r.valueBucketString(pair.UpperBoundValue())
 		}
 		bucketSpecificTagMap[r.bucketTagName] = boundValueStr
 
@@ -619,8 +616,8 @@ func (r *reporter) convertManyTags(tags map[string]string) []m3thrift.MetricTag 
 	// Build result in sorted order
 	for _, k := range keys {
 		result = append(result, m3thrift.MetricTag{
-			Name:  r.stringInterner.Intern(k),
-			Value: r.stringInterner.Intern(tags[k]),
+			Name:  k,
+			Value: tags[k],
 		})
 	}
 
