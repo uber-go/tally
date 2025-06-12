@@ -395,7 +395,6 @@ type scopeRegistry struct {
 	pooledScopes    map[string]*scope // Scopes available for reuse, indexed by key
 	pooledScopesMtx sync.Mutex        // Mutex for pool access
 	pooledScopesLRU []string          // Keys in LRU order (oldest first)
-	poolAccessTimes map[string]int64  // Last access time for each key
 	maxPoolSize     int               // Maximum number of scopes in the pool
 	poolSize        int64             // Current size of the pool, accessed atomically
 	poolHits        int64             // Track hits for stats
@@ -727,9 +726,6 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 					}
 				}
 
-				// Delete from access times
-				delete(r.poolAccessTimes, ephemeralKey)
-
 				// Update pool size
 				atomic.AddInt64(&r.poolSize, -1)
 
@@ -1030,7 +1026,6 @@ func newScopeRegistryWithEvictionOptions(
 	if enableScopePooling {
 		r.pooledScopes = make(map[string]*scope)
 		r.pooledScopesLRU = make([]string, 0, 128)
-		r.poolAccessTimes = make(map[string]int64)
 		r.maxPoolSize = 1000 // Cap the pool size to prevent memory issues
 		r.scopePool = sync.Pool{
 			New: func() interface{} {
@@ -1240,80 +1235,50 @@ func poolKey(prefix string, tags map[string]string) string {
 
 // cleanupScopePool removes stale scopes from the pool that haven't been used recently
 func (r *scopeRegistry) cleanupScopePool() {
-	// Only run cleanup periodically
+	// Run this check at most once per minute to avoid extra work.
 	now := time.Now().Unix()
 	lastCheck := atomic.LoadInt64(&r.lastEvictionCheck)
-	if now-lastCheck < 60 { // Only check once per minute
+	if now-lastCheck < 60 {
 		return
 	}
-
-	// Update last check time
 	atomic.StoreInt64(&r.lastEvictionCheck, now)
 
 	r.pooledScopesMtx.Lock()
 	defer r.pooledScopesMtx.Unlock()
 
-	// Nothing to clean if pool is empty
 	if len(r.pooledScopes) == 0 {
 		return
 	}
 
-	// Calculate pooling statistics
+	// Dynamically tune the maxPoolSize based on hit-rate to keep memory usage reasonable.
 	hitRate := float64(0)
-	if totalOps := atomic.LoadInt64(&r.poolHits) + atomic.LoadInt64(&r.poolMisses); totalOps > 0 {
-		hitRate = float64(atomic.LoadInt64(&r.poolHits)) / float64(totalOps) * 100
+	if total := atomic.LoadInt64(&r.poolHits) + atomic.LoadInt64(&r.poolMisses); total > 0 {
+		hitRate = float64(atomic.LoadInt64(&r.poolHits)) / float64(total) * 100.0
 	}
-
-	// Adjust pool size based on hit rate
-	// If hit rate is high, we can increase max pool size
 	if hitRate > 90 && r.maxPoolSize < 2000 {
 		r.maxPoolSize += 100
 	} else if hitRate < 30 && r.maxPoolSize > 100 {
 		r.maxPoolSize -= 50
 	}
 
-	// Remove old scopes - anything not accessed in the last 5 minutes
-	cutoffTime := now - 300 // 5 minutes
-	var removedCount int
+	// Evict oldest scopes (front of the LRU slice) until we are within the size limit.
+	for len(r.pooledScopes) > r.maxPoolSize && len(r.pooledScopesLRU) > 0 {
+		key := r.pooledScopesLRU[0]
+		r.pooledScopesLRU = r.pooledScopesLRU[1:]
 
-	// Start with the oldest scopes first (front of LRU list)
-	i := 0
-	for i < len(r.pooledScopesLRU) {
-		key := r.pooledScopesLRU[i]
-		accessTime, exists := r.poolAccessTimes[key]
+		scope := r.pooledScopes[key]
+		delete(r.pooledScopes, key)
 
-		// If too old or we need to reduce pool size
-		if !exists || accessTime < cutoffTime || len(r.pooledScopes) > r.maxPoolSize {
-			// Get the scope and remove it from all tracking
-			scope := r.pooledScopes[key]
-			delete(r.pooledScopes, key)
-			delete(r.poolAccessTimes, key)
-
-			// Remove from LRU by swapping with last element and truncating
-			lastIdx := len(r.pooledScopesLRU) - 1
-			if i < lastIdx {
-				r.pooledScopesLRU[i] = r.pooledScopesLRU[lastIdx]
-			}
-			r.pooledScopesLRU = r.pooledScopesLRU[:lastIdx]
-
-			// Return to generic pool
-			if scope != nil {
-				r.scopePool.Put(scope)
-			}
-
-			// Update counter
-			removedCount++
-		} else {
-			// Only increment if we didn't remove this entry
-			i++
+		if scope != nil {
+			r.scopePool.Put(scope)
 		}
 	}
 
-	// Update pool size counter
+	// Update pool size metric.
 	atomic.StoreInt64(&r.poolSize, int64(len(r.pooledScopes)))
 
-	// Reset hit/miss counters periodically
-	if now%3600 == 0 { // Reset every hour
+	// Reset hit/miss counters once an hour to keep the numbers bounded.
+	if now%3600 == 0 {
 		atomic.StoreInt64(&r.poolHits, 0)
 		atomic.StoreInt64(&r.poolMisses, 0)
 	}

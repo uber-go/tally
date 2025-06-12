@@ -527,12 +527,7 @@ func (s *scope) subscope(prefix string, tags map[string]string) Scope {
 	if s.registry != nil && s.registry.root != nil && s.registry.root.baseReporter != nil {
 		// Check if NoCacheSubscopes option is enabled on the root scope
 		if s.noCacheSubscopes {
-			pooledTags := mergeRightTagsPooled(s.tags, s.copyAndSanitizeMap(tags))
-			allTags := make(map[string]string, len(pooledTags))
-			for k, v := range pooledTags {
-				allTags[k] = v
-			}
-			releaseTagMap(&pooledTags)
+			allTags := mergeRightTagsPooled(s.tags, s.copyAndSanitizeMap(tags))
 
 			// Create ephemeral scope with sync.Map instead of map[string]*timer
 			ephemeralScope := &scope{
@@ -676,9 +671,6 @@ func (s *scope) Close() error {
 
 					// Add to LRU list
 					s.registry.pooledScopesLRU = append(s.registry.pooledScopesLRU, s.ephemeralKey)
-
-					// Track access time
-					s.registry.poolAccessTimes[s.ephemeralKey] = time.Now().Unix()
 
 					// Update size counter
 					atomic.AddInt64(&s.registry.poolSize, 1)
@@ -874,10 +866,10 @@ func mergeRightTagsPooled(tagsLeft, tagsRight map[string]string) map[string]stri
 		return tagsRight
 	}
 
-	// Get pooled map from registry functions (we'll access them via scope registry)
-	estimatedSize := len(tagsLeft) + len(tagsRight)
-	resultPtr := getTagMap(estimatedSize)
-	result := *resultPtr
+	// Create a regular map instead of using pooled maps to avoid race conditions
+	// The pooled map approach was causing issues because the map was being
+	// released incorrectly in some code paths
+	result := make(map[string]string, len(tagsLeft)+len(tagsRight))
 
 	// Copy values
 	for k, v := range tagsLeft {
