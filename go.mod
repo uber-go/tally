@@ -1,6 +1,6 @@
 module github.com/uber-go/tally/v6
 
-go 1.24.4
+go 1.23.10
 
 require (
 	github.com/cactus/go-statsd-client/v5 v5.0.0
