@@ -529,26 +529,83 @@ func BenchmarkSnapshotMapPooling(b *testing.B) {
 
 // Benchmark the overall subscope creation with all Phase 4 optimizations
 func BenchmarkSubscopeCreationPhase4(b *testing.B) {
-	root, closer := NewRootScope(ScopeOptions{
-		Prefix:   "test",
-		Reporter: NullStatsReporter,
+	// Test subscope creation with all optimizations enabled
+	root := newRootScope(ScopeOptions{
+		Prefix: "test",
+		Tags: map[string]string{
+			"service": "benchmark",
+		},
 	}, 0)
-	defer closer.Close()
 
 	tags := map[string]string{
-		"service":     "test-service",
-		"environment": "production",
-		"region":      "us-west-2",
+		"endpoint": "/api/v1/test",
+		"method":   "GET",
+		"status":   "200",
 	}
 
-	b.Run("SubscopeCreationWithPhase4", func(b *testing.B) {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			subscope := root.Tagged(tags).SubScope("metrics")
-			// Create some metrics to trigger slice allocations
-			subscope.Counter("requests").Inc(1)
-			subscope.Gauge("cpu_usage").Update(50.0)
-			subscope.Histogram("latency", MustMakeLinearValueBuckets(0, 10, 10)).RecordValue(5.0)
-		}
-	})
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Create subscope with tags
+		_ = root.Tagged(tags)
+	}
+}
+
+func TestOptimizedFlushReportsAllMetrics(t *testing.T) {
+	// Enable optimized flush
+	EnableOptimizedFlush()
+	defer DisableOptimizedFlush()
+
+	// Create a test reporter to capture reported metrics
+	r := newTestStatsReporter()
+
+	// Create root scope with the test reporter
+	root, closer := NewRootScope(ScopeOptions{
+		Reporter:               r,
+		OmitCardinalityMetrics: true, // Disable cardinality metrics to simplify test
+	}, 50*time.Millisecond)
+	defer closer.Close()
+
+	// Create multiple scopes and metrics to simulate high cardinality
+	numScopes := 10
+	for i := 0; i < numScopes; i++ {
+		scope := root.Tagged(map[string]string{"instance": fmt.Sprintf("instance-%d", i)})
+
+		// Create different types of metrics with unique names
+		r.cg.Add(1)
+		counter := scope.Counter(fmt.Sprintf("test_counter_%d", i))
+		counter.Inc(int64(i + 1))
+
+		r.gg.Add(1)
+		gauge := scope.Gauge(fmt.Sprintf("test_gauge_%d", i))
+		gauge.Update(float64(i * 2))
+
+		r.tg.Add(1)
+		timer := scope.Timer(fmt.Sprintf("test_timer_%d", i))
+		timer.Record(time.Duration(i) * time.Millisecond)
+
+		r.hg.Add(1)
+		histogram := scope.Histogram(fmt.Sprintf("test_histogram_%d", i), ValueBuckets{1, 5, 10})
+		histogram.RecordValue(float64(i))
+	}
+
+	// Wait for all metrics to be reported
+	r.WaitAll()
+
+	// Verify all metric types were reported by checking the maps
+	counters := r.getCounters()
+	gauges := r.getGauges()
+	timers := r.getTimers()
+	histograms := r.getHistograms()
+
+	// Verify all metric types were reported
+	assert.True(t, len(counters) > 0, "Counters should be reported with optimized flush")
+	assert.True(t, len(gauges) > 0, "Gauges should be reported with optimized flush")
+	assert.True(t, len(timers) > 0, "Timers should be reported with optimized flush")
+	assert.True(t, len(histograms) > 0, "Histograms should be reported with optimized flush")
+
+	// Verify we have the expected number of metrics (should be numScopes each)
+	assert.Equal(t, numScopes, len(counters), "Should have %d counter metrics", numScopes)
+	assert.Equal(t, numScopes, len(gauges), "Should have %d gauge metrics", numScopes)
+	assert.Equal(t, numScopes, len(timers), "Should have %d timer metrics", numScopes)
+	assert.Equal(t, numScopes, len(histograms), "Should have %d histogram metrics", numScopes)
 }

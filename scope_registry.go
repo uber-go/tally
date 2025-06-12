@@ -526,39 +526,24 @@ func (r *scopeRegistry) parallelProcess(processFn func(*scope)) {
 func (r *scopeRegistry) workerPoolProcess(processFn func(*scope), numWorkers int) {
 	var wg sync.WaitGroup
 
-	// Collect all work items synchronously to avoid races
-	var allWorkItems []workItem
+	// Create a channel to distribute buckets to workers
+	bucketChan := make(chan *scopeBucket, len(r.subscopes))
+
+	// Send all buckets to the channel
 	for _, subscopeBucket := range r.subscopes {
-		scopesToProcess := r.copyBucketScopes(subscopeBucket)
-		for i, s := range scopesToProcess.scopes {
-			allWorkItems = append(allWorkItems, workItem{
-				scope:    s,
-				scopeKey: scopesToProcess.keys[i],
-				bucket:   subscopeBucket,
-			})
-		}
+		bucketChan <- subscopeBucket
 	}
+	close(bucketChan)
 
-	// Create channels with exact capacity
-	workChan := make(chan workItem, len(allWorkItems))
-	closedScopesChan := make(chan workItem, len(allWorkItems))
+	closedScopes := make(chan scopeClosureInfo, 100)
 
-	// Fill work queue synchronously
-	for _, item := range allWorkItems {
-		workChan <- item
-	}
-	close(workChan)
-
-	// Start worker goroutines
+	// Start worker goroutines that process entire buckets
 	wg.Add(numWorkers)
 	for i := 0; i < numWorkers; i++ {
 		go func() {
 			defer wg.Done()
-			for item := range workChan {
-				processFn(item.scope)
-				if atomic.LoadInt32(&item.scope.closed) != 0 {
-					closedScopesChan <- item
-				}
+			for bucket := range bucketChan {
+				r.processBucketWithClosures(bucket, processFn, closedScopes)
 			}
 		}()
 	}
@@ -566,16 +551,11 @@ func (r *scopeRegistry) workerPoolProcess(processFn func(*scope), numWorkers int
 	// Wait for workers and close the closed scopes channel
 	go func() {
 		wg.Wait()
-		close(closedScopesChan)
+		close(closedScopes)
 	}()
 
 	// Handle closed scopes
-	for item := range closedScopesChan {
-		item.bucket.mu.Lock()
-		delete(item.bucket.s, item.scopeKey)
-		item.bucket.mu.Unlock()
-		item.scope.clearMetrics()
-	}
+	r.handleClosedScopes(closedScopes)
 }
 
 // Helper methods for scope processing
