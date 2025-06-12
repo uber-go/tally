@@ -26,21 +26,21 @@ import (
 )
 
 func BenchmarkCounterInc(b *testing.B) {
-	c := &counter{}
+	c := newCounter("foo", nil)
 	for n := 0; n < b.N; n++ {
 		c.Inc(1)
 	}
 }
 
 func BenchmarkReportCounterNoData(b *testing.B) {
-	c := &counter{}
+	c := newCounter("foo", nil)
 	for n := 0; n < b.N; n++ {
 		c.report("foo", nil, NullStatsReporter)
 	}
 }
 
 func BenchmarkReportCounterWithData(b *testing.B) {
-	c := &counter{}
+	c := newCounter("foo", nil)
 	for n := 0; n < b.N; n++ {
 		c.Inc(1)
 		c.report("foo", nil, NullStatsReporter)
@@ -48,21 +48,21 @@ func BenchmarkReportCounterWithData(b *testing.B) {
 }
 
 func BenchmarkGaugeSet(b *testing.B) {
-	g := &gauge{}
+	g := newGauge("bar", nil)
 	for n := 0; n < b.N; n++ {
 		g.Update(42)
 	}
 }
 
 func BenchmarkReportGaugeNoData(b *testing.B) {
-	g := &gauge{}
+	g := newGauge("bar", nil)
 	for n := 0; n < b.N; n++ {
 		g.report("bar", nil, NullStatsReporter)
 	}
 }
 
 func BenchmarkReportGaugeWithData(b *testing.B) {
-	g := &gauge{}
+	g := newGauge("bar", nil)
 	for n := 0; n < b.N; n++ {
 		g.Update(73)
 		g.report("bar", nil, NullStatsReporter)

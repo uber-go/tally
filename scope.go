@@ -238,47 +238,99 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 
 // report dumps all aggregated stats into the reporter. Should be called automatically by the root scope periodically.
 func (s *scope) report(r StatsReporter) {
-	s.counters.Range(func(key, value interface{}) bool {
-		c := value.(*counter)
-		c.report(s.fullyQualifiedName(key.(string)), s.tags, r)
-		return true
-	})
+	// Copy slices under their individual mutexes to avoid race with clearMetrics
+	s.countersSliceMux.Lock()
+	var countersCopy []*counter
+	if s.countersSlice != nil {
+		countersCopy = make([]*counter, len(s.countersSlice))
+		copy(countersCopy, s.countersSlice)
+	}
+	s.countersSliceMux.Unlock()
 
-	s.gauges.Range(func(key, value interface{}) bool {
-		g := value.(*gauge)
-		g.report(s.fullyQualifiedName(key.(string)), s.tags, r)
-		return true
-	})
+	s.gaugesSliceMux.Lock()
+	var gaugesCopy []*gauge
+	if s.gaugesSlice != nil {
+		gaugesCopy = make([]*gauge, len(s.gaugesSlice))
+		copy(gaugesCopy, s.gaugesSlice)
+	}
+	s.gaugesSliceMux.Unlock()
+
+	s.histogramsSliceMux.Lock()
+	var histogramsCopy []*histogram
+	if s.histogramsSlice != nil {
+		histogramsCopy = make([]*histogram, len(s.histogramsSlice))
+		copy(histogramsCopy, s.histogramsSlice)
+	}
+	s.histogramsSliceMux.Unlock()
+
+	// Now iterate over the copies without holding any mutexes
+	for _, c := range countersCopy {
+		if c != nil {
+			c.report(c.name, s.tags, r)
+		}
+	}
+
+	for _, g := range gaugesCopy {
+		if g != nil {
+			g.report(g.name, s.tags, r)
+		}
+	}
 
 	// We do nothing for timers here because timers report directly to the StatsReporter without buffering
 
-	s.histograms.Range(func(key, value interface{}) bool {
-		h := value.(*histogram)
-		h.report(s.fullyQualifiedName(key.(string)), s.tags, r)
-		return true
-	})
+	for _, h := range histogramsCopy {
+		if h != nil {
+			h.report(h.name, s.tags, r)
+		}
+	}
 }
 
 func (s *scope) cachedReport() {
-	s.counters.Range(func(key, value interface{}) bool {
-		c := value.(*counter)
-		c.cachedReport()
-		return true
-	})
+	// Copy slices under their individual mutexes to avoid race with clearMetrics
+	s.countersSliceMux.Lock()
+	var countersCopy []*counter
+	if s.countersSlice != nil {
+		countersCopy = make([]*counter, len(s.countersSlice))
+		copy(countersCopy, s.countersSlice)
+	}
+	s.countersSliceMux.Unlock()
 
-	s.gauges.Range(func(key, value interface{}) bool {
-		g := value.(*gauge)
-		g.cachedReport()
-		return true
-	})
+	s.gaugesSliceMux.Lock()
+	var gaugesCopy []*gauge
+	if s.gaugesSlice != nil {
+		gaugesCopy = make([]*gauge, len(s.gaugesSlice))
+		copy(gaugesCopy, s.gaugesSlice)
+	}
+	s.gaugesSliceMux.Unlock()
+
+	s.histogramsSliceMux.Lock()
+	var histogramsCopy []*histogram
+	if s.histogramsSlice != nil {
+		histogramsCopy = make([]*histogram, len(s.histogramsSlice))
+		copy(histogramsCopy, s.histogramsSlice)
+	}
+	s.histogramsSliceMux.Unlock()
+
+	// Now iterate over the copies without holding any mutexes
+	for _, c := range countersCopy {
+		if c != nil {
+			c.cachedReport()
+		}
+	}
+
+	for _, g := range gaugesCopy {
+		if g != nil {
+			g.cachedReport()
+		}
+	}
 
 	// We do nothing for timers here because timers report directly to the StatsReporter without buffering
 
-	s.histograms.Range(func(key, value interface{}) bool {
-		h := value.(*histogram)
-		h.cachedReport()
-		return true
-	})
+	for _, h := range histogramsCopy {
+		if h != nil {
+			h.cachedReport()
+		}
+	}
 }
 
 // reportLoop is used by the root scope for periodic reporting
@@ -333,7 +385,7 @@ func (s *scope) Counter(name string) Counter {
 		)
 	}
 
-	c := newCounter(cachedCounter)
+	c := newCounter(s.fullyQualifiedName(name), cachedCounter)
 
 	// Attempt to store it, or get the existing one if another goroutine created it first
 	actual, loaded := s.counters.LoadOrStore(name, c)
@@ -380,7 +432,7 @@ func (s *scope) Gauge(name string) Gauge {
 		)
 	}
 
-	g := newGauge(cachedGauge)
+	g := newGauge(s.fullyQualifiedName(name), cachedGauge)
 
 	// Attempt to store it, or get the existing one if another goroutine created it first
 	actual, loaded := s.gauges.LoadOrStore(name, g)
@@ -691,9 +743,6 @@ func (s *scope) Close() error {
 }
 
 func (s *scope) clearMetrics() {
-	s.clearMux.Lock()
-	defer s.clearMux.Unlock()
-
 	var numCounters, numGauges, numHistograms int64
 
 	s.counters.Range(func(key, value interface{}) bool {
@@ -701,14 +750,20 @@ func (s *scope) clearMetrics() {
 		s.counters.Delete(key)
 		return true
 	})
+
+	s.countersSliceMux.Lock()
 	s.countersSlice = nil
+	s.countersSliceMux.Unlock()
 
 	s.gauges.Range(func(key, value interface{}) bool {
 		numGauges++
 		s.gauges.Delete(key)
 		return true
 	})
+
+	s.gaugesSliceMux.Lock()
 	s.gaugesSlice = nil
+	s.gaugesSliceMux.Unlock()
 
 	s.timers.Range(func(key, value interface{}) bool {
 		s.timers.Delete(key)
@@ -720,7 +775,10 @@ func (s *scope) clearMetrics() {
 		s.histograms.Delete(key)
 		return true
 	})
+
+	s.histogramsSliceMux.Lock()
 	s.histogramsSlice = nil
+	s.histogramsSliceMux.Unlock()
 
 	// Atomically decrement the cardinality counters in the registry.
 	if s.registry != nil {
