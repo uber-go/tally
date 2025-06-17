@@ -60,14 +60,13 @@ func (c *capabilities) Tagging() bool {
 }
 
 type counter struct {
-	name        string
 	prev        int64
 	curr        int64
 	cachedCount CachedCount
 }
 
-func newCounter(name string, cachedCount CachedCount) *counter {
-	return &counter{name: name, cachedCount: cachedCount}
+func newCounter(cachedCount CachedCount) *counter {
+	return &counter{cachedCount: cachedCount}
 }
 
 func (c *counter) Inc(v int64) {
@@ -108,14 +107,13 @@ func (c *counter) snapshot() int64 {
 }
 
 type gauge struct {
-	name        string
 	updated     uint64
 	curr        uint64
 	cachedGauge CachedGauge
 }
 
-func newGauge(name string, cachedGauge CachedGauge) *gauge {
-	return &gauge{name: name, cachedGauge: cachedGauge}
+func newGauge(cachedGauge CachedGauge) *gauge {
+	return &gauge{cachedGauge: cachedGauge}
 }
 
 func (g *gauge) Update(v float64) {
@@ -299,7 +297,7 @@ func newHistogram(
 	}
 
 	for i := range h.samples {
-		h.samples[i].counter = newCounter(name, nil)
+		h.samples[i].counter = newCounter(nil)
 
 		if cachedHistogram != nil {
 			switch htype {
