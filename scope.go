@@ -240,13 +240,15 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 func (s *scope) report(r StatsReporter) {
 	s.counters.Range(func(key, value interface{}) bool {
 		c := value.(*counter)
-		c.report(s.fullyQualifiedName(key.(string)), s.tags, r)
+		internedName := BuildInternedMetricName(s.prefix, s.separator, key.(string))
+		c.report(internedName, s.tags, r)
 		return true
 	})
 
 	s.gauges.Range(func(key, value interface{}) bool {
 		g := value.(*gauge)
-		g.report(s.fullyQualifiedName(key.(string)), s.tags, r)
+		internedName := BuildInternedMetricName(s.prefix, s.separator, key.(string))
+		g.report(internedName, s.tags, r)
 		return true
 	})
 
@@ -254,7 +256,8 @@ func (s *scope) report(r StatsReporter) {
 
 	s.histograms.Range(func(key, value interface{}) bool {
 		h := value.(*histogram)
-		h.report(s.fullyQualifiedName(key.(string)), s.tags, r)
+		internedName := BuildInternedMetricName(s.prefix, s.separator, key.(string))
+		h.report(internedName, s.tags, r)
 		return true
 	})
 }
@@ -327,8 +330,9 @@ func (s *scope) Counter(name string) Counter {
 	// Create a new counter
 	var cachedCounter CachedCount
 	if s.cachedReporter != nil {
+		fullyQualifiedName := BuildInternedMetricName(s.prefix, s.separator, name)
 		cachedCounter = s.cachedReporter.AllocateCounter(
-			s.fullyQualifiedName(name),
+			fullyQualifiedName,
 			s.tags,
 		)
 	}
@@ -375,8 +379,9 @@ func (s *scope) Gauge(name string) Gauge {
 	// Create a new gauge
 	var cachedGauge CachedGauge
 	if s.cachedReporter != nil {
+		fullyQualifiedName := BuildInternedMetricName(s.prefix, s.separator, name)
 		cachedGauge = s.cachedReporter.AllocateGauge(
-			s.fullyQualifiedName(name), s.tags,
+			fullyQualifiedName, s.tags,
 		)
 	}
 
@@ -421,14 +426,15 @@ func (s *scope) Timer(name string) Timer {
 
 	// Create a new timer
 	var cachedTimer CachedTimer
+	fullyQualifiedName := BuildInternedMetricName(s.prefix, s.separator, name)
 	if s.cachedReporter != nil {
 		cachedTimer = s.cachedReporter.AllocateTimer(
-			s.fullyQualifiedName(name), s.tags,
+			fullyQualifiedName, s.tags,
 		)
 	}
 
 	t := newTimer(
-		s.fullyQualifiedName(name), s.tags, s.reporter, cachedTimer,
+		fullyQualifiedName, s.tags, s.reporter, cachedTimer,
 	)
 
 	// Attempt to store it, or get the existing one if another goroutine created it first
@@ -470,15 +476,16 @@ func (s *scope) Histogram(name string, b Buckets) Histogram {
 	}
 
 	var cachedHistogram CachedHistogram
+	fullyQualifiedName := BuildInternedMetricName(s.prefix, s.separator, name)
 	if s.cachedReporter != nil {
 		cachedHistogram = s.cachedReporter.AllocateHistogram(
-			s.fullyQualifiedName(name), s.tags, b,
+			fullyQualifiedName, s.tags, b,
 		)
 	}
 
 	h := newHistogram(
 		htype,
-		s.fullyQualifiedName(name),
+		fullyQualifiedName,
 		s.tags,
 		s.reporter,
 		s.bucketCache.Get(htype, b),
@@ -553,6 +560,9 @@ func (s *scope) subscope(prefix string, tags map[string]string) Scope {
 			// Initialize lastActivity timestamp
 			atomic.StoreInt64(&ephemeralScope.lastActivity, time.Now().Unix())
 
+			// Register the scope for reporting
+			s.registry.ephemeralScopes.Store(ephemeralScope, true)
+
 			return ephemeralScope
 		}
 	}
@@ -579,7 +589,7 @@ func (s *scope) Snapshot() Snapshot {
 
 		ss.counters.Range(func(key, value interface{}) bool {
 			c := value.(*counter)
-			name := ss.fullyQualifiedName(key.(string))
+			name := BuildInternedMetricName(ss.prefix, ss.separator, key.(string))
 			id := KeyForPrefixedStringMap(name, tags)
 			snap.counters[id] = &counterSnapshot{
 				name:  name,
@@ -590,7 +600,7 @@ func (s *scope) Snapshot() Snapshot {
 		})
 		ss.gauges.Range(func(key, value interface{}) bool {
 			g := value.(*gauge)
-			name := ss.fullyQualifiedName(key.(string))
+			name := BuildInternedMetricName(ss.prefix, ss.separator, key.(string))
 			id := KeyForPrefixedStringMap(name, tags)
 			snap.gauges[id] = &gaugeSnapshot{
 				name:  name,
@@ -601,7 +611,7 @@ func (s *scope) Snapshot() Snapshot {
 		})
 		ss.timers.Range(func(key, value interface{}) bool {
 			t := value.(*timer)
-			name := ss.fullyQualifiedName(key.(string))
+			name := BuildInternedMetricName(ss.prefix, ss.separator, key.(string))
 			id := KeyForPrefixedStringMap(name, tags)
 			snap.timers[id] = &timerSnapshot{
 				name:   name,
@@ -612,7 +622,7 @@ func (s *scope) Snapshot() Snapshot {
 		})
 		ss.histograms.Range(func(key, value interface{}) bool {
 			h := value.(*histogram)
-			name := ss.fullyQualifiedName(key.(string))
+			name := BuildInternedMetricName(ss.prefix, ss.separator, key.(string))
 			id := KeyForPrefixedStringMap(name, tags)
 			snap.histograms[id] = &histogramSnapshot{
 				name:      name,
@@ -642,6 +652,13 @@ func (s *scope) Close() error {
 	// Wait for the reportLoop goroutine to finish, but only if we started one
 	if s.hasReportLoop {
 		s.wg.Wait()
+	}
+
+	// If this is an ephemeral scope, unregister it from the tracking
+	if !s.root && (s.noCacheSubscopes || (s.registry != nil && atomic.LoadInt32(&s.registry.adaptiveMode) == 1)) {
+		if s.registry != nil {
+			s.registry.ephemeralScopes.Delete(s)
+		}
 	}
 
 	if s.root {

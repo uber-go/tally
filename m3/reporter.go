@@ -434,7 +434,7 @@ func (r *reporter) allocateMetric(
 	tagMap map[string]string,
 	mType metricType,
 ) *cachedMetric {
-	internedName := name
+	internedName := tally.InternString(name)
 	canonicalTags := r.convertTags(tagMap)
 
 	headerMetric := m3thrift.NewMetric()
@@ -483,7 +483,7 @@ func (r *reporter) AllocateHistogram(
 	tags map[string]string,
 	bucketsTally tally.Buckets,
 ) tally.CachedHistogram {
-	internedBaseName := name
+	internedBaseName := tally.InternString(name)
 	baseTags := r.convertTags(tags)
 
 	_, isDuration := bucketsTally.(tally.DurationBuckets)
@@ -511,7 +511,7 @@ func (r *reporter) AllocateHistogram(
 		}
 
 		bucketIDStr := fmt.Sprintf(bucketIDFmt, i)
-		bucketSpecificTagMap[r.bucketIDTagName] = bucketIDStr
+		bucketSpecificTagMap[r.bucketIDTagName] = tally.InternString(bucketIDStr)
 
 		var boundValueStr string
 		if isDuration {
@@ -519,7 +519,7 @@ func (r *reporter) AllocateHistogram(
 		} else {
 			boundValueStr = r.valueBucketString(prevValue) + "-" + r.valueBucketString(pair.UpperBoundValue())
 		}
-		bucketSpecificTagMap[r.bucketTagName] = boundValueStr
+		bucketSpecificTagMap[r.bucketTagName] = tally.InternString(boundValueStr)
 
 		cm := r.allocateMetric(internedBaseName, bucketSpecificTagMap, counterType)
 
@@ -545,23 +545,23 @@ func (r *reporter) AllocateHistogram(
 
 func (r *reporter) valueBucketString(v float64) string {
 	if v == math.MaxFloat64 {
-		return "infinity"
+		return tally.InternString("infinity")
 	}
 	if v == -math.MaxFloat64 {
-		return "-infinity"
+		return tally.InternString("-infinity")
 	}
 	return fmt.Sprintf(r.bucketValFmt, v)
 }
 
 func (r *reporter) durationBucketString(d time.Duration) string {
 	if d == 0 {
-		return "0"
+		return tally.InternString("0")
 	}
 	if d == time.Duration(math.MaxInt64) {
-		return "infinity"
+		return tally.InternString("infinity")
 	}
 	if d == time.Duration(math.MinInt64) {
-		return "-infinity"
+		return tally.InternString("-infinity")
 	}
 	return d.String()
 }
@@ -616,8 +616,8 @@ func (r *reporter) convertManyTags(tags map[string]string) []m3thrift.MetricTag 
 	// Build result in sorted order
 	for _, k := range keys {
 		result = append(result, m3thrift.MetricTag{
-			Name:  k,
-			Value: tags[k],
+			Name:  tally.BuildInternedTagKey(k),
+			Value: tally.BuildInternedTagValue(tags[k]),
 		})
 	}
 
@@ -848,12 +848,18 @@ func (r *reporter) buildMetric(mType metricType, cachedMetric *cachedMetric, val
 // getMetricID generates a unique string ID for a metric based on its canonical tags.
 // This ID is used for per-metric timer sample limiting.
 func (r *reporter) getMetricID(tags []m3thrift.MetricTag) string {
-	// Use a simple approach - combine all tag key-value pairs
-	var parts []string
-	for _, tag := range tags {
-		parts = append(parts, tag.Name+"="+tag.Value)
+	if len(tags) == 0 {
+		return ""
 	}
-	return fmt.Sprintf("%s", parts)
+
+	// Convert tags to a map for the interning function
+	tagMap := make(map[string]string, len(tags))
+	for _, tag := range tags {
+		tagMap[tag.Name] = tag.Value
+	}
+
+	// Use the interned metric ID builder from the tally package
+	return tally.BuildInternedMetricID("", tagMap)
 }
 
 func (r *reporter) Capabilities() tally.Capabilities {

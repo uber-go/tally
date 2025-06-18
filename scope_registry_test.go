@@ -31,7 +31,7 @@ import (
 )
 
 var (
-	numInternalMetrics = 4
+	numInternalMetrics = 6 // 4 cardinality gauges + 2 string interning gauges
 )
 
 func TestVerifyCachedTaggedScopesAlloc(t *testing.T) {
@@ -89,7 +89,11 @@ func TestVerifyOmitCardinalityMetricsTags(t *testing.T) {
 		"instance":            "global",
 	}
 
-	r.gg.Add(numInternalMetrics)
+	// Account for all internal metrics:
+	// - numInternalMetrics = 6 total internal gauge metrics (4 cardinality + 2 string interning)
+	// - 3 string interning counters (string_intern_hits, string_intern_misses, string_intern_evictions)
+	r.gg.Add(numInternalMetrics) // 6 total internal gauges
+	r.cg.Add(3)                  // 3 string interning counters
 	closer.Close()
 	r.WaitAll()
 
@@ -110,7 +114,7 @@ func TestNewTestStatsReporterOneScope(t *testing.T) {
 	numFakeHistograms := 11
 	numScopes := 1
 
-	r.cg.Add(numFakeCounters)
+	r.cg.Add(numFakeCounters + 3) // +3 for string interning counters
 	for c := 1; c <= numFakeCounters; c++ {
 		s.Counter(fmt.Sprintf("counter-%d", c)).Inc(int64(c))
 	}
@@ -159,7 +163,7 @@ func TestNewTestStatsReporterManyScopes(t *testing.T) {
 	wantCounters, wantGauges, wantHistograms, wantScopes := 3, 2, 1, 2
 
 	s := root.(*scope)
-	r.cg.Add(2)
+	r.cg.Add(2 + 3) // +3 for string interning counters
 	s.Counter("counter-foo").Inc(1)
 	s.Counter("counter-bar").Inc(2)
 	r.gg.Add(1 + numInternalMetrics)
@@ -255,7 +259,7 @@ func TestCachedReporterInternalMetricsAlloc(t *testing.T) {
 		{
 			name:                   "include metrics",
 			omitCardinalityMetrics: false,
-			wantGauges:             1 + numInternalMetrics,
+			wantGauges:             1 + 4, // Only 4 cardinality gauges for cached reporter, no string interning metrics
 		},
 	}
 
@@ -329,6 +333,7 @@ func TestCachedReporterInternalMetricsConcurrent(t *testing.T) {
 				// kick off report loop manually, so we can keep track of how many internal metrics
 				// we emitted.
 				tr.gg.Add(numInternalMetrics)
+				tr.cg.Add(3) // +3 for string interning counters
 				s.reportLoopRun()
 			}
 		}
@@ -337,6 +342,7 @@ func TestCachedReporterInternalMetricsConcurrent(t *testing.T) {
 
 	// Close should also trigger internal metric report.
 	tr.gg.Add(numInternalMetrics)
+	tr.cg.Add(3) // +3 for string interning counters
 	closer.Close()
 }
 

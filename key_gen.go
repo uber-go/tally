@@ -153,13 +153,33 @@ func keyForPrefixedStringMaps(prefix string, maps ...map[string]string) string {
 
 // keyForPrefixedStringMapsWithPooledBuffer generates a unique key using a pooled buffer
 // to reduce allocations. The buffer is automatically selected and returned to the pool.
+// The result is interned for better memory efficiency.
 func keyForPrefixedStringMapsWithPooledBuffer(prefix string, maps ...map[string]string) string {
+	// For simple cases, use direct interning
+	if len(maps) == 0 {
+		return InternString(prefix)
+	}
+
+	if len(maps) == 1 && len(prefix) == 0 {
+		// Single map, no prefix - can use the specialized metric ID builder
+		return BuildInternedMetricID("", maps[0])
+	}
+
 	// Estimate the required buffer size
 	estimatedSize := len(prefix) + 8 // Base size + overhead
 	for _, m := range maps {
 		for k, v := range m {
 			estimatedSize += len(k) + len(v) + 3 // key=value, separators
 		}
+	}
+
+	// Don't intern very long keys to prevent memory bloat
+	if estimatedSize > MaxInternedStringLength {
+		// Fall back to non-interned key generation
+		buf := getTagSerializationBuffer(estimatedSize)
+		defer releaseTagSerializationBuffer(buf)
+		result := keyForPrefixedStringMapsAsKeyWithPooledSlice(*buf, prefix, maps...)
+		return string(result)
 	}
 
 	// Get appropriately sized buffer from pool
@@ -169,8 +189,8 @@ func keyForPrefixedStringMapsWithPooledBuffer(prefix string, maps ...map[string]
 	// Generate the key using the optimized pooled slice method
 	result := keyForPrefixedStringMapsAsKeyWithPooledSlice(*buf, prefix, maps...)
 
-	// Return string copy (safe since we're about to release the buffer)
-	return string(result)
+	// Intern the result for memory efficiency
+	return InternString(string(result))
 }
 
 func insertionSort(keys []string) {

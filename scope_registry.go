@@ -384,6 +384,10 @@ type scopeRegistry struct {
 	adaptiveMode   int32 // Used as atomic boolean
 	totalSubScopes int64 // Used with atomic operations
 
+	// Ephemeral scope tracking for reporting
+	ephemeralScopes    sync.Map     // map[*scope]bool - tracks active ephemeral scopes
+	ephemeralScopesMux sync.RWMutex // protects ephemeral scope operations during shutdown
+
 	// Eviction and LRU policy config
 	enableEviction             bool
 	maxInactivity              time.Duration
@@ -492,6 +496,9 @@ func (r *scopeRegistry) processScopes(processFn func(*scope)) {
 	} else {
 		r.sequentialProcess(processFn)
 	}
+
+	// Also process ephemeral scopes
+	r.processEphemeralScopes(processFn)
 }
 
 // sequentialProcess processes all scopes sequentially
@@ -669,6 +676,20 @@ func (r *scopeRegistry) ForEachScope(f func(*scope)) {
 			f(s)
 		}
 	}
+
+	// Also process ephemeral scopes
+	r.ephemeralScopesMux.RLock()
+	r.ephemeralScopes.Range(func(key, value interface{}) bool {
+		scope := key.(*scope)
+		if atomic.LoadInt32(&scope.closed) == 0 {
+			f(scope)
+		} else {
+			// Remove closed ephemeral scopes
+			r.ephemeralScopes.Delete(key)
+		}
+		return true
+	})
+	r.ephemeralScopesMux.RUnlock()
 }
 
 func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]string) *scope {
@@ -719,6 +740,9 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 				// Update activity timestamp
 				atomic.StoreInt64(&existingScope.lastActivity, time.Now().Unix())
 
+				// Register the scope for reporting
+				r.ephemeralScopes.Store(existingScope, true)
+
 				return existingScope
 			}
 
@@ -753,11 +777,14 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 			// Ensure the scope is marked as not closed
 			atomic.StoreInt32(&newScope.closed, 0)
 
+			// Register the scope for reporting
+			r.ephemeralScopes.Store(newScope, true)
+
 			return newScope
 		}
 
 		// If pooling is not enabled, create a new scope
-		return &scope{
+		ephemeralScope := &scope{
 			separator:      parent.separator,
 			prefix:         prefix,
 			tags:           allTags,
@@ -781,6 +808,14 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 			testScope:          parent.testScope,
 			noCacheSubscopes:   parent.noCacheSubscopes,
 		}
+
+		// Initialize lastActivity timestamp
+		atomic.StoreInt64(&ephemeralScope.lastActivity, time.Now().Unix())
+
+		// Register the scope for reporting
+		r.ephemeralScopes.Store(ephemeralScope, true)
+
+		return ephemeralScope
 	}
 
 	var (
@@ -905,6 +940,7 @@ func (r *scopeRegistry) purgeIfRootClosed() {
 		return
 	}
 
+	// Clean up cached scopes
 	for _, subscopeBucket := range r.subscopes {
 		subscopeBucket.mu.Lock()
 		for k, s := range subscopeBucket.s {
@@ -914,6 +950,17 @@ func (r *scopeRegistry) purgeIfRootClosed() {
 		}
 		subscopeBucket.mu.Unlock()
 	}
+
+	// Clean up ephemeral scopes
+	r.ephemeralScopesMux.Lock()
+	r.ephemeralScopes.Range(func(key, value interface{}) bool {
+		scope := key.(*scope)
+		_ = scope.Close()
+		scope.clearMetrics()
+		r.ephemeralScopes.Delete(key)
+		return true
+	})
+	r.ephemeralScopesMux.Unlock()
 }
 
 func (r *scopeRegistry) removeWithRLock(subscopeBucket *scopeBucket, key string) {
@@ -926,7 +973,7 @@ func (r *scopeRegistry) removeWithRLock(subscopeBucket *scopeBucket, key string)
 	delete(subscopeBucket.s, key)
 }
 
-// Records internal Metrics' cardinalities.
+// Records internal Metrics' cardinalities and string interning stats.
 func (r *scopeRegistry) reportInternalMetrics() {
 	if r.omitCardinalityMetrics {
 		return
@@ -939,11 +986,28 @@ func (r *scopeRegistry) reportInternalMetrics() {
 	histograms := r.numHistograms.Load()
 	scopes := atomic.LoadInt64(&r.totalSubScopes) + 1 // +1 for the root scope.
 
+	// Get string interning statistics
+	internStats := GetStringInterningStats()
+
 	if r.root.reporter != nil {
 		r.root.reporter.ReportGauge(r.sanitizedCounterCardinalityName, r.cardinalityMetricsTags, float64(counters))
 		r.root.reporter.ReportGauge(r.sanitizedGaugeCardinalityName, r.cardinalityMetricsTags, float64(gauges))
 		r.root.reporter.ReportGauge(r.sanitizedHistogramCardinalityName, r.cardinalityMetricsTags, float64(histograms))
 		r.root.reporter.ReportGauge(r.sanitizedScopeCardinalityName, r.cardinalityMetricsTags, float64(scopes))
+
+		// Report string interning metrics
+		r.root.reporter.ReportGauge("tally.internal.string_intern_size", r.cardinalityMetricsTags, float64(internStats.TotalEntries))
+		r.root.reporter.ReportCounter("tally.internal.string_intern_hits", r.cardinalityMetricsTags, internStats.Hits)
+		r.root.reporter.ReportCounter("tally.internal.string_intern_misses", r.cardinalityMetricsTags, internStats.Misses)
+		r.root.reporter.ReportCounter("tally.internal.string_intern_evictions", r.cardinalityMetricsTags, internStats.Evictions)
+
+		// Calculate and report hit rate as a percentage
+		totalAccesses := internStats.Hits + internStats.Misses
+		var hitRate float64
+		if totalAccesses > 0 {
+			hitRate = float64(internStats.Hits) / float64(totalAccesses) * 100.0
+		}
+		r.root.reporter.ReportGauge("tally.internal.string_intern_hit_rate", r.cardinalityMetricsTags, hitRate)
 	}
 
 	if r.root.cachedReporter != nil {
@@ -1464,4 +1528,21 @@ func releaseHistogramSnapshotMap(m *map[string]HistogramSnapshot) {
 		delete(*m, k)
 	}
 	snapshotMapPools.histogramMaps.Put(m)
+}
+
+// processEphemeralScopes processes all ephemeral scopes for reporting
+func (r *scopeRegistry) processEphemeralScopes(processFn func(*scope)) {
+	r.ephemeralScopesMux.RLock()
+	defer r.ephemeralScopesMux.RUnlock()
+
+	r.ephemeralScopes.Range(func(key, value interface{}) bool {
+		scope := key.(*scope)
+		if atomic.LoadInt32(&scope.closed) == 0 {
+			processFn(scope)
+		} else {
+			// Remove closed ephemeral scopes
+			r.ephemeralScopes.Delete(key)
+		}
+		return true
+	})
 }

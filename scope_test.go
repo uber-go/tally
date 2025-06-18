@@ -37,7 +37,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m)
+	// Use goleak's IgnoreTopFunction to ignore the string interning cleanup goroutine
+	goleak.VerifyTestMain(m, goleak.IgnoreTopFunction("github.com/uber-go/tally/v6.(*stringInterningSystem).cleanupLoop"))
 }
 
 var (
@@ -1715,4 +1716,87 @@ func TestRootScopeAdaptiveCaching(t *testing.T) {
 	// Verify they're different instances
 	assert.NotEqual(t, fmt.Sprintf("%p", scope2), fmt.Sprintf("%p", scope3),
 		"Scopes with same tags should be different instances in adaptive mode")
+}
+
+func TestEphemeralScopeReporting(t *testing.T) {
+	// Create a test scope with reporting
+	r := newTestStatsReporter()
+	root, closer := NewRootScope(ScopeOptions{
+		Prefix:                 "test",
+		Reporter:               r,
+		OmitCardinalityMetrics: true,
+	}, 100*time.Millisecond) // Short interval for testing
+	defer closer.Close()
+
+	rootImpl := root.(*scope)
+
+	// Manually enable adaptive mode to force ephemeral scope creation
+	atomic.StoreInt32(&rootImpl.registry.adaptiveMode, 1)
+	atomic.StoreInt64(&rootImpl.registry.totalSubScopes, 5001) // Simulate high cardinality
+
+	// Verify adaptive mode is enabled
+	assert.Equal(t, int32(1), atomic.LoadInt32(&rootImpl.registry.adaptiveMode), "Adaptive mode should be enabled")
+
+	// Now create some scopes - these should be ephemeral
+	const numScopes = 10
+	scopes := make([]Scope, numScopes)
+	for i := 0; i < numScopes; i++ {
+		scopes[i] = root.Tagged(map[string]string{"id": strconv.Itoa(i)})
+	}
+
+	// Verify that ephemeral scopes are being tracked
+	ephemeralCount := 0
+	rootImpl.registry.ephemeralScopes.Range(func(key, value interface{}) bool {
+		ephemeralCount++
+		return true
+	})
+	t.Logf("Found %d ephemeral scopes registered", ephemeralCount)
+	assert.True(t, ephemeralCount > 0, "Should have ephemeral scopes registered, found %d", ephemeralCount)
+
+	// Create metrics on some ephemeral scopes
+	for i := 0; i < numScopes; i++ {
+		scope := scopes[i]
+		counter := scope.Counter("test_counter")
+		gauge := scope.Gauge("test_gauge")
+
+		r.cg.Add(1)
+		r.gg.Add(1)
+
+		counter.Inc(int64(i + 1))
+		gauge.Update(float64(i + 1))
+	}
+
+	// Wait for all metrics to be reported
+	r.WaitAll()
+
+	// Get the reported metrics
+	counters := r.getCounters()
+	gauges := r.getGauges()
+
+	t.Logf("Found %d counters total", len(counters))
+	t.Logf("Found %d gauges total", len(gauges))
+
+	// Check that we have counters and gauges from ephemeral scopes
+	foundCounters := 0
+	foundGauges := 0
+
+	for name, counter := range counters {
+		t.Logf("Counter: %s = %d", name, counter.val)
+		if strings.Contains(name, "test_counter") {
+			foundCounters++
+			assert.True(t, counter.val > 0, "Counter should have a positive value")
+		}
+	}
+
+	for name, gauge := range gauges {
+		t.Logf("Gauge: %s = %f", name, gauge.val)
+		if strings.Contains(name, "test_gauge") {
+			foundGauges++
+			assert.True(t, gauge.val > 0, "Gauge should have a positive value")
+		}
+	}
+
+	// We should find at least some of the metrics we created on ephemeral scopes
+	assert.True(t, foundCounters > 0, "Should have found counters from ephemeral scopes, found %d", foundCounters)
+	assert.True(t, foundGauges > 0, "Should have found gauges from ephemeral scopes, found %d", foundGauges)
 }
