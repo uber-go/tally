@@ -84,9 +84,13 @@ type ConfigurationOptions struct {
 	// OnError allows for customization of what to do when a metric
 	// registration error fails, the default is to panic.
 	OnError func(e error)
+
+	// Handler allows to provide its own ServerMux
+	// Only used if a ListenAddress is set
+	ServerMux *http.ServeMux
 }
 
-// NewReporter creates a new M3 reporter from this configuration.
+// NewReporter creates a new Prometheus reporter from this configuration.
 func (c Configuration) NewReporter(
 	configOpts ConfigurationOptions,
 ) (Reporter, error) {
@@ -115,6 +119,10 @@ func (c Configuration) NewReporter(
 				panic(err)
 			}
 		}
+	}
+
+	if configOpts.ServerMux == nil {
+		configOpts.ServerMux = http.NewServeMux()
 	}
 
 	switch c.TimerType {
@@ -150,8 +158,7 @@ func (c Configuration) NewReporter(
 	if addr := strings.TrimSpace(c.ListenAddress); addr == "" {
 		http.Handle(path, reporter.HTTPHandler())
 	} else {
-		mux := http.NewServeMux()
-		mux.Handle(path, reporter.HTTPHandler())
+		configOpts.ServerMux.Handle(path, reporter.HTTPHandler())
 		go func() {
 			network := c.ListenNetwork
 			if network == "" {
@@ -166,7 +173,7 @@ func (c Configuration) NewReporter(
 
 			defer listener.Close()
 
-			if err = http.Serve(listener, mux); err != nil {
+			if err = http.Serve(listener, configOpts.ServerMux); err != nil {
 				opts.OnRegisterError(err)
 			}
 		}()
