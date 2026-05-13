@@ -376,6 +376,10 @@ func (h *histogram) RecordValue(value float64) {
 	idx := sort.Search(len(h.buckets), func(i int) bool {
 		return h.buckets[i].valueUpperBound >= value
 	})
+	if idx == len(h.buckets) {
+		// value is NaN or +Inf, neither of which compares as <= any bound.
+		idx = len(h.buckets) - 1
+	}
 	h.samples[idx].counter.Inc(1)
 }
 
