@@ -29,21 +29,30 @@ import (
 )
 
 func TestSafeFloat64ToInt64(t *testing.T) {
+	assert.Equal(t, int64(math.MaxInt64), safeFloat64ToInt64(math.Inf(1)))
 	assert.Equal(t, int64(math.MaxInt64), safeFloat64ToInt64(float64(math.MaxInt64)*2))
 	assert.Equal(t, int64(math.MaxInt64), safeFloat64ToInt64(float64(math.MaxInt64)+1000))
 
+	assert.Equal(t, int64(math.MinInt64), safeFloat64ToInt64(math.Inf(-1)))
 	assert.Equal(t, int64(math.MinInt64), safeFloat64ToInt64(float64(math.MinInt64)*2))
 	assert.Equal(t, int64(math.MinInt64), safeFloat64ToInt64(float64(math.MinInt64)-1000))
 
 	assert.Equal(t, int64(1000), safeFloat64ToInt64(1000))
+	assert.Equal(t, int64(-500), safeFloat64ToInt64(-500))
+	assert.Equal(t, int64(0), safeFloat64ToInt64(0))
 }
 
 func TestSafeDurationSum(t *testing.T) {
 	maxDuration := time.Duration(math.MaxInt64)
 	assert.Equal(t, maxDuration, safeDurationSum(maxDuration, 1))
+	assert.Equal(t, maxDuration, safeDurationSum(maxDuration, maxDuration))
 
 	minDuration := time.Duration(math.MinInt64)
 	assert.Equal(t, minDuration, safeDurationSum(minDuration, -1))
+	assert.Equal(t, minDuration, safeDurationSum(minDuration, minDuration))
 
 	assert.Equal(t, 10*time.Second, safeDurationSum(3*time.Second, 7*time.Second))
+	assert.Equal(t, -30*time.Second, safeDurationSum(-10*time.Second, -20*time.Second))
+	assert.Equal(t, time.Duration(0), safeDurationSum(0, 0))
 }
+
