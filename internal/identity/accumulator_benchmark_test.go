@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/uber-go/tally/v4/internal/identity"
+	"github.com/uber-go/tally/v7/internal/identity"
 )
 
 func BenchmarkAccumulator_StringStringMap(b *testing.B) {
