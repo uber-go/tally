@@ -39,8 +39,8 @@ package main
 import (
 	"time"
 
-	tally "github.com/uber-go/tally/v4"
-	"github.com/uber-go/tally/v4/m3"
+	tally "github.com/uber-go/tally/v7"
+	"github.com/uber-go/tally/v7/m3"
 )
 
 func main() {

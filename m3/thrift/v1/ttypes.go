@@ -6,7 +6,7 @@ package v1
 import (
 	"bytes"
 	"fmt"
-	"github.com/uber-go/tally/v4/thirdparty/github.com/apache/thrift/lib/go/thrift"
+	"github.com/uber-go/tally/v7/thirdparty/github.com/apache/thrift/lib/go/thrift"
 )
 
 // (needed to ensure safety because of naive import list construction.)
