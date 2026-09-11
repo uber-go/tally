@@ -23,6 +23,7 @@ package tally
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -290,4 +291,236 @@ func TestDefaultNativeHistogramDataIsInert(t *testing.T) {
 
 func TestDefaultNativeHistogramMaxBucketsValue(t *testing.T) {
 	assert.Equal(t, 160, DefaultNativeHistogramMaxBuckets)
+}
+
+// testNativeHistogramFactory records the bucket budget it is handed for each
+// native histogram a scope creates, and hands back accumulators the test can
+// inspect.
+type testNativeHistogramFactory struct {
+	maxBuckets []int
+	data       []*testNativeHistogramData
+}
+
+func (f *testNativeHistogramFactory) New(maxBuckets int) NativeHistogramData {
+	d := newTestNativeHistogramData()
+	f.maxBuckets = append(f.maxBuckets, maxBuckets)
+	f.data = append(f.data, d)
+	return d
+}
+
+// getNativeHistograms mirrors testStatsReporter's other accessors, keying by
+// bare metric name.
+func (r *testStatsReporter) getNativeHistograms() map[string]*testNativeHistogramValue {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
+	dst := make(map[string]*testNativeHistogramValue, len(r.nativeHistograms))
+	for k, v := range r.nativeHistograms {
+		var (
+			parts = strings.Split(k, "+")
+			name  string
+		)
+		if len(parts) > 0 {
+			name = parts[0]
+		}
+
+		dst[name] = v
+	}
+
+	return dst
+}
+
+func TestScopeNativeHistogram(t *testing.T) {
+	r := newTestStatsReporter()
+	f := &testNativeHistogramFactory{}
+
+	root, closer := NewRootScope(ScopeOptions{
+		Reporter:               r,
+		NativeHistogramFactory: f.New,
+		OmitCardinalityMetrics: true,
+	}, 0)
+	defer closer.Close()
+
+	s := root.(*scope)
+
+	r.nhg.Add(1)
+	h := s.NativeHistogram("latency", 0)
+	h.RecordValue(1)
+	h.RecordDuration(2 * time.Second)
+
+	s.report(r)
+	r.WaitAll()
+
+	nh := r.getNativeHistograms()["latency"]
+	require.NotNil(t, nh)
+	assert.Equal(t, []byte("[1 2]"), nh.payload)
+	assert.Equal(t, uint64(2), nh.samples)
+}
+
+func TestScopeNativeHistogramCachedReporter(t *testing.T) {
+	r := newTestStatsReporter()
+	f := &testNativeHistogramFactory{}
+
+	root, closer := NewRootScope(ScopeOptions{
+		CachedReporter:         r,
+		NativeHistogramFactory: f.New,
+		OmitCardinalityMetrics: true,
+	}, 0)
+	defer closer.Close()
+
+	s := root.(*scope)
+
+	r.nhg.Add(1)
+	s.NativeHistogram("latency", 0).RecordValue(42)
+
+	s.cachedReport()
+	r.WaitAll()
+
+	nh := r.getNativeHistograms()["latency"]
+	require.NotNil(t, nh)
+	assert.Equal(t, []byte("[42]"), nh.payload)
+	assert.Equal(t, uint64(1), nh.samples)
+}
+
+func TestScopeNativeHistogramMaxBuckets(t *testing.T) {
+	tests := []struct {
+		name       string
+		scopeMax   int
+		callMax    int
+		expectedTo int
+	}{
+		{
+			name:       "zero uses the scope default",
+			callMax:    0,
+			expectedTo: DefaultNativeHistogramMaxBuckets,
+		},
+		{
+			name:       "explicit budget is passed through",
+			callMax:    32,
+			expectedTo: 32,
+		},
+		{
+			name:       "zero uses a configured scope default",
+			scopeMax:   64,
+			callMax:    0,
+			expectedTo: 64,
+		},
+		{
+			name:       "explicit budget overrides the scope default",
+			scopeMax:   64,
+			callMax:    32,
+			expectedTo: 32,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &testNativeHistogramFactory{}
+
+			root, closer := NewRootScope(ScopeOptions{
+				Reporter:                         NullStatsReporter,
+				NativeHistogramFactory:           f.New,
+				DefaultNativeHistogramMaxBuckets: tt.scopeMax,
+				OmitCardinalityMetrics:           true,
+			}, 0)
+			defer closer.Close()
+
+			root.NativeHistogram("latency", tt.callMax)
+
+			require.Equal(t, 1, len(f.maxBuckets))
+			assert.Equal(t, tt.expectedTo, f.maxBuckets[0])
+		})
+	}
+}
+
+// A scope with no NativeHistogramFactory must stay usable: values are counted
+// but nothing is ever reported.
+func TestScopeNativeHistogramWithoutFactory(t *testing.T) {
+	r := newTestStatsReporter()
+
+	root, closer := NewRootScope(ScopeOptions{
+		Reporter:               r,
+		OmitCardinalityMetrics: true,
+	}, 0)
+	defer closer.Close()
+
+	s := root.(*scope)
+
+	h := s.NativeHistogram("latency", 0)
+	h.RecordValue(1)
+	h.RecordDuration(time.Second)
+
+	s.report(r)
+	r.WaitAll()
+
+	assert.Empty(t, r.getNativeHistograms())
+	assert.Equal(t, uint64(2), h.(*nativeHistogram).snapshot())
+}
+
+func TestScopeNativeHistogramSubscopesInheritFactory(t *testing.T) {
+	r := newTestStatsReporter()
+	f := &testNativeHistogramFactory{}
+
+	root, closer := NewRootScope(ScopeOptions{
+		Reporter:                         r,
+		NativeHistogramFactory:           f.New,
+		DefaultNativeHistogramMaxBuckets: 64,
+		OmitCardinalityMetrics:           true,
+	}, 0)
+	defer closer.Close()
+
+	sub := root.SubScope("requests").Tagged(map[string]string{"env": "test"})
+
+	r.nhg.Add(1)
+	sub.NativeHistogram("latency", 0).RecordValue(7)
+
+	root.(*scope).registry.Report(r)
+	r.WaitAll()
+
+	require.Equal(t, 1, len(f.maxBuckets))
+	assert.Equal(t, 64, f.maxBuckets[0], "subscope inherits the scope default")
+
+	nh := r.getNativeHistograms()["requests.latency"]
+	require.NotNil(t, nh)
+	assert.Equal(t, []byte("[7]"), nh.payload)
+	assert.Equal(t, uint64(1), nh.samples)
+	assert.Equal(t, map[string]string{"env": "test"}, nh.tags)
+}
+
+func TestScopeNativeHistogramReturnsSameInstance(t *testing.T) {
+	f := &testNativeHistogramFactory{}
+
+	root, closer := NewRootScope(ScopeOptions{
+		Reporter:               NullStatsReporter,
+		NativeHistogramFactory: f.New,
+		OmitCardinalityMetrics: true,
+	}, 0)
+	defer closer.Close()
+
+	first := root.NativeHistogram("latency", 0)
+	second := root.NativeHistogram("latency", 0)
+
+	assert.Equal(t, first, second)
+	assert.Equal(t, 1, len(f.maxBuckets), "the accumulator is only built once")
+}
+
+func TestScopeNativeHistogramSnapshot(t *testing.T) {
+	s := NewTestScope("prefix", map[string]string{"env": "test"})
+
+	s.NativeHistogram("latency", 0).RecordValue(1)
+	s.NativeHistogram("latency", 0).RecordDuration(time.Second)
+	s.NativeHistogram("other", 0).RecordValue(3)
+
+	snap := s.Snapshot().NativeHistograms()
+	require.Equal(t, 2, len(snap))
+
+	latency := snap[KeyForPrefixedStringMap("prefix.latency", map[string]string{"env": "test"})]
+	require.NotNil(t, latency)
+	assert.Equal(t, "prefix.latency", latency.Name())
+	assert.Equal(t, map[string]string{"env": "test"}, latency.Tags())
+	assert.Equal(t, uint64(2), latency.Samples())
+
+	other := snap[KeyForPrefixedStringMap("prefix.other", map[string]string{"env": "test"})]
+	require.NotNil(t, other)
+	assert.Equal(t, uint64(1), other.Samples())
 }

@@ -70,20 +70,26 @@ type scope struct {
 	defaultBuckets Buckets
 	sanitizer      Sanitizer
 
+	nativeHistogramFactory          func(maxBuckets int) NativeHistogramData
+	defaultNativeHistogramMaxBucket int
+
 	registry *scopeRegistry
 
-	cm sync.RWMutex
-	gm sync.RWMutex
-	tm sync.RWMutex
-	hm sync.RWMutex
+	cm  sync.RWMutex
+	gm  sync.RWMutex
+	tm  sync.RWMutex
+	hm  sync.RWMutex
+	nhm sync.RWMutex
 
-	counters        map[string]*counter
-	countersSlice   []*counter
-	gauges          map[string]*gauge
-	gaugesSlice     []*gauge
-	histograms      map[string]*histogram
-	histogramsSlice []*histogram
-	timers          map[string]*timer
+	counters              map[string]*counter
+	countersSlice         []*counter
+	gauges                map[string]*gauge
+	gaugesSlice           []*gauge
+	histograms            map[string]*histogram
+	histogramsSlice       []*histogram
+	nativeHistograms      map[string]*nativeHistogram
+	nativeHistogramsSlice []*nativeHistogram
+	timers                map[string]*timer
 	// nb: deliberately skipping timersSlice as we report timers immediately,
 	// no buffering is involved.
 
@@ -106,6 +112,17 @@ type ScopeOptions struct {
 	SanitizeOptions        *SanitizeOptions
 	OmitCardinalityMetrics bool
 	CardinalityMetricsTags map[string]string
+
+	// NativeHistogramFactory supplies the accumulator backing each native
+	// histogram created on this scope and its subscopes. Leaving it nil makes
+	// Scope.NativeHistogram safe to call, but values are merely counted and
+	// never reported.
+	NativeHistogramFactory func(maxBuckets int) NativeHistogramData
+
+	// DefaultNativeHistogramMaxBuckets is the bucket budget used when
+	// Scope.NativeHistogram is called with maxBuckets of 0. Defaults to
+	// DefaultNativeHistogramMaxBuckets.
+	DefaultNativeHistogramMaxBuckets int
 
 	testScope          bool
 	registryShardCount uint
@@ -163,6 +180,13 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		opts.DefaultBuckets = defaultScopeBuckets
 	}
 
+	if opts.NativeHistogramFactory == nil {
+		opts.NativeHistogramFactory = defaultNativeHistogramFactory
+	}
+	if opts.DefaultNativeHistogramMaxBuckets < 1 {
+		opts.DefaultNativeHistogramMaxBuckets = DefaultNativeHistogramMaxBuckets
+	}
+
 	s := &scope{
 		baseReporter:    baseReporter,
 		bucketCache:     newBucketCache(),
@@ -182,6 +206,11 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		timers:          make(map[string]*timer),
 		root:            true,
 		testScope:       opts.testScope,
+
+		nativeHistogramFactory:          opts.NativeHistogramFactory,
+		defaultNativeHistogramMaxBucket: opts.DefaultNativeHistogramMaxBuckets,
+		nativeHistograms:                make(map[string]*nativeHistogram),
+		nativeHistogramsSlice:           make([]*nativeHistogram, 0, _defaultInitialSliceSize),
 	}
 
 	// NB(r): Take a copy of the tags on creation
@@ -223,6 +252,12 @@ func (s *scope) report(r StatsReporter) {
 		histogram.report(s.fullyQualifiedName(name), s.tags, r)
 	}
 	s.hm.RUnlock()
+
+	s.nhm.RLock()
+	for name, nativeHistogram := range s.nativeHistograms {
+		nativeHistogram.report(s.fullyQualifiedName(name), s.tags, r)
+	}
+	s.nhm.RUnlock()
 }
 
 func (s *scope) cachedReport() {
@@ -245,6 +280,12 @@ func (s *scope) cachedReport() {
 		histogram.cachedReport()
 	}
 	s.hm.RUnlock()
+
+	s.nhm.RLock()
+	for _, nativeHistogram := range s.nativeHistogramsSlice {
+		nativeHistogram.cachedReport()
+	}
+	s.nhm.RUnlock()
 }
 
 // reportLoop is used by the root scope for periodic reporting
@@ -438,6 +479,48 @@ func (s *scope) histogram(sanitizedName string) (Histogram, bool) {
 	return h, ok
 }
 
+func (s *scope) NativeHistogram(name string, maxBuckets int) NativeHistogram {
+	name = s.sanitizer.Name(name)
+	if h, ok := s.nativeHistogram(name); ok {
+		return h
+	}
+
+	if maxBuckets < 1 {
+		maxBuckets = s.defaultNativeHistogramMaxBucket
+	}
+
+	s.nhm.Lock()
+	defer s.nhm.Unlock()
+
+	if h, ok := s.nativeHistograms[name]; ok {
+		return h
+	}
+
+	var cachedNativeHistogram CachedNativeHistogram
+	if s.cachedReporter != nil {
+		cachedNativeHistogram = s.cachedReporter.AllocateNativeHistogram(
+			s.fullyQualifiedName(name), s.tags, maxBuckets,
+		)
+	}
+
+	h := newNativeHistogram(
+		s.nativeHistogramFactory(maxBuckets),
+		cachedNativeHistogram,
+	)
+	s.nativeHistograms[name] = h
+	s.nativeHistogramsSlice = append(s.nativeHistogramsSlice, h)
+
+	return h
+}
+
+func (s *scope) nativeHistogram(sanitizedName string) (NativeHistogram, bool) {
+	s.nhm.RLock()
+	defer s.nhm.RUnlock()
+
+	h, ok := s.nativeHistograms[sanitizedName]
+	return h, ok
+}
+
 func (s *scope) Tagged(tags map[string]string) Scope {
 	return s.subscope(s.prefix, tags)
 }
@@ -513,6 +596,17 @@ func (s *scope) Snapshot() Snapshot {
 			}
 		}
 		ss.hm.RUnlock()
+		ss.nhm.RLock()
+		for key, h := range ss.nativeHistograms {
+			name := ss.fullyQualifiedName(key)
+			id := KeyForPrefixedStringMap(name, tags)
+			snap.nativeHistograms[id] = &nativeHistogramSnapshot{
+				name:    name,
+				tags:    tags,
+				samples: h.snapshot(),
+			}
+		}
+		ss.nhm.RUnlock()
 	})
 
 	return snap
@@ -542,10 +636,12 @@ func (s *scope) clearMetrics() {
 	s.gm.Lock()
 	s.tm.Lock()
 	s.hm.Lock()
+	s.nhm.Lock()
 	defer s.cm.Unlock()
 	defer s.gm.Unlock()
 	defer s.tm.Unlock()
 	defer s.hm.Unlock()
+	defer s.nhm.Unlock()
 
 	for k := range s.counters {
 		delete(s.counters, k)
@@ -565,6 +661,11 @@ func (s *scope) clearMetrics() {
 		delete(s.histograms, k)
 	}
 	s.histogramsSlice = nil
+
+	for k := range s.nativeHistograms {
+		delete(s.nativeHistograms, k)
+	}
+	s.nativeHistogramsSlice = nil
 }
 
 // NB(prateek): We assume concatenation of sanitized inputs is
@@ -615,6 +716,10 @@ type Snapshot interface {
 
 	// Histograms returns a snapshot of histogram samples since last report execution
 	Histograms() map[string]HistogramSnapshot
+
+	// NativeHistograms returns a snapshot of native histogram sample counts
+	// since last report execution
+	NativeHistograms() map[string]NativeHistogramSnapshot
 }
 
 // CounterSnapshot is a snapshot of a counter
@@ -668,6 +773,23 @@ type HistogramSnapshot interface {
 	Durations() map[time.Duration]int64
 }
 
+// NativeHistogramSnapshot is a snapshot of a native histogram.
+//
+// Only the sample count is exposed: the distribution itself lives in an
+// application-supplied NativeHistogramData whose encoding tally does not
+// interpret.
+type NativeHistogramSnapshot interface {
+	// Name returns the name
+	Name() string
+
+	// Tags returns the tags
+	Tags() map[string]string
+
+	// Samples returns the number of values accumulated since last report
+	// execution
+	Samples() uint64
+}
+
 // mergeRightTags merges 2 sets of tags with the tags from tagsRight overriding values from tagsLeft
 func mergeRightTags(tagsLeft, tagsRight map[string]string) map[string]string {
 	if tagsLeft == nil && tagsRight == nil {
@@ -691,18 +813,20 @@ func mergeRightTags(tagsLeft, tagsRight map[string]string) map[string]string {
 }
 
 type snapshot struct {
-	counters   map[string]CounterSnapshot
-	gauges     map[string]GaugeSnapshot
-	timers     map[string]TimerSnapshot
-	histograms map[string]HistogramSnapshot
+	counters         map[string]CounterSnapshot
+	gauges           map[string]GaugeSnapshot
+	timers           map[string]TimerSnapshot
+	histograms       map[string]HistogramSnapshot
+	nativeHistograms map[string]NativeHistogramSnapshot
 }
 
 func newSnapshot() *snapshot {
 	return &snapshot{
-		counters:   make(map[string]CounterSnapshot),
-		gauges:     make(map[string]GaugeSnapshot),
-		timers:     make(map[string]TimerSnapshot),
-		histograms: make(map[string]HistogramSnapshot),
+		counters:         make(map[string]CounterSnapshot),
+		gauges:           make(map[string]GaugeSnapshot),
+		timers:           make(map[string]TimerSnapshot),
+		histograms:       make(map[string]HistogramSnapshot),
+		nativeHistograms: make(map[string]NativeHistogramSnapshot),
 	}
 }
 
@@ -720,6 +844,10 @@ func (s *snapshot) Timers() map[string]TimerSnapshot {
 
 func (s *snapshot) Histograms() map[string]HistogramSnapshot {
 	return s.histograms
+}
+
+func (s *snapshot) NativeHistograms() map[string]NativeHistogramSnapshot {
+	return s.nativeHistograms
 }
 
 type counterSnapshot struct {
@@ -797,4 +925,22 @@ func (s *histogramSnapshot) Values() map[float64]int64 {
 
 func (s *histogramSnapshot) Durations() map[time.Duration]int64 {
 	return s.durations
+}
+
+type nativeHistogramSnapshot struct {
+	name    string
+	tags    map[string]string
+	samples uint64
+}
+
+func (s *nativeHistogramSnapshot) Name() string {
+	return s.name
+}
+
+func (s *nativeHistogramSnapshot) Tags() map[string]string {
+	return s.tags
+}
+
+func (s *nativeHistogramSnapshot) Samples() uint64 {
+	return s.samples
 }
