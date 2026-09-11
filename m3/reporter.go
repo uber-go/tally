@@ -134,6 +134,9 @@ type reporter struct {
 	numWriteErrors        atomic.Int64
 	numWriteErrorsCounter tally.CachedCount
 	numTagCacheCounter    tally.CachedCount
+
+	numNativeHistogramsDropped        atomic.Int64
+	numNativeHistogramsDroppedCounter tally.CachedCount
 }
 
 // Options is a set of options for the M3 reporter.
@@ -301,6 +304,9 @@ func NewReporter(opts Options) (Reporter, error) {
 	r.numMetricsCounter = r.AllocateCounter("tally.internal.num-metrics", internalTags)
 	r.numWriteErrorsCounter = r.AllocateCounter("tally.internal.num-write-errors", internalTags)
 	r.numTagCacheCounter = r.AllocateCounter("tally.internal.num-tag-cache", internalTags)
+	r.numNativeHistogramsDroppedCounter = r.AllocateCounter(
+		"tally.internal.num-native-histograms-dropped", internalTags,
+	)
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
@@ -439,6 +445,20 @@ func (r *reporter) AllocateHistogram(
 		cachedValueBuckets:    cachedValueBuckets,
 		cachedDurationBuckets: cachedDurationBuckets,
 	}
+}
+
+// AllocateNativeHistogram implements tally.CachedStatsReporter.
+//
+// The M3 thrift wire format carries only count, gauge and timer values, so
+// there is no field a serialized native histogram payload can travel in.
+// Rather than silently discard them, the returned handle counts every dropped
+// report into tally.internal.num-native-histograms-dropped.
+func (r *reporter) AllocateNativeHistogram(
+	name string,
+	tags map[string]string,
+	maxBuckets int,
+) tally.CachedNativeHistogram {
+	return cachedNativeHistogram{reporter: r}
 }
 
 func (r *reporter) valueBucketString(v float64) string {
@@ -699,6 +719,13 @@ func (r *reporter) reportInternalMetrics() {
 	r.numMetricsCounter.ReportCount(metrics)
 	r.numWriteErrorsCounter.ReportCount(writeErrors)
 	r.numTagCacheCounter.ReportCount(int64(r.tagCache.Len()))
+
+	// Reported only when non-zero. Emitting it unconditionally would add a
+	// permanently-zero series to every m3 reporter in a fleet, since almost
+	// no caller uses native histograms with this reporter.
+	if dropped := r.numNativeHistogramsDropped.Swap(0); dropped > 0 {
+		r.numNativeHistogramsDroppedCounter.ReportCount(dropped)
+	}
 }
 
 func (r *reporter) timeLoop() {
@@ -733,6 +760,16 @@ func (c cachedMetric) ReportGauge(value float64) {
 func (c cachedMetric) ReportTimer(interval time.Duration) {
 	c.metric.Value.Timer = int64(interval)
 	c.reporter.reportCopyMetric(c.metric, c.size, "", "")
+}
+
+// cachedNativeHistogram discards native histogram payloads, which the M3
+// thrift wire format cannot represent, and counts the drops.
+type cachedNativeHistogram struct {
+	reporter *reporter
+}
+
+func (c cachedNativeHistogram) ReportNativeHistogram(payload []byte, samples uint64) {
+	c.reporter.numNativeHistogramsDropped.Inc()
 }
 
 type noopMetric struct{}

@@ -109,6 +109,18 @@ func (mr *MockStatsReporterMockRecorder) ReportHistogramValueSamples(arg0, arg1,
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReportHistogramValueSamples", reflect.TypeOf((*MockStatsReporter)(nil).ReportHistogramValueSamples), arg0, arg1, arg2, arg3, arg4, arg5)
 }
 
+// ReportNativeHistogram mocks base method.
+func (m *MockStatsReporter) ReportNativeHistogram(arg0 string, arg1 map[string]string, arg2 []byte, arg3 uint64) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "ReportNativeHistogram", arg0, arg1, arg2, arg3)
+}
+
+// ReportNativeHistogram indicates an expected call of ReportNativeHistogram.
+func (mr *MockStatsReporterMockRecorder) ReportNativeHistogram(arg0, arg1, arg2, arg3 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReportNativeHistogram", reflect.TypeOf((*MockStatsReporter)(nil).ReportNativeHistogram), arg0, arg1, arg2, arg3)
+}
+
 // ReportTimer mocks base method.
 func (m *MockStatsReporter) ReportTimer(arg0 string, arg1 map[string]string, arg2 time.Duration) {
 	m.ctrl.T.Helper()

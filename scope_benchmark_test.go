@@ -290,6 +290,8 @@ func (s noopStat) DurationBucket(bucketLowerBound, bucketUpperBound time.Duratio
 }
 func (s noopStat) ReportSamples(value int64) {}
 
+func (s noopStat) ReportNativeHistogram(payload []byte, samples uint64) {}
+
 type noopCachedReporter struct{}
 
 func (n noopCachedReporter) Capabilities() Capabilities {
@@ -311,6 +313,9 @@ func (n noopCachedReporter) ReportHistogramValueSamples(name string, tags map[st
 func (n noopCachedReporter) ReportHistogramDurationSamples(name string, tags map[string]string, buckets Buckets, bucketLowerBound time.Duration, bucketUpperBound time.Duration, samples int64) {
 }
 
+func (n noopCachedReporter) ReportNativeHistogram(name string, tags map[string]string, payload []byte, samples uint64) {
+}
+
 func (n noopCachedReporter) AllocateCounter(name string, tags map[string]string) CachedCount {
 	return noopStat{}
 }
@@ -323,5 +328,9 @@ func (n noopCachedReporter) AllocateTimer(name string, tags map[string]string) C
 	return noopStat{}
 }
 func (n noopCachedReporter) AllocateHistogram(name string, tags map[string]string, buckets Buckets) CachedHistogram {
+	return noopStat{}
+}
+
+func (n noopCachedReporter) AllocateNativeHistogram(name string, tags map[string]string, maxBuckets int) CachedNativeHistogram {
 	return noopStat{}
 }
