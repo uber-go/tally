@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"time"
 
-	tally "github.com/uber-go/tally/v4"
+	tally "github.com/uber-go/tally/v7"
 )
 
 type printStatsReporter struct{}
