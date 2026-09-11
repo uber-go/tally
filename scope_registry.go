@@ -247,16 +247,21 @@ func (r *scopeRegistry) Subscope(parent *scope, prefix string, tags map[string]s
 		sanitizer:      parent.sanitizer,
 		registry:       parent.registry,
 
-		counters:        make(map[string]*counter),
-		countersSlice:   make([]*counter, 0, _defaultInitialSliceSize),
-		gauges:          make(map[string]*gauge),
-		gaugesSlice:     make([]*gauge, 0, _defaultInitialSliceSize),
-		histograms:      make(map[string]*histogram),
-		histogramsSlice: make([]*histogram, 0, _defaultInitialSliceSize),
-		timers:          make(map[string]*timer),
-		bucketCache:     parent.bucketCache,
-		done:            make(chan struct{}),
-		testScope:       parent.testScope,
+		nativeHistogramFactory:          parent.nativeHistogramFactory,
+		defaultNativeHistogramMaxBucket: parent.defaultNativeHistogramMaxBucket,
+
+		counters:              make(map[string]*counter),
+		countersSlice:         make([]*counter, 0, _defaultInitialSliceSize),
+		gauges:                make(map[string]*gauge),
+		gaugesSlice:           make([]*gauge, 0, _defaultInitialSliceSize),
+		histograms:            make(map[string]*histogram),
+		histogramsSlice:       make([]*histogram, 0, _defaultInitialSliceSize),
+		nativeHistograms:      make(map[string]*nativeHistogram),
+		nativeHistogramsSlice: make([]*nativeHistogram, 0, _defaultInitialSliceSize),
+		timers:                make(map[string]*timer),
+		bucketCache:           parent.bucketCache,
+		done:                  make(chan struct{}),
+		testScope:             parent.testScope,
 	}
 	subscopeBucket.s[sanitizedKey] = subscope
 	if _, ok := r.lockedLookup(subscopeBucket, unsanitizedKey); !ok {

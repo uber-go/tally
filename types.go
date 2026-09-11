@@ -54,6 +54,16 @@ type Scope interface {
 	// You can use tally.MustMakeExponentialDurationBuckets(start, factor, count) for exponential durations.
 	Histogram(name string, buckets Buckets) Histogram
 
+	// NativeHistogram returns the NativeHistogram object corresponding to the
+	// name, holding at most maxBuckets buckets. Pass 0 to use the scope's
+	// configured default.
+	//
+	// Unlike Histogram, bucket boundaries are derived from the observations
+	// rather than declared up front, and the distribution is reported as a
+	// single serialized payload. Requires ScopeOptions.NativeHistogramFactory
+	// to be set; without it the metric accumulates but is never reported.
+	NativeHistogram(name string, maxBuckets int) NativeHistogram
+
 	// Tagged returns a new child scope with the given tags and current tags.
 	Tagged(tags map[string]string) Scope
 
