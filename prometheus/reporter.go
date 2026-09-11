@@ -216,6 +216,9 @@ func (m noopMetric) ReportCount(value int64)            {}
 func (m noopMetric) ReportGauge(value float64)          {}
 func (m noopMetric) ReportTimer(interval time.Duration) {}
 func (m noopMetric) ReportSamples(value int64)          {}
+
+func (m noopMetric) ReportNativeHistogram(payload []byte, samples uint64) {}
+
 func (m noopMetric) ValueBucket(lower, upper float64) tally.CachedHistogramBucket {
 	return m
 }
@@ -569,6 +572,21 @@ func (r *reporter) AllocateHistogram(
 		return noopMetric{}
 	}
 	return &cachedMetric{histogram: histogramVec.With(tags)}
+}
+
+// AllocateNativeHistogram implements tally.CachedStatsReporter.
+//
+// Prometheus has native histograms of its own, but tally hands this method an
+// already-serialized payload in whatever encoding the application chose via
+// ScopeOptions.NativeHistogramFactory. An opaque blob cannot be turned into a
+// prometheus.Collector, so there is nothing to register and the metric is
+// dropped.
+func (r *reporter) AllocateNativeHistogram(
+	name string,
+	tags map[string]string,
+	maxBuckets int,
+) tally.CachedNativeHistogram {
+	return noopMetric{}
 }
 
 func (r *reporter) Capabilities() tally.Capabilities {

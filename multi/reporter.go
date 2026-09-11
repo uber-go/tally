@@ -103,6 +103,17 @@ func (r *multi) ReportHistogramDurationSamples(
 	}
 }
 
+func (r *multi) ReportNativeHistogram(
+	name string,
+	tags map[string]string,
+	payload []byte,
+	samples uint64,
+) {
+	for _, r := range r.reporters {
+		r.ReportNativeHistogram(name, tags, payload, samples)
+	}
+}
+
 func (r *multi) Capabilities() tally.Capabilities {
 	return r.multiBaseReporters.Capabilities()
 }
@@ -175,6 +186,18 @@ func (r *multiCached) AllocateHistogram(
 	return multiMetric{histograms: metrics}
 }
 
+func (r *multiCached) AllocateNativeHistogram(
+	name string,
+	tags map[string]string,
+	maxBuckets int,
+) tally.CachedNativeHistogram {
+	metrics := make([]tally.CachedNativeHistogram, 0, len(r.reporters))
+	for _, r := range r.reporters {
+		metrics = append(metrics, r.AllocateNativeHistogram(name, tags, maxBuckets))
+	}
+	return multiMetric{nativeHistograms: metrics}
+}
+
 func (r *multiCached) Capabilities() tally.Capabilities {
 	return r.multiBaseReporters.Capabilities()
 }
@@ -184,10 +207,11 @@ func (r *multiCached) Flush() {
 }
 
 type multiMetric struct {
-	counters   []tally.CachedCount
-	gauges     []tally.CachedGauge
-	timers     []tally.CachedTimer
-	histograms []tally.CachedHistogram
+	counters         []tally.CachedCount
+	gauges           []tally.CachedGauge
+	timers           []tally.CachedTimer
+	histograms       []tally.CachedHistogram
+	nativeHistograms []tally.CachedNativeHistogram
 }
 
 func (m multiMetric) ReportCount(value int64) {
@@ -228,6 +252,12 @@ func (m multiMetric) DurationBucket(
 			m.DurationBucket(bucketLowerBound, bucketUpperBound))
 	}
 	return multiHistogramBucket{multi}
+}
+
+func (m multiMetric) ReportNativeHistogram(payload []byte, samples uint64) {
+	for _, m := range m.nativeHistograms {
+		m.ReportNativeHistogram(payload, samples)
+	}
 }
 
 type multiHistogramBucket struct {

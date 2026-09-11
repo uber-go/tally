@@ -44,6 +44,7 @@ func TestMultiReporter(t *testing.T) {
 		{"foo": "qux"},
 		{"foo": "bzz"},
 		{"foo": "buz"},
+		{"foo": "nhg"},
 	}
 
 	valueBuckets := tally.MustMakeLinearValueBuckets(0, 2, 5)
@@ -57,6 +58,7 @@ func TestMultiReporter(t *testing.T) {
 		2.0, 4.0, 3)
 	r.ReportHistogramDurationSamples("buz", tags[4], durationBuckets,
 		2*time.Second, 4*time.Second, 3)
+	r.ReportNativeHistogram("nhg", tags[5], []byte("payload"), 7)
 	for _, r := range all {
 		require.Equal(t, 2, len(r.counts))
 
@@ -87,6 +89,12 @@ func TestMultiReporter(t *testing.T) {
 		assert.Equal(t, 2*time.Second, r.histogramDurationSamples[0].bucketLowerBound)
 		assert.Equal(t, 4*time.Second, r.histogramDurationSamples[0].bucketUpperBound)
 		assert.Equal(t, int64(3), r.histogramDurationSamples[0].samples)
+
+		require.Equal(t, 1, len(r.nativeHistograms))
+		assert.Equal(t, "nhg", r.nativeHistograms[0].name)
+		assert.Equal(t, tags[5], r.nativeHistograms[0].tags)
+		assert.Equal(t, []byte("payload"), r.nativeHistograms[0].payload)
+		assert.Equal(t, uint64(7), r.nativeHistograms[0].samples)
 	}
 
 	assert.NotNil(t, r.Capabilities())
@@ -112,6 +120,7 @@ func TestMultiCachedReporter(t *testing.T) {
 		{"foo": "qux"},
 		{"foo": "bzz"},
 		{"foo": "buz"},
+		{"foo": "nhg"},
 	}
 
 	valueBuckets := tally.MustMakeLinearValueBuckets(0, 2, 5)
@@ -132,6 +141,9 @@ func TestMultiCachedReporter(t *testing.T) {
 
 	dhist := r.AllocateHistogram("buz", tags[4], durationBuckets)
 	dhist.DurationBucket(2*time.Second, 4*time.Second).ReportSamples(3)
+
+	nhist := r.AllocateNativeHistogram("nhg", tags[5], 160)
+	nhist.ReportNativeHistogram([]byte("payload"), 7)
 
 	for _, r := range all {
 		require.Equal(t, 2, len(r.counts))
@@ -163,6 +175,12 @@ func TestMultiCachedReporter(t *testing.T) {
 		assert.Equal(t, 2*time.Second, r.histogramDurationSamples[0].bucketLowerBound)
 		assert.Equal(t, 4*time.Second, r.histogramDurationSamples[0].bucketUpperBound)
 		assert.Equal(t, int64(3), r.histogramDurationSamples[0].samples)
+
+		require.Equal(t, 1, len(r.nativeHistograms))
+		assert.Equal(t, "nhg", r.nativeHistograms[0].name)
+		assert.Equal(t, tags[5], r.nativeHistograms[0].tags)
+		assert.Equal(t, []byte("payload"), r.nativeHistograms[0].payload)
+		assert.Equal(t, uint64(7), r.nativeHistograms[0].samples)
 	}
 
 	assert.NotNil(t, r.Capabilities())
@@ -179,6 +197,7 @@ type capturingStatsReporter struct {
 	timers                   []capturedTimer
 	histogramValueSamples    []capturedHistogramValueSamples
 	histogramDurationSamples []capturedHistogramDurationSamples
+	nativeHistograms         []capturedNativeHistogram
 	capabilities             int
 	flush                    int
 }
@@ -215,6 +234,13 @@ type capturedHistogramDurationSamples struct {
 	bucketLowerBound time.Duration
 	bucketUpperBound time.Duration
 	samples          int64
+}
+
+type capturedNativeHistogram struct {
+	name    string
+	tags    map[string]string
+	payload []byte
+	samples uint64
 }
 
 func newCapturingStatsReporter() *capturingStatsReporter {
@@ -275,6 +301,16 @@ func (r *capturingStatsReporter) ReportHistogramDurationSamples(
 	r.histogramDurationSamples = append(r.histogramDurationSamples, elem)
 }
 
+func (r *capturingStatsReporter) ReportNativeHistogram(
+	name string,
+	tags map[string]string,
+	payload []byte,
+	samples uint64,
+) {
+	elem := capturedNativeHistogram{name, tags, payload, samples}
+	r.nativeHistograms = append(r.nativeHistograms, elem)
+}
+
 func (r *capturingStatsReporter) AllocateCounter(
 	name string,
 	tags map[string]string,
@@ -323,6 +359,17 @@ func (r *capturingStatsReporter) AllocateHistogram(
 	}
 }
 
+func (r *capturingStatsReporter) AllocateNativeHistogram(
+	name string,
+	tags map[string]string,
+	maxBuckets int,
+) tally.CachedNativeHistogram {
+	return cachedNativeHistogram{fn: func(payload []byte, samples uint64) {
+		elem := capturedNativeHistogram{name, tags, payload, samples}
+		r.nativeHistograms = append(r.nativeHistograms, elem)
+	}}
+}
+
 func (r *capturingStatsReporter) Capabilities() tally.Capabilities {
 	r.capabilities++
 	return r
@@ -362,6 +409,14 @@ type cachedTimer struct {
 
 func (c cachedTimer) ReportTimer(value time.Duration) {
 	c.fn(value)
+}
+
+type cachedNativeHistogram struct {
+	fn func(payload []byte, samples uint64)
+}
+
+func (h cachedNativeHistogram) ReportNativeHistogram(payload []byte, samples uint64) {
+	h.fn(payload, samples)
 }
 
 type cachedHistogram struct {

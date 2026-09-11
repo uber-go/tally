@@ -138,6 +138,18 @@ func (r *cactusStatsReporter) durationBucketString(
 	return upperBound.String()
 }
 
+// ReportNativeHistogram implements tally.StatsReporter.
+//
+// The statsd wire protocol carries scalar values only, so there is no way to
+// transmit a serialized native histogram payload and the metric is dropped.
+func (r *cactusStatsReporter) ReportNativeHistogram(
+	name string,
+	tags map[string]string,
+	payload []byte,
+	samples uint64,
+) {
+}
+
 func (r *cactusStatsReporter) Capabilities() tally.Capabilities {
 	return r
 }
