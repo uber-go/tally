@@ -29,7 +29,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	tally "github.com/uber-go/tally/v4"
+	tally "github.com/uber-go/tally/v7"
 )
 
 // NB(r): If a test is failing, you can debug what is being
