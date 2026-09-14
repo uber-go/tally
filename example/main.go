@@ -69,6 +69,16 @@ func (r *printStatsReporter) ReportHistogramDurationSamples(
 		name, bucketLowerBound, bucketUpperBound, samples)
 }
 
+func (r *printStatsReporter) ReportNativeHistogram(
+	name string,
+	_ map[string]string,
+	payload []byte,
+	samples uint64,
+) {
+	fmt.Printf("native histogram %s payload %d bytes samples %d\n",
+		name, len(payload), samples)
+}
+
 func (r *printStatsReporter) Capabilities() tally.Capabilities {
 	return r
 }

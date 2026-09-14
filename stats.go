@@ -249,6 +249,14 @@ func (r *timerNoReporterSink) ReportHistogramDurationSamples(
 ) {
 }
 
+func (r *timerNoReporterSink) ReportNativeHistogram(
+	name string,
+	tags map[string]string,
+	payload []byte,
+	samples uint64,
+) {
+}
+
 func (r *timerNoReporterSink) Capabilities() Capabilities {
 	return capabilitiesReportingTagging
 }
@@ -539,6 +547,14 @@ func (r nullStatsReporter) ReportHistogramDurationSamples(
 	bucketLowerBound,
 	bucketUpperBound time.Duration,
 	samples int64,
+) {
+}
+
+func (r nullStatsReporter) ReportNativeHistogram(
+	name string,
+	tags map[string]string,
+	payload []byte,
+	samples uint64,
 ) {
 }
 

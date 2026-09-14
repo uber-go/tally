@@ -29,10 +29,12 @@ import (
 )
 
 type statsTestReporter struct {
-	last            interface{}
-	valueSamples    map[float64]int
-	durationSamples map[time.Duration]int
-	buckets         Buckets
+	last                   interface{}
+	valueSamples           map[float64]int
+	durationSamples        map[time.Duration]int
+	buckets                Buckets
+	nativeHistogramPayload []byte
+	nativeHistogramSamples uint64
 }
 
 func newStatsTestReporter() *statsTestReporter {
@@ -75,6 +77,16 @@ func (r *statsTestReporter) ReportHistogramDurationSamples(
 ) {
 	r.durationSamples[bucketUpperBound] = int(samples)
 	r.buckets = buckets
+}
+
+func (r *statsTestReporter) ReportNativeHistogram(
+	name string,
+	tags map[string]string,
+	payload []byte,
+	samples uint64,
+) {
+	r.nativeHistogramPayload = payload
+	r.nativeHistogramSamples = samples
 }
 
 func (r *statsTestReporter) Capabilities() Capabilities {

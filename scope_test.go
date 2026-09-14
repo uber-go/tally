@@ -100,18 +100,26 @@ func newTestHistogramValue() *testHistogramValue {
 	}
 }
 
+type testNativeHistogramValue struct {
+	tags    map[string]string
+	payload []byte
+	samples uint64
+}
+
 type testStatsReporter struct {
 	mtx sync.Mutex
 
-	cg sync.WaitGroup
-	gg sync.WaitGroup
-	tg sync.WaitGroup
-	hg sync.WaitGroup
+	cg  sync.WaitGroup
+	gg  sync.WaitGroup
+	tg  sync.WaitGroup
+	hg  sync.WaitGroup
+	nhg sync.WaitGroup
 
-	counters   map[string]*testIntValue
-	gauges     map[string]*testFloatValue
-	timers     map[string]*testIntValue
-	histograms map[string]*testHistogramValue
+	counters         map[string]*testIntValue
+	gauges           map[string]*testFloatValue
+	timers           map[string]*testIntValue
+	histograms       map[string]*testHistogramValue
+	nativeHistograms map[string]*testNativeHistogramValue
 
 	flushes int32
 }
@@ -119,10 +127,11 @@ type testStatsReporter struct {
 // newTestStatsReporter returns a new TestStatsReporter
 func newTestStatsReporter() *testStatsReporter {
 	return &testStatsReporter{
-		counters:   make(map[string]*testIntValue),
-		gauges:     make(map[string]*testFloatValue),
-		timers:     make(map[string]*testIntValue),
-		histograms: make(map[string]*testHistogramValue),
+		counters:         make(map[string]*testIntValue),
+		gauges:           make(map[string]*testFloatValue),
+		timers:           make(map[string]*testIntValue),
+		histograms:       make(map[string]*testHistogramValue),
+		nativeHistograms: make(map[string]*testNativeHistogramValue),
 	}
 }
 
@@ -211,6 +220,7 @@ func (r *testStatsReporter) WaitAll() {
 	r.gg.Wait()
 	r.tg.Wait()
 	r.hg.Wait()
+	r.nhg.Wait()
 }
 
 func (r *testStatsReporter) AllocateCounter(
@@ -386,6 +396,45 @@ func (r *testStatsReporter) ReportHistogramDurationSamples(
 	}
 	value.durationSamples[bucketUpperBound] = int(samples)
 	r.hg.Done()
+}
+
+func (r *testStatsReporter) AllocateNativeHistogram(
+	name string,
+	tags map[string]string,
+	maxBuckets int,
+) CachedNativeHistogram {
+	return testStatsReporterCachedNativeHistogram{r, name, tags}
+}
+
+type testStatsReporterCachedNativeHistogram struct {
+	r    *testStatsReporter
+	name string
+	tags map[string]string
+}
+
+func (h testStatsReporterCachedNativeHistogram) ReportNativeHistogram(
+	payload []byte,
+	samples uint64,
+) {
+	h.r.ReportNativeHistogram(h.name, h.tags, payload, samples)
+}
+
+func (r *testStatsReporter) ReportNativeHistogram(
+	name string,
+	tags map[string]string,
+	payload []byte,
+	samples uint64,
+) {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
+	key := KeyForPrefixedStringMap(name, tags)
+	r.nativeHistograms[key] = &testNativeHistogramValue{
+		tags:    tags,
+		payload: payload,
+		samples: samples,
+	}
+	r.nhg.Done()
 }
 
 func (r *testStatsReporter) Capabilities() Capabilities {

@@ -75,6 +75,16 @@ type StatsReporter interface {
 		bucketUpperBound time.Duration,
 		samples int64,
 	)
+
+	// ReportNativeHistogram reports a serialized native histogram covering
+	// the samples observed since the last report. The payload encoding is
+	// determined by the NativeHistogramData the scope was configured with.
+	ReportNativeHistogram(
+		name string,
+		tags map[string]string,
+		payload []byte,
+		samples uint64,
+	)
 }
 
 // CachedStatsReporter is a backend for Scopes that pre allocates all
@@ -107,6 +117,14 @@ type CachedStatsReporter interface {
 		tags map[string]string,
 		buckets Buckets,
 	) CachedHistogram
+
+	// AllocateNativeHistogram pre allocates a native histogram data structure
+	// with name, tags and a bucket budget.
+	AllocateNativeHistogram(
+		name string,
+		tags map[string]string,
+		maxBuckets int,
+	) CachedNativeHistogram
 }
 
 // CachedCount interface for reporting an individual counter
@@ -137,4 +155,14 @@ type CachedHistogram interface {
 // CachedHistogramBucket interface for reporting histogram samples to a specific bucket
 type CachedHistogramBucket interface {
 	ReportSamples(value int64)
+}
+
+// CachedNativeHistogram interface for reporting an individual native histogram.
+//
+// There is no per-bucket equivalent of CachedHistogramBucket: a native
+// histogram rescales its buckets as it observes values, so there is no stable
+// set of bounds to pre-allocate handles against. The whole distribution is
+// reported as one payload instead.
+type CachedNativeHistogram interface {
+	ReportNativeHistogram(payload []byte, samples uint64)
 }
