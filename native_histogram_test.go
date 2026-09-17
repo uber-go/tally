@@ -102,22 +102,21 @@ func TestNativeHistogramRecordValue(t *testing.T) {
 	assert.Equal(t, uint64(2), h.snapshot())
 }
 
-// RecordDuration must convert to seconds: the same units that
-// DurationBuckets.AsValues() uses. Getting this wrong silently misaligns
-// percentiles against tally's own bucketed histograms.
-func TestNativeHistogramRecordDurationRecordsSeconds(t *testing.T) {
+// RecordDuration must convert to milliseconds. Getting this wrong silently
+// misaligns every percentile by 1000x, and nothing downstream can correct it.
+func TestNativeHistogramRecordDurationRecordsMilliseconds(t *testing.T) {
 	tests := []struct {
 		duration time.Duration
 		expected float64
 	}{
 		{duration: 0, expected: 0},
-		{duration: time.Nanosecond, expected: 1e-9},
-		{duration: time.Microsecond, expected: 1e-6},
-		{duration: time.Millisecond, expected: 0.001},
-		{duration: 250 * time.Millisecond, expected: 0.25},
-		{duration: time.Second, expected: 1},
-		{duration: 90 * time.Second, expected: 90},
-		{duration: -time.Second, expected: -1},
+		{duration: time.Nanosecond, expected: 1e-6},
+		{duration: time.Microsecond, expected: 0.001},
+		{duration: time.Millisecond, expected: 1},
+		{duration: 250 * time.Millisecond, expected: 250},
+		{duration: time.Second, expected: 1000},
+		{duration: 90 * time.Second, expected: 90000},
+		{duration: -time.Second, expected: -1000},
 	}
 
 	for _, tt := range tests {
@@ -133,9 +132,10 @@ func TestNativeHistogramRecordDurationRecordsSeconds(t *testing.T) {
 	}
 }
 
-// A duration must land on the same value the equivalent bucketed histogram
-// would have used for it.
-func TestNativeHistogramDurationUnitsMatchDurationBuckets(t *testing.T) {
+// Native duration histograms are milliseconds where DurationBuckets is
+// seconds. The divergence is deliberate; pinned here so it cannot be quietly
+// "corrected" back into alignment.
+func TestNativeHistogramDurationUnitsDivergeFromDurationBuckets(t *testing.T) {
 	buckets := DurationBuckets{
 		10 * time.Millisecond,
 		250 * time.Millisecond,
@@ -148,7 +148,14 @@ func TestNativeHistogramDurationUnitsMatchDurationBuckets(t *testing.T) {
 		h.RecordDuration(d)
 	}
 
-	assert.Equal(t, buckets.AsValues(), data.values)
+	assert.Equal(t, []float64{10, 250, 3000}, data.values)
+
+	seconds := buckets.AsValues()
+	require.Equal(t, len(seconds), len(data.values))
+	for i := range seconds {
+		assert.Equal(t, seconds[i]*1000, data.values[i],
+			"milliseconds, exactly 1000x the bucketed equivalent")
+	}
 }
 
 func TestNativeHistogramStopwatch(t *testing.T) {
@@ -165,7 +172,7 @@ func TestNativeHistogramStopwatch(t *testing.T) {
 	sw.Stop()
 
 	require.Equal(t, 1, len(data.values))
-	assert.Equal(t, 1.5, data.values[0])
+	assert.Equal(t, float64(1500), data.values[0])
 }
 
 func TestNativeHistogramReport(t *testing.T) {
@@ -238,9 +245,10 @@ func TestNativeHistogramReportDiscardsSamplesOnMarshalError(t *testing.T) {
 	assert.Equal(t, uint64(0), h.snapshot())
 }
 
-// The reason the type is split in two. A histogram that accepts both APIs lets
-// two call sites feed one distribution in different units -- 250 and 0.25 for
-// the same quarter second -- with nothing to catch it.
+// The reason the type is split in two. RecordValue states no unit, so a
+// histogram that accepts both APIs lets two call sites feed one distribution
+// 1000x apart -- RecordValue(2) for two seconds against the 2000 that
+// RecordDuration(2*time.Second) records -- with nothing to catch it.
 func TestNativeHistogramVariantsWithholdEachOthersAPIs(t *testing.T) {
 	acc := newNativeHistogram(newTestNativeHistogramData(), nil)
 
@@ -394,7 +402,8 @@ func TestScopeNativeHistogram(t *testing.T) {
 
 	latency := r.getNativeHistograms()["latency"]
 	require.NotNil(t, latency)
-	assert.Equal(t, []byte("[2]"), latency.payload, "durations report as seconds")
+	assert.Equal(t, []byte("[2000]"), latency.payload,
+		"durations report as milliseconds")
 	assert.Equal(t, uint64(1), latency.samples)
 }
 
@@ -558,8 +567,8 @@ func TestScopeNativeHistogramVariantsAreSeparateMetrics(t *testing.T) {
 	require.Equal(t, 2, len(f.maxBuckets), "one accumulator per variant")
 	require.Equal(t, 2, len(f.data))
 	assert.Equal(t, []float64{1}, f.data[0].values)
-	assert.Equal(t, []float64{1}, f.data[1].values,
-		"a second of duration, not the raw value")
+	assert.Equal(t, []float64{1000}, f.data[1].values,
+		"a second of duration in milliseconds, not the raw value")
 }
 
 func TestScopeNativeHistogramSnapshot(t *testing.T) {
