@@ -66,7 +66,7 @@ type Scope interface {
 	NativeValueHistogram(name string) NativeValueHistogram
 
 	// NativeDurationHistogram is NativeValueHistogram for durations, which it
-	// records as seconds.
+	// records as milliseconds.
 	//
 	// Durations are a separate metric from values, not another way to write to
 	// the same one, so a name used for both yields two distributions reported

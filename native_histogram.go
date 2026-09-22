@@ -76,9 +76,9 @@ type NativeValueHistogram interface {
 }
 
 // NativeDurationHistogram is the NativeValueHistogram equivalent for
-// durations, which it records as seconds.
+// durations, which it records as milliseconds.
 type NativeDurationHistogram interface {
-	// RecordDuration records a specific duration directly, as seconds.
+	// RecordDuration records a specific duration directly, as milliseconds.
 	RecordDuration(value time.Duration)
 
 	// Start gives you a specific point in time to then record a duration.
@@ -189,11 +189,12 @@ type nativeDurationHistogram struct {
 	*nativeHistogram
 }
 
-// RecordDuration records value in SECONDS, matching the units that
-// DurationBuckets.AsValues() reports durations in. Reporters that need another
-// unit on the wire convert on the way out.
+// RecordDuration records value in MILLISECONDS. This deliberately differs from
+// DurationBuckets.AsValues(), which is seconds: record() buckets the value on
+// the way in, and 1000x is not a power-of-two shift, so no reporter downstream
+// can rescale the sketch afterwards. The unit has to be right here.
 func (h nativeDurationHistogram) RecordDuration(value time.Duration) {
-	h.record(value.Seconds())
+	h.record(float64(value) / float64(time.Millisecond))
 }
 
 func (h nativeDurationHistogram) Start() Stopwatch {
