@@ -22,6 +22,7 @@ package thrift
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -565,6 +566,10 @@ func (p *TSimpleJSONProtocol) Transport() TTransport {
 }
 
 func (p *TSimpleJSONProtocol) OutputPreValue() error {
+	if len(p.dumpContext) == 0 {
+        return errors.New("dumpContext is empty")
+	}
+
 	cxt := _ParseContext(p.dumpContext[len(p.dumpContext)-1])
 	switch cxt {
 	case _CONTEXT_IN_LIST, _CONTEXT_IN_OBJECT_NEXT_KEY:
@@ -582,6 +587,10 @@ func (p *TSimpleJSONProtocol) OutputPreValue() error {
 }
 
 func (p *TSimpleJSONProtocol) OutputPostValue() error {
+	if len(p.dumpContext) == 0 {
+        return errors.New("dumpContext is empty")
+    }
+
 	cxt := _ParseContext(p.dumpContext[len(p.dumpContext)-1])
 	switch cxt {
 	case _CONTEXT_IN_LIST_FIRST:
@@ -608,6 +617,10 @@ func (p *TSimpleJSONProtocol) OutputBool(value bool) error {
 	if e := p.OutputPreValue(); e != nil {
 		return e
 	}
+	if len(p.dumpContext) == 0 {
+        return errors.New("dumpContext is empty")
+	}
+
 	var v string
 	if value {
 		v = string(JSON_TRUE)
@@ -648,6 +661,9 @@ func (p *TSimpleJSONProtocol) OutputF64(value float64) error {
 		v = string(JSON_QUOTE) + JSON_NEGATIVE_INFINITY + string(JSON_QUOTE)
 	} else {
 		v = strconv.FormatFloat(value, 'g', -1, 64)
+		if len(p.dumpContext) == 0 {
+             return errors.New("dumpContext is empty")
+		}
 		switch _ParseContext(p.dumpContext[len(p.dumpContext)-1]) {
 		case _CONTEXT_IN_OBJECT_FIRST, _CONTEXT_IN_OBJECT_NEXT_KEY:
 			v = string(JSON_QUOTE) + v + string(JSON_QUOTE)
@@ -664,6 +680,10 @@ func (p *TSimpleJSONProtocol) OutputI64(value int64) error {
 	if e := p.OutputPreValue(); e != nil {
 		return e
 	}
+	if len(p.dumpContext) == 0 {
+        return errors.New("dumpContext is empty")
+	}
+
 	v := strconv.FormatInt(value, 10)
 	switch _ParseContext(p.dumpContext[len(p.dumpContext)-1]) {
 	case _CONTEXT_IN_OBJECT_FIRST, _CONTEXT_IN_OBJECT_NEXT_KEY:
@@ -706,6 +726,10 @@ func (p *TSimpleJSONProtocol) OutputObjectEnd() error {
 	if _, e := p.write(JSON_RBRACE); e != nil {
 		return NewTProtocolException(e)
 	}
+	if len(p.dumpContext) == 0 {
+        return errors.New("dumpContext is empty")
+    }
+
 	p.dumpContext = p.dumpContext[:len(p.dumpContext)-1]
 	if e := p.OutputPostValue(); e != nil {
 		return e
@@ -728,6 +752,10 @@ func (p *TSimpleJSONProtocol) OutputListEnd() error {
 	if _, e := p.write(JSON_RBRACKET); e != nil {
 		return NewTProtocolException(e)
 	}
+	if len(p.dumpContext) == 0 {
+        return errors.New("dumpContext is empty")
+    }
+
 	p.dumpContext = p.dumpContext[:len(p.dumpContext)-1]
 	if e := p.OutputPostValue(); e != nil {
 		return e
@@ -752,6 +780,10 @@ func (p *TSimpleJSONProtocol) ParsePreValue() error {
 	if e := p.readNonSignificantWhitespace(); e != nil {
 		return NewTProtocolException(e)
 	}
+	if len(p.parseContextStack) == 0 {
+        return errors.New("parseContextStack is empty")
+	}
+
 	cxt := _ParseContext(p.parseContextStack[len(p.parseContextStack)-1])
 	b, _ := p.reader.Peek(1)
 	switch cxt {
@@ -812,6 +844,10 @@ func (p *TSimpleJSONProtocol) ParsePostValue() error {
 	if e := p.readNonSignificantWhitespace(); e != nil {
 		return NewTProtocolException(e)
 	}
+	if len(p.parseContextStack) == 0 {
+        return errors.New("parseContextStack is empty")
+    }
+
 	cxt := _ParseContext(p.parseContextStack[len(p.parseContextStack)-1])
 	switch cxt {
 	case _CONTEXT_IN_LIST_FIRST:
@@ -991,6 +1027,10 @@ func (p *TSimpleJSONProtocol) ParseObjectEnd() error {
 	if isNull, err := p.readIfNull(); isNull || err != nil {
 		return err
 	}
+	if len(p.parseContextStack) == 0 {
+        return errors.New("parseContextStack is empty")
+	}
+
 	cxt := _ParseContext(p.parseContextStack[len(p.parseContextStack)-1])
 	if (cxt != _CONTEXT_IN_OBJECT_FIRST) && (cxt != _CONTEXT_IN_OBJECT_NEXT_KEY) {
 		e := fmt.Errorf("Expected to be in the Object Context, but not in Object Context (%d)", cxt)
@@ -1052,6 +1092,10 @@ func (p *TSimpleJSONProtocol) ParseListEnd() error {
 	if isNull, err := p.readIfNull(); isNull || err != nil {
 		return err
 	}
+	if len(p.parseContextStack) == 0 {
+        return errors.New("parseContextStack is empty")
+	}
+
 	cxt := _ParseContext(p.parseContextStack[len(p.parseContextStack)-1])
 	if cxt != _CONTEXT_IN_LIST {
 		e := fmt.Errorf("Expected to be in the List Context, but not in List Context (%d)", cxt)
