@@ -21,6 +21,7 @@
 package tally
 
 import (
+	"math"
 	"math/rand"
 	"testing"
 	"time"
@@ -181,4 +182,15 @@ func TestHistogramDurationSamples(t *testing.T) {
 	assert.Equal(t, 3, r.durationSamples[10*time.Millisecond])
 	assert.Equal(t, 5, r.durationSamples[60*time.Millisecond])
 	assert.Equal(t, buckets, r.buckets)
+}
+
+func TestHistogramRecordValueNaN(t *testing.T) {
+	r := newStatsTestReporter()
+	buckets := MustMakeLinearValueBuckets(0, 10, 10)
+	storage := newBucketStorage(valueHistogramType, buckets)
+	h := newHistogram(valueHistogramType, "h1", nil, r, storage, nil)
+
+	assert.NotPanics(t, func() {
+		h.RecordValue(math.NaN())
+	})
 }
