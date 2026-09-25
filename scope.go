@@ -34,9 +34,9 @@ const (
 )
 
 var (
-	// NoopScope is a scope that does nothing
+	// NoopScope is a scope that does nothing.
 	NoopScope, _ = NewRootScope(ScopeOptions{Reporter: NullStatsReporter}, 0)
-	// DefaultSeparator is the default separator used to join nested scopes
+	// DefaultSeparator is the default separator used to join nested scopes.
 	DefaultSeparator = "."
 
 	globalNow = time.Now
