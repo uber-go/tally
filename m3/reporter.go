@@ -21,6 +21,7 @@
 package m3
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -31,7 +32,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
 	tally "github.com/uber-go/tally/v7"
 	"github.com/uber-go/tally/v7/internal/cache"
 	customtransport "github.com/uber-go/tally/v7/m3/customtransports"
@@ -224,7 +224,7 @@ func NewReporter(opts Options) (Reporter, error) {
 		if opts.CommonTags[HostTag] == "" {
 			hostname, err := os.Hostname()
 			if err != nil {
-				return nil, errors.WithMessage(err, "error resolving host tag")
+				return nil, fmt.Errorf("error resolving host tag: %w", err)
 			}
 			tagm[HostTag] = hostname
 		}
@@ -247,10 +247,7 @@ func NewReporter(opts Options) (Reporter, error) {
 	)
 
 	if err := batch.Write(proto); err != nil {
-		return nil, errors.WithMessage(
-			err,
-			"failed to write to proto for size calculation",
-		)
+		return nil, fmt.Errorf("failed to write to proto for size calculation: %w", err)
 	}
 
 	resourcePool.releaseMetricSlice(batch.Metrics)

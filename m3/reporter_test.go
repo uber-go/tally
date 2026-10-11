@@ -22,6 +22,7 @@ package m3
 
 import (
 	"bytes"
+	"errors"
 	"math/rand"
 	"net"
 	"os"
@@ -174,20 +175,45 @@ func TestMultiReporter(t *testing.T) {
 // TestNewReporterErrors tests for Reporter creation errors
 func TestNewReporterErrors(t *testing.T) {
 	var err error
+	// Test empty HostPorts
+	_, err = NewReporter(Options{})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errNoHostPorts))
+
 	// Test freeBytes (maxPacketSizeBytes - numOverheadBytes) is negative
 	_, err = NewReporter(Options{
-		HostPorts:          []string{"127.0.0.1"},
+		HostPorts:          []string{"127.0.0.1:0"},
 		Service:            "test-service",
+		Env:                "test-env",
 		MaxQueueSize:       10,
 		MaxPacketSizeBytes: 2 << 5,
 	})
 	assert.Error(t, err)
+	assert.True(t, errors.Is(err, errCommonTagSize))
+
 	// Test invalid addr
 	_, err = NewReporter(Options{
 		HostPorts: []string{"fakeAddress"},
 		Service:   "test-service",
+		Env:       "test-env",
 	})
 	assert.Error(t, err)
+}
+
+// TestReporterAlreadyClosedError tests that closing twice returns errAlreadyClosed
+func TestReporterAlreadyClosedError(t *testing.T) {
+	r, err := NewReporter(Options{
+		HostPorts:          []string{"127.0.0.1:0"},
+		Service:            "test-service",
+		Env:                "test-env",
+		MaxQueueSize:       10,
+		MaxPacketSizeBytes: 1440,
+	})
+	require.NoError(t, err)
+	require.NoError(t, r.Close())
+	err = r.Close()
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errAlreadyClosed))
 }
 
 // TestReporterRaceCondition checks if therem is race condition between reporter closing

@@ -21,6 +21,7 @@
 package prometheus
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -333,6 +334,37 @@ func TestHistogramBucketValues(t *testing.T) {
 				}),
 			},
 		},
+	})
+}
+
+func TestDefaultOnRegisterError(t *testing.T) {
+	r := NewReporter(Options{}).(*reporter)
+	require.NotNil(t, r.onRegisterError)
+
+	t.Run("previously registered error wraps and preserves cause", func(t *testing.T) {
+		rootErr := errors.New("previously registered with different collector")
+		defer func() {
+			recovered := recover()
+			require.NotNil(t, recovered)
+			err, ok := recovered.(error)
+			require.True(t, ok)
+			require.Contains(t, err.Error(), "potential tally.Scope() vs Prometheus usage contract mismatch")
+			require.True(t, errors.Is(err, rootErr))
+			require.Equal(t, rootErr, errors.Unwrap(err))
+		}()
+		r.onRegisterError(rootErr)
+	})
+
+	t.Run("other registration error panics unmodified", func(t *testing.T) {
+		rootErr := errors.New("other registration failure")
+		defer func() {
+			recovered := recover()
+			require.NotNil(t, recovered)
+			err, ok := recovered.(error)
+			require.True(t, ok)
+			require.Equal(t, rootErr, err)
+		}()
+		r.onRegisterError(rootErr)
 	})
 }
 
