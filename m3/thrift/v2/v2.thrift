@@ -27,6 +27,7 @@ struct Metric {
 struct MetricBatch {
     1: required list<Metric> metrics
     2: optional list<MetricTag> commonTags
+    3: optional string clientLibraryName
 }
 
 service M3 {

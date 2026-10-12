@@ -673,9 +673,11 @@ func (p *Metric) String() string {
 // Attributes:
 //  - Metrics
 //  - CommonTags
+//  - ClientLibraryName
 type MetricBatch struct {
-	Metrics    []Metric    `thrift:"metrics,1,required" json:"metrics"`
-	CommonTags []MetricTag `thrift:"commonTags,2" json:"commonTags,omitempty"`
+	Metrics           []Metric    `thrift:"metrics,1,required" json:"metrics"`
+	CommonTags        []MetricTag `thrift:"commonTags,2" json:"commonTags,omitempty"`
+	ClientLibraryName *string     `thrift:"clientLibraryName,3" json:"clientLibraryName,omitempty"`
 }
 
 func NewMetricBatch() *MetricBatch {
@@ -691,8 +693,21 @@ var MetricBatch_CommonTags_DEFAULT []MetricTag
 func (p *MetricBatch) GetCommonTags() []MetricTag {
 	return p.CommonTags
 }
+
+var MetricBatch_ClientLibraryName_DEFAULT string
+
+func (p *MetricBatch) GetClientLibraryName() string {
+	if !p.IsSetClientLibraryName() {
+		return MetricBatch_ClientLibraryName_DEFAULT
+	}
+	return *p.ClientLibraryName
+}
 func (p *MetricBatch) IsSetCommonTags() bool {
 	return p.CommonTags != nil
+}
+
+func (p *MetricBatch) IsSetClientLibraryName() bool {
+	return p.ClientLibraryName != nil
 }
 
 func (p *MetricBatch) Read(iprot thrift.TProtocol) error {
@@ -718,6 +733,10 @@ func (p *MetricBatch) Read(iprot thrift.TProtocol) error {
 			issetMetrics = true
 		case 2:
 			if err := p.readField2(iprot); err != nil {
+				return err
+			}
+		case 3:
+			if err := p.readField3(iprot); err != nil {
 				return err
 			}
 		default:
@@ -778,6 +797,15 @@ func (p *MetricBatch) readField2(iprot thrift.TProtocol) error {
 	return nil
 }
 
+func (p *MetricBatch) readField3(iprot thrift.TProtocol) error {
+	if v, err := iprot.ReadString(); err != nil {
+		return thrift.PrependError("error reading field 3: ", err)
+	} else {
+		p.ClientLibraryName = &v
+	}
+	return nil
+}
+
 func (p *MetricBatch) Write(oprot thrift.TProtocol) error {
 	if err := oprot.WriteStructBegin("MetricBatch"); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
@@ -786,6 +814,9 @@ func (p *MetricBatch) Write(oprot thrift.TProtocol) error {
 		return err
 	}
 	if err := p.writeField2(oprot); err != nil {
+		return err
+	}
+	if err := p.writeField3(oprot); err != nil {
 		return err
 	}
 	if err := oprot.WriteFieldStop(); err != nil {
@@ -836,6 +867,21 @@ func (p *MetricBatch) writeField2(oprot thrift.TProtocol) (err error) {
 		}
 		if err := oprot.WriteFieldEnd(); err != nil {
 			return thrift.PrependError(fmt.Sprintf("%T write field end error 2:commonTags: ", p), err)
+		}
+	}
+	return err
+}
+
+func (p *MetricBatch) writeField3(oprot thrift.TProtocol) (err error) {
+	if p.IsSetClientLibraryName() {
+		if err := oprot.WriteFieldBegin("clientLibraryName", thrift.STRING, 3); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 3:clientLibraryName: ", p), err)
+		}
+		if err := oprot.WriteString(string(*p.ClientLibraryName)); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T.clientLibraryName (3) field write error: ", p), err)
+		}
+		if err := oprot.WriteFieldEnd(); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 3:clientLibraryName: ", p), err)
 		}
 	}
 	return err
