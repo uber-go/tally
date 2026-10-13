@@ -104,6 +104,8 @@ func TestReporter(t *testing.T) {
 		// Validate common tags
 		for _, batch := range batches {
 			require.NotNil(t, batch)
+			require.True(t, batch.IsSetClientLibraryName())
+			require.Equal(t, ClientLibraryName, batch.GetClientLibraryName())
 			require.True(t, batch.IsSetCommonTags())
 			require.Equal(t, len(commonTags)+1, len(batch.GetCommonTags()))
 			for _, tag := range batch.GetCommonTags() {
@@ -145,6 +147,43 @@ func TestReporter(t *testing.T) {
 }
 
 // TestMultiReporter tests the multi Reporter works as expected
+func TestMetricBatchClientLibraryNameRoundTrip(t *testing.T) {
+	name := "custom_client"
+	tests := []struct {
+		desc string
+		name *string
+	}{
+		{desc: "set", name: &name},
+		{desc: "unset", name: nil},
+	}
+
+	factories := map[string]thrift.TProtocolFactory{
+		"binary":  thrift.NewTBinaryProtocolFactoryDefault(),
+		"compact": thrift.NewTCompactProtocolFactory(),
+	}
+
+	for protoName, factory := range factories {
+		for _, tt := range tests {
+			t.Run(protoName+"/"+tt.desc, func(t *testing.T) {
+				var (
+					buf   = thrift.NewTMemoryBuffer()
+					proto = factory.GetProtocol(buf)
+					in    = m3thrift.MetricBatch{
+						Metrics:           []m3thrift.Metric{{Name: "foo"}},
+						ClientLibraryName: tt.name,
+					}
+					out m3thrift.MetricBatch
+				)
+				require.NoError(t, in.Write(proto))
+				require.NoError(t, out.Read(proto))
+				require.Equal(t, tt.name != nil, out.IsSetClientLibraryName())
+				require.Equal(t, in.GetClientLibraryName(), out.GetClientLibraryName())
+				require.Equal(t, "foo", out.GetMetrics()[0].GetName())
+			})
+		}
+	}
+}
+
 func TestMultiReporter(t *testing.T) {
 	dests := []string{"127.0.0.1:9052", "127.0.0.1:9053"}
 	commonTags := map[string]string{
