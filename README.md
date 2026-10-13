@@ -3,7 +3,7 @@
 Fast, buffered, hierarchical stats collection in Go.
 
 ## Installation
-`go get -u github.com/uber-go/tally`
+`go get -u github.com/uber-go/tally/v7`
 
 ## Abstract
 
@@ -14,17 +14,17 @@ By default it buffers counters, gauges and histograms at a specified interval bu
 ## Structure
 
 - Scope: Keeps track of metrics, and their common metadata.
-- Metrics: Counters, Gauges, Timers and Histograms.
+- Metrics: Counters, Gauges, Timers, Histograms and Native Histograms.
 - Reporter: Implemented by you. Accepts aggregated values from the scope. Forwards the aggregated values to your metrics ingestion pipeline.
   - The reporters already available listed alphabetically are:
-	 - `github.com/uber-go/tally/m3`: Report m3 metrics, timers are not sampled and forwarded directly.
-	 - `github.com/uber-go/tally/multi`: Report to multiple reporters, you can multi-write metrics to other reporters simply.
-	 - `github.com/uber-go/tally/prometheus`: Report prometheus metrics, timers by default are made summaries with an option to make them histograms instead.
-	 - `github.com/uber-go/tally/statsd`: Report statsd metrics, no support for tags.
+	 - `github.com/uber-go/tally/v7/m3`: Report m3 metrics, timers are not sampled and forwarded directly.
+	 - `github.com/uber-go/tally/v7/multi`: Report to multiple reporters, you can multi-write metrics to other reporters simply.
+	 - `github.com/uber-go/tally/v7/prometheus`: Report prometheus metrics, timers by default are made summaries with an option to make them histograms instead.
+	 - `github.com/uber-go/tally/v7/statsd`: Report statsd metrics, no support for tags.
 
 ### Basics
 
- - Scopes created with tally provide race-safe registration and use of all metric types `Counter`, `Gauge`, `Timer`, `Histogram`.
+ - Scopes created with tally provide race-safe registration and use of all metric types `Counter`, `Gauge`, `Timer`, `Histogram`, `NativeValueHistogram` and `NativeDurationHistogram`.
  - `NewRootScope(...)` returns a `Scope` and `io.Closer`, the second return value is used to stop the scope's goroutine reporting values from the scope to it's reporter.  This is to reduce the footprint of `Scope` from the public API for those implementing it themselves to use in Go packages that take a tally `Scope`.
 
 ### Acquire a Scope ###
@@ -52,6 +52,31 @@ queueGauge := scope.Gauge("queue_length")  // cache me
 queueGauge.Update(42)
 ```
 
+### Native histograms ###
+
+A `Histogram` needs its buckets declared up front. A native histogram derives them from the observations instead, within a bucket budget, so you do not have to guess the shape of the distribution before you have seen it.
+
+The tradeoff is how it travels. A classic histogram reports as one counter per bucket, which every metrics protocol can carry. A native histogram rescales its buckets as it observes values, so there is no stable set of bounds to report against, and the whole distribution is serialized into a single payload per interval.
+
+Tally does not define that payload. You supply the accumulator and its encoding through `ScopeOptions.NativeHistogramFactory`, and the reporter you pair it with has to understand whatever that encoder produces:
+
+```go
+scope, closer := tally.NewRootScope(tally.ScopeOptions{
+	Reporter:                         myNativeHistogramReporter,
+	NativeHistogramFactory:           myEncoder.New,
+	DefaultNativeHistogramMaxBuckets: 160,
+}, time.Second)
+
+scope.NativeValueHistogram("payload_bytes").RecordValue(2048)
+scope.NativeDurationHistogram("latency").RecordDuration(120 * time.Millisecond)
+```
+
+Values and durations are separate metrics rather than two ways of writing to one. A native histogram has no declared buckets to signal which it holds, so mixing them would silently blend two scales into one distribution. Durations are recorded as milliseconds.
+
+**None of the bundled reporters can transmit native histograms.** The m3 and statsd wire formats have no field an opaque payload can travel in, and prometheus cannot turn one into a `prometheus.Collector`. The feature is for reporters paired with a matching encoder.
+
+Note that a scope drops native histograms it cannot encode or transmit, and says nothing when it does. The default is one such case: leaving `NativeHistogramFactory` unset keeps `NativeValueHistogram` and `NativeDurationHistogram` safe to call, but their values are then only counted, never reported, with no error or warning to say so. Set the factory at the same time you set the reporter.
+
 ### Report your metrics ###
 Use the inbuilt statsd reporter:
 
@@ -59,8 +84,8 @@ Use the inbuilt statsd reporter:
 import (
 	"io"
 	"github.com/cactus/go-statsd-client/v5/statsd"
-	"github.com/uber-go/tally"
-	tallystatsd "github.com/uber-go/tally/statsd"
+	"github.com/uber-go/tally/v7"
+	tallystatsd "github.com/uber-go/tally/v7/statsd"
 	// ...
 )
 
@@ -136,8 +161,20 @@ type StatsReporter interface {
 		bucketUpperBound time.Duration,
 		samples int64,
 	)
+
+	// ReportNativeHistogram reports a serialized native histogram covering
+	// the samples observed since the last report. The payload encoding is
+	// determined by the NativeHistogramData the scope was configured with.
+	ReportNativeHistogram(
+		name string,
+		tags map[string]string,
+		payload []byte,
+		samples uint64,
+	)
 }
 ```
+
+A `CachedStatsReporter` additionally pre-allocates a handle per metric with `AllocateNativeHistogram(name, tags, maxBuckets)`. There is no per-bucket equivalent of `CachedHistogramBucket`: a native histogram has no stable bounds to pre-allocate handles against, so the whole distribution is reported as one payload.
 
 Or implement your own metrics implementation that matches the tally `Scope` interface to use different buffering semantics:
 
@@ -162,6 +199,25 @@ type Scope interface {
 	// You can use tally.MustMakeExponentialValueBuckets(start, factor, count) for exponential values.
 	// You can use tally.MustMakeExponentialDurationBuckets(start, factor, count) for exponential durations.
 	Histogram(name string, buckets Buckets) Histogram
+
+	// NativeValueHistogram returns the NativeValueHistogram object
+	// corresponding to the name.
+	//
+	// Unlike Histogram, bucket boundaries are derived from the observations
+	// rather than declared up front, and the distribution is reported as a
+	// single serialized payload. The bucket budget is
+	// ScopeOptions.DefaultNativeHistogramMaxBuckets. Requires
+	// ScopeOptions.NativeHistogramFactory to be set; without it the metric
+	// accumulates but is never reported.
+	NativeValueHistogram(name string) NativeValueHistogram
+
+	// NativeDurationHistogram is NativeValueHistogram for durations, which it
+	// records as milliseconds.
+	//
+	// Durations are a separate metric from values, not another way to write to
+	// the same one, so a name used for both yields two distributions reported
+	// under it -- as Counter and Gauge already do.
+	NativeDurationHistogram(name string) NativeDurationHistogram
 
 	// Tagged returns a new child scope with the given tags and current tags.
 	Tagged(tags map[string]string) Scope
