@@ -58,6 +58,9 @@ const (
 	EnvTag = "env"
 	// HostTag is the name of the M3 host tag.
 	HostTag = "host"
+	// ClientLibraryName is the client library name that the reporter sends
+	// in the clientLibraryName field of each metric batch.
+	ClientLibraryName = "oss_go_tally"
 	// DefaultMaxQueueSize is the default M3 reporter queue size.
 	DefaultMaxQueueSize = 4096
 	// DefaultMaxPacketSize is the default M3 reporter max packet size.
@@ -79,6 +82,10 @@ const (
 var (
 	_maxInt64   = int64(math.MaxInt64)
 	_maxFloat64 = math.MaxFloat64
+
+	// _clientLibraryName lets each batch point to the name without an
+	// allocation per flush.
+	_clientLibraryName = ClientLibraryName
 )
 
 type metricType int
@@ -240,8 +247,9 @@ func NewReporter(opts Options) (Reporter, error) {
 	// Calculate size of common tags
 	var (
 		batch = m3thrift.MetricBatch{
-			Metrics:    resourcePool.getMetricSlice(),
-			CommonTags: tags,
+			Metrics:           resourcePool.getMetricSlice(),
+			CommonTags:        tags,
+			ClientLibraryName: &_clientLibraryName,
 		}
 		proto = resourcePool.getProto()
 	)
@@ -661,8 +669,9 @@ func (r *reporter) flush(mets []m3thrift.Metric) []m3thrift.Metric {
 	r.numBatches.Inc()
 
 	err := r.client.EmitMetricBatchV2(m3thrift.MetricBatch{
-		Metrics:    mets,
-		CommonTags: r.commonTags,
+		Metrics:           mets,
+		CommonTags:        r.commonTags,
+		ClientLibraryName: &_clientLibraryName,
 	})
 	if err != nil {
 		r.numWriteErrors.Inc()
