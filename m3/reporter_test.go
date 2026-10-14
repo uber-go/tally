@@ -31,6 +31,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 
 	tally "github.com/uber-go/tally/v7"
 	customtransport "github.com/uber-go/tally/v7/m3/customtransports"
@@ -819,3 +820,16 @@ func tagEquals(tags []m3thrift.MetricTag, tagName string, tagValue string) bool 
 	}
 	return false
 }
+
+func TestReporterAtomicAlignment(t *testing.T) {
+	var r reporter
+	assert.Equal(t, uintptr(0), unsafe.Offsetof(r.now))
+	assert.Equal(t, uintptr(0), unsafe.Offsetof(r.now)%8)
+	assert.Equal(t, uintptr(0), unsafe.Offsetof(r.pending)%8)
+	assert.Equal(t, uintptr(0), unsafe.Offsetof(r.numBatches)%8)
+	assert.Equal(t, uintptr(0), unsafe.Offsetof(r.numMetrics)%8)
+	assert.Equal(t, uintptr(0), unsafe.Offsetof(r.numWriteErrors)%8)
+	assert.Equal(t, uintptr(0), unsafe.Offsetof(r.numNativeHistogramsDropped)%8)
+	assert.Equal(t, uintptr(0), unsafe.Offsetof(r.done)%8)
+}
+
