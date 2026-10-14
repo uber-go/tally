@@ -112,38 +112,42 @@ type Reporter interface {
 // remote M3 collector, metrics are batched together and emitted
 // via either thrift compact or binary protocol in batch UDP packets.
 type reporter struct {
-	bucketIDTagName string
-	bucketTagName   string
-	bucketValFmt    string
-	buckets         []tally.BucketPair
-	calc            *customtransport.TCalcTransport
-	calcLock        sync.Mutex
-	calcProto       thrift.TProtocol
-	client          *m3thrift.M3Client
-	commonTags      []m3thrift.MetricTag
-	done            atomic.Bool
-	donech          chan struct{}
-	freeBytes       int32
-	metCh           chan sizedMetric
-	now             atomic.Int64
-	overheadBytes   int32
-	pending         atomic.Uint64
-	resourcePool    *resourcePool
-	stringInterner  *cache.StringInterner
-	tagCache        *cache.TagCache
-	wg              sync.WaitGroup
-
-	batchSizeHistogram    tally.CachedHistogram
-	numBatches            atomic.Int64
-	numBatchesCounter     tally.CachedCount
-	numMetrics            atomic.Int64
-	numMetricsCounter     tally.CachedCount
-	numWriteErrors        atomic.Int64
-	numWriteErrorsCounter tally.CachedCount
-	numTagCacheCounter    tally.CachedCount
-
+	now                               atomic.Int64
+	pending                           atomic.Uint64
+	numBatches                        atomic.Int64
+	numMetrics                        atomic.Int64
+	numWriteErrors                    atomic.Int64
 	numNativeHistogramsDropped        atomic.Int64
+	done                              atomic.Bool
+
+	donech                            chan struct{}
+	metCh                             chan sizedMetric
+
+	calc                              *customtransport.TCalcTransport
+	calcProto                         thrift.TProtocol
+	client                            *m3thrift.M3Client
+	resourcePool                      *resourcePool
+	stringInterner                    *cache.StringInterner
+	tagCache                          *cache.TagCache
+
+	batchSizeHistogram                tally.CachedHistogram
+	numBatchesCounter                 tally.CachedCount
+	numMetricsCounter                 tally.CachedCount
+	numWriteErrorsCounter             tally.CachedCount
+	numTagCacheCounter                tally.CachedCount
 	numNativeHistogramsDroppedCounter tally.CachedCount
+
+	commonTags                        []m3thrift.MetricTag
+	buckets                           []tally.BucketPair
+	bucketIDTagName                   string
+	bucketTagName                     string
+	bucketValFmt                      string
+
+	freeBytes                         int32
+	overheadBytes                     int32
+
+	calcLock                          sync.Mutex
+	wg                                sync.WaitGroup
 }
 
 // Options is a set of options for the M3 reporter.
