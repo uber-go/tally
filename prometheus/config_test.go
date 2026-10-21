@@ -21,8 +21,8 @@
 package prometheus
 
 import (
-	"io/ioutil"
 	"net"
+	"net/http"
 	"os"
 	"path"
 	"testing"
@@ -50,7 +50,7 @@ func TestListenErrorCallsOnRegisterError(t *testing.T) {
 }
 
 func TestUnixDomainSocketListener(t *testing.T) {
-	dir, err := ioutil.TempDir("", "tally-test-prometheus")
+	dir, err := os.MkdirTemp("", "tally-test-prometheus")
 	require.NoError(t, err)
 
 	defer os.RemoveAll(dir)
@@ -80,4 +80,47 @@ func TestTcpListener(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestOptionsServeMux(t *testing.T) {
+	t.Run("option ServerMux is nil", func(t *testing.T) {
+		cfg := Configuration{
+			ListenAddress: "127.0.0.1:8081",
+		}
+		_, err := cfg.NewReporter(ConfigurationOptions{})
+		require.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		res, err := http.Get("http://127.0.0.1:8081/metrics")
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, res.StatusCode)
+
+		res, err = http.Get("http://127.0.0.1:8081/debug/pprof")
+		require.NoError(t, err)
+		require.Equal(t, http.StatusNotFound, res.StatusCode)
+	})
+
+	t.Run("option ServerMux is not nil", func(t *testing.T) {
+		cfg := Configuration{
+			ListenAddress: "127.0.0.1:8082",
+		}
+
+		// an empty HandleFunc responds HTTP 200
+		http.DefaultServeMux.HandleFunc("/debug/pprof", func(w http.ResponseWriter, r *http.Request) {})
+
+		_, err := cfg.NewReporter(ConfigurationOptions{ServerMux: http.DefaultServeMux})
+		require.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		res, err := http.Get("http://127.0.0.1:8082/metrics")
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, res.StatusCode)
+
+		res, err = http.Get("http://127.0.0.1:8082/debug/pprof")
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, res.StatusCode)
+	})
+
 }
