@@ -76,11 +76,25 @@ func TestVerifyOmitCardinalityMetricsTags(t *testing.T) {
 	closer.Close()
 	r.WaitAll()
 
+	assert.NotNil(t, r.gauges[gaugeCardinalityName], "gauge cardinality should not be nil")
+	assert.NotNil(t, r.gauges[histogramCardinalityName], "histogram cardinality should not be nil")
 	assert.NotNil(t, r.gauges[counterCardinalityName], "counter cardinality should not be nil")
+	assert.NotNil(t, r.gauges[scopeCardinalityName], "scope cardinality should not be nil")
+
 	assert.Equal(
 		t, wantOmitCardinalityMetricsTags, r.gauges[counterCardinalityName].tags, "expected tags %v, got tags %v",
 		wantOmitCardinalityMetricsTags, r.gauges[counterCardinalityName].tags,
 	)
+	assert.Equal(t, wantOmitCardinalityMetricsTags, r.gauges[gaugeCardinalityName].tags, "expected tags %v, got tags %v",
+		wantOmitCardinalityMetricsTags, r.gauges[gaugeCardinalityName].tags,
+	)
+	assert.Equal(t, wantOmitCardinalityMetricsTags, r.gauges[histogramCardinalityName].tags, "expected tags %v, got tags %v",
+		wantOmitCardinalityMetricsTags, r.gauges[histogramCardinalityName].tags,
+	)
+	assert.Equal(t, wantOmitCardinalityMetricsTags, r.gauges[scopeCardinalityName].tags, "expected tags %v, got tags %v",
+		wantOmitCardinalityMetricsTags, r.gauges[scopeCardinalityName].tags,
+	)
+
 }
 
 func TestNewTestStatsReporterOneScope(t *testing.T) {
