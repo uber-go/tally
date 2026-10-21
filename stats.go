@@ -376,6 +376,9 @@ func (h *histogram) RecordValue(value float64) {
 	if h.htype != valueHistogramType {
 		return
 	}
+	if math.IsNaN(value) {
+		return
+	}
 
 	// Find the highest inclusive of the bucket upper bound
 	// and emit directly to it. Since we use BucketPairs to derive
@@ -384,6 +387,9 @@ func (h *histogram) RecordValue(value float64) {
 	idx := sort.Search(len(h.buckets), func(i int) bool {
 		return h.buckets[i].valueUpperBound >= value
 	})
+	if idx >= len(h.samples) {
+		return
+	}
 	h.samples[idx].counter.Inc(1)
 }
 
@@ -399,6 +405,9 @@ func (h *histogram) RecordDuration(value time.Duration) {
 	idx := sort.Search(len(h.buckets), func(i int) bool {
 		return h.buckets[i].durationUpperBound >= value
 	})
+	if idx >= len(h.samples) {
+		return
+	}
 	h.samples[idx].counter.Inc(1)
 }
 
