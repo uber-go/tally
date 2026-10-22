@@ -22,6 +22,7 @@ package m3
 
 import (
 	"bytes"
+	"fmt"
 	"math/rand"
 	"net"
 	"os"
@@ -183,6 +184,137 @@ func TestMetricBatchClientLibraryNameRoundTrip(t *testing.T) {
 				require.Equal(t, "foo", out.GetMetrics()[0].GetName())
 			})
 		}
+	}
+}
+
+func TestMetricValueSketchRoundTrip(t *testing.T) {
+	tests := []struct {
+		desc   string
+		sketch []byte
+	}{
+		{desc: "set", sketch: []byte{0x10, 0x01, 0x18, 0x01}},
+		{desc: "unset", sketch: nil},
+	}
+
+	factories := map[string]thrift.TProtocolFactory{
+		"binary":  thrift.NewTBinaryProtocolFactoryDefault(),
+		"compact": thrift.NewTCompactProtocolFactory(),
+	}
+
+	for protoName, factory := range factories {
+		for _, tt := range tests {
+			t.Run(protoName+"/"+tt.desc, func(t *testing.T) {
+				var (
+					buf   = thrift.NewTMemoryBuffer()
+					proto = factory.GetProtocol(buf)
+					in    = m3thrift.MetricValue{
+						MetricType: m3thrift.MetricType_SKETCH,
+						Sketch:     tt.sketch,
+					}
+					out m3thrift.MetricValue
+				)
+				require.NoError(t, in.Write(proto))
+				require.NoError(t, out.Read(proto))
+				require.Equal(t, m3thrift.MetricType_SKETCH, out.GetMetricType())
+				require.Equal(t, tt.sketch != nil, out.IsSetSketch())
+				require.Equal(t, tt.sketch, out.GetSketch())
+			})
+		}
+	}
+}
+
+func TestReporterNativeHistogram(t *testing.T) {
+	for _, protocol := range protocols {
+		t.Run(fmt.Sprintf("protocol=%d", protocol), func(t *testing.T) {
+			var wg sync.WaitGroup
+			server := newFakeM3Server(t, &wg, false, protocol)
+			go server.Serve()
+			defer server.Close()
+
+			r, err := NewReporter(Options{
+				HostPorts:          []string{server.Addr},
+				Service:            "test-service",
+				CommonTags:         defaultCommonTags,
+				Protocol:           protocol,
+				MaxQueueSize:       queueSize,
+				MaxPacketSizeBytes: maxPacketSize,
+			})
+			require.NoError(t, err)
+			defer func() {
+				assert.NoError(t, r.Close())
+			}()
+
+			tags := map[string]string{"testTag": "TestValue"}
+			h := r.AllocateNativeHistogram("my-native-histogram", tags, 160)
+
+			// An empty payload is not sent.
+			h.ReportNativeHistogram(nil, 0)
+
+			first := []byte{0x10, 0x02, 0x18, 0x02}
+			second := bytes.Repeat([]byte{0xab}, 300)
+
+			// The payloads and the internal metrics can need more than one
+			// packet, so the test counts metrics and not batches.
+			wg.Add(2 + internalMetrics)
+			h.ReportNativeHistogram(first, 2)
+			h.ReportNativeHistogram(second, 7)
+			r.Flush()
+			wg.Wait()
+
+			var sketches []m3thrift.Metric
+			for _, m := range server.Service.getMetrics() {
+				if m.GetName() == "my-native-histogram" {
+					sketches = append(sketches, m)
+				}
+			}
+			require.Len(t, sketches, 2)
+
+			for i, want := range [][]byte{first, second} {
+				m := sketches[i]
+				require.Equal(t, m3thrift.MetricType_SKETCH, m.Value.MetricType)
+				require.Equal(t, want, m.Value.Sketch)
+				require.True(t, tagEquals(m.GetTags(), "testTag", "TestValue"))
+			}
+		})
+	}
+}
+
+func TestReporterNativeHistogramTooLargeIsDropped(t *testing.T) {
+	var wg sync.WaitGroup
+	server := newFakeM3Server(t, &wg, false, Compact)
+	go server.Serve()
+	defer server.Close()
+
+	maxPacketSize := int32(1440)
+	r, err := NewReporter(Options{
+		HostPorts:          []string{server.Addr},
+		Service:            "test-service",
+		CommonTags:         defaultCommonTags,
+		MaxQueueSize:       queueSize,
+		MaxPacketSizeBytes: maxPacketSize,
+	})
+	require.NoError(t, err)
+	defer r.Close()
+
+	r.AllocateNativeHistogram("too-large", nil, 160).
+		ReportNativeHistogram(make([]byte, maxPacketSize), 1)
+
+	wg.Add(internalMetrics + 1)
+	r.Flush()
+	wg.Wait()
+
+	var dropped []m3thrift.Metric
+	for _, m := range server.Service.getMetrics() {
+		require.NotEqual(t, "too-large", m.GetName())
+		if m.GetName() == "tally.internal.num-native-histograms-dropped" {
+			dropped = append(dropped, m)
+		}
+	}
+	require.Len(t, dropped, 1)
+	require.Equal(t, int64(1), dropped[0].Value.Count)
+
+	for _, packet := range server.Packets() {
+		require.Less(t, len(packet), int(maxPacketSize))
 	}
 }
 
@@ -422,6 +554,7 @@ func TestBatchSizes(t *testing.T) {
 			counters = make(map[string]tally.CachedCount)
 			gauges   = make(map[string]tally.CachedGauge)
 			timers   = make(map[string]tally.CachedTimer)
+			sketches = make(map[string]tally.CachedNativeHistogram)
 			randTags = func() map[string]string {
 				return map[string]string{
 					"t1": "val" + strconv.Itoa(rand.Intn(10000)),
@@ -429,7 +562,7 @@ func TestBatchSizes(t *testing.T) {
 			}
 		)
 		for atomic.LoadUint32(&stop) == 0 {
-			metTypeRand := rand.Intn(9)
+			metTypeRand := rand.Intn(12)
 			name := "size.test.metric.name" + strconv.Itoa(rand.Intn(50))
 
 			if metTypeRand <= 2 {
@@ -444,12 +577,19 @@ func TestBatchSizes(t *testing.T) {
 					gauges[name] = r.AllocateGauge(name, randTags())
 				}
 				gauges[name].ReportGauge(rand.Float64() * 10000)
-			} else {
+			} else if metTypeRand <= 8 {
 				_, ok := timers[name]
 				if !ok {
 					timers[name] = r.AllocateTimer(name, randTags())
 				}
 				timers[name].ReportTimer(time.Duration(rand.Int63n(10000)))
+			} else {
+				_, ok := sketches[name]
+				if !ok {
+					sketches[name] = r.AllocateNativeHistogram(name, randTags(), 160)
+				}
+				payload := make([]byte, 1+rand.Intn(600))
+				sketches[name].ReportNativeHistogram(payload, 1)
 			}
 		}
 		r.Close()

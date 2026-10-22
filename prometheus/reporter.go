@@ -577,8 +577,8 @@ func (r *reporter) AllocateHistogram(
 // AllocateNativeHistogram implements tally.CachedStatsReporter.
 //
 // Prometheus has native histograms of its own, but tally hands this method an
-// already-serialized payload in whatever encoding the application chose via
-// ScopeOptions.NativeHistogramFactory. An opaque blob cannot be turned into a
+// already-serialized payload, in the default encoding or in whatever encoding
+// the application chose via ScopeOptions.NativeHistogramFactory. An opaque blob cannot be turned into a
 // prometheus.Collector, so there is nothing to register and the metric is
 // dropped.
 func (r *reporter) AllocateNativeHistogram(
