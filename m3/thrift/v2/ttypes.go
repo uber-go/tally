@@ -23,6 +23,7 @@ const (
 	MetricType_COUNTER MetricType = 1
 	MetricType_GAUGE   MetricType = 2
 	MetricType_TIMER   MetricType = 3
+	MetricType_SKETCH  MetricType = 4
 )
 
 func (p MetricType) String() string {
@@ -35,6 +36,8 @@ func (p MetricType) String() string {
 		return "GAUGE"
 	case MetricType_TIMER:
 		return "TIMER"
+	case MetricType_SKETCH:
+		return "SKETCH"
 	}
 	return "<UNSET>"
 }
@@ -49,6 +52,8 @@ func MetricTypeFromString(s string) (MetricType, error) {
 		return MetricType_GAUGE, nil
 	case "TIMER":
 		return MetricType_TIMER, nil
+	case "SKETCH":
+		return MetricType_SKETCH, nil
 	}
 	return MetricType(0), fmt.Errorf("not a valid MetricType string")
 }
@@ -73,11 +78,13 @@ func (p *MetricType) UnmarshalText(text []byte) error {
 //  - Count
 //  - Gauge
 //  - Timer
+//  - Sketch
 type MetricValue struct {
 	MetricType MetricType `thrift:"metricType,1,required" json:"metricType"`
 	Count      int64      `thrift:"count,2,required" json:"count"`
 	Gauge      float64    `thrift:"gauge,3,required" json:"gauge"`
 	Timer      int64      `thrift:"timer,4,required" json:"timer"`
+	Sketch     []byte     `thrift:"sketch,5" json:"sketch,omitempty"`
 }
 
 func NewMetricValue() *MetricValue {
@@ -98,6 +105,15 @@ func (p *MetricValue) GetGauge() float64 {
 
 func (p *MetricValue) GetTimer() int64 {
 	return p.Timer
+}
+
+var MetricValue_Sketch_DEFAULT []byte
+
+func (p *MetricValue) GetSketch() []byte {
+	return p.Sketch
+}
+func (p *MetricValue) IsSetSketch() bool {
+	return p.Sketch != nil
 }
 func (p *MetricValue) Read(iprot thrift.TProtocol) error {
 	if _, err := iprot.ReadStructBegin(); err != nil {
@@ -138,6 +154,10 @@ func (p *MetricValue) Read(iprot thrift.TProtocol) error {
 				return err
 			}
 			issetTimer = true
+		case 5:
+			if err := p.readField5(iprot); err != nil {
+				return err
+			}
 		default:
 			if err := iprot.Skip(fieldTypeId); err != nil {
 				return err
@@ -202,6 +222,15 @@ func (p *MetricValue) readField4(iprot thrift.TProtocol) error {
 	return nil
 }
 
+func (p *MetricValue) readField5(iprot thrift.TProtocol) error {
+	if v, err := iprot.ReadBinary(); err != nil {
+		return thrift.PrependError("error reading field 5: ", err)
+	} else {
+		p.Sketch = v
+	}
+	return nil
+}
+
 func (p *MetricValue) Write(oprot thrift.TProtocol) error {
 	if err := oprot.WriteStructBegin("MetricValue"); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err)
@@ -216,6 +245,9 @@ func (p *MetricValue) Write(oprot thrift.TProtocol) error {
 		return err
 	}
 	if err := p.writeField4(oprot); err != nil {
+		return err
+	}
+	if err := p.writeField5(oprot); err != nil {
 		return err
 	}
 	if err := oprot.WriteFieldStop(); err != nil {
@@ -275,6 +307,21 @@ func (p *MetricValue) writeField4(oprot thrift.TProtocol) (err error) {
 	}
 	if err := oprot.WriteFieldEnd(); err != nil {
 		return thrift.PrependError(fmt.Sprintf("%T write field end error 4:timer: ", p), err)
+	}
+	return err
+}
+
+func (p *MetricValue) writeField5(oprot thrift.TProtocol) (err error) {
+	if p.IsSetSketch() {
+		if err := oprot.WriteFieldBegin("sketch", thrift.STRING, 5); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field begin error 5:sketch: ", p), err)
+		}
+		if err := oprot.WriteBinary(p.Sketch); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T.sketch (5) field write error: ", p), err)
+		}
+		if err := oprot.WriteFieldEnd(); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T write field end error 5:sketch: ", p), err)
+		}
 	}
 	return err
 }

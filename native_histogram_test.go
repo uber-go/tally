@@ -298,40 +298,23 @@ func TestNativeHistogramSnapshot(t *testing.T) {
 	assert.Equal(t, uint64(3), h.snapshot())
 }
 
-func TestDefaultNativeHistogramData(t *testing.T) {
-	data := defaultNativeHistogramFactory(DefaultNativeHistogramMaxBuckets)
-
-	assert.Equal(t, uint64(0), data.Count())
-
-	data.Update(1)
-	data.Update(2)
-	assert.Equal(t, uint64(2), data.Count())
-
-	payload, err := data.MarshalBinary()
-	assert.Nil(t, payload)
-	assert.ErrorIs(t, err, ErrNativeHistogramBackendNotConfigured)
-
-	data.Clear()
-	assert.Equal(t, uint64(0), data.Count())
-}
-
-// Without a NativeHistogramFactory a scope's native histograms must accumulate
-// harmlessly and never report, rather than panicking or emitting nonsense.
-func TestDefaultNativeHistogramDataIsInert(t *testing.T) {
+// A scope's native histograms default to the exponential histogram, so a
+// value recorded without a factory is reported as a decodable payload.
+func TestDefaultNativeHistogramFactory(t *testing.T) {
 	acc := newNativeHistogram(
-		defaultNativeHistogramFactory(DefaultNativeHistogramMaxBuckets),
+		newExpoHistogramData(DefaultNativeHistogramMaxBuckets),
 		nil,
 	)
 	r := newStatsTestReporter()
 
-	nativeValueHistogram{acc}.RecordValue(1)
-	nativeDurationHistogram{acc}.RecordDuration(time.Second)
-	assert.Equal(t, uint64(2), acc.snapshot(), "values are still counted")
-
+	nativeValueHistogram{acc}.RecordValue(4)
 	acc.report("nh", nil, r)
 
-	assert.Nil(t, r.nativeHistogramPayload, "but nothing is reported")
-	assert.Equal(t, uint64(0), acc.snapshot(), "and the failed marshal clears")
+	require.NotNil(t, r.nativeHistogramPayload)
+	h := decodeExpoHistogram(t, r.nativeHistogramPayload)
+	assert.Equal(t, uint64(1), h.count)
+	assert.Equal(t, 4.0, h.sum)
+	assert.Equal(t, uint64(0), acc.snapshot(), "report drains")
 }
 
 func TestDefaultNativeHistogramMaxBucketsValue(t *testing.T) {
@@ -472,8 +455,8 @@ func TestScopeNativeHistogramMaxBuckets(t *testing.T) {
 	}
 }
 
-// A scope with no NativeHistogramFactory must stay usable: values are counted
-// but nothing is ever reported.
+// A scope with no NativeHistogramFactory reports exponential histogram
+// payloads. Durations are recorded as milliseconds.
 func TestScopeNativeHistogramWithoutFactory(t *testing.T) {
 	r := newTestStatsReporter()
 
@@ -485,20 +468,24 @@ func TestScopeNativeHistogramWithoutFactory(t *testing.T) {
 
 	s := root.(*scope)
 
-	values := s.NativeValueHistogram("payload_bytes").(nativeValueHistogram)
-	durations := s.NativeDurationHistogram("latency").(nativeDurationHistogram)
-	values.RecordValue(1)
-	durations.RecordDuration(time.Second)
+	s.NativeValueHistogram("payload_bytes").RecordValue(512)
+	s.NativeDurationHistogram("latency").RecordDuration(time.Second)
 
-	require.Equal(t, uint64(1), values.snapshot(), "values are counted")
-	require.Equal(t, uint64(1), durations.snapshot())
-
+	r.nhg.Add(2)
 	s.report(r)
 	r.WaitAll()
 
-	assert.Empty(t, r.getNativeHistograms(), "but nothing is reported")
-	assert.Equal(t, uint64(0), values.snapshot(), "and the failed marshal clears")
-	assert.Equal(t, uint64(0), durations.snapshot())
+	got := r.getNativeHistograms()
+	require.Len(t, got, 2)
+
+	values := decodeExpoHistogram(t, got["payload_bytes"].payload)
+	assert.Equal(t, uint64(1), got["payload_bytes"].samples)
+	assert.Equal(t, uint64(1), values.count)
+	assert.Equal(t, 512.0, values.sum)
+
+	durations := decodeExpoHistogram(t, got["latency"].payload)
+	assert.Equal(t, uint64(1), got["latency"].samples)
+	assert.Equal(t, 1000.0, durations.sum, "durations are milliseconds")
 }
 
 func TestScopeNativeHistogramSubscopesInheritFactory(t *testing.T) {

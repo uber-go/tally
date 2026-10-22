@@ -94,6 +94,7 @@ const (
 	counterType metricType = iota + 1
 	timerType
 	gaugeType
+	sketchType
 )
 
 var (
@@ -457,16 +458,17 @@ func (r *reporter) AllocateHistogram(
 
 // AllocateNativeHistogram implements tally.CachedStatsReporter.
 //
-// The M3 thrift wire format carries only count, gauge and timer values, so
-// there is no field a serialized native histogram payload can travel in.
-// Rather than silently discard them, the returned handle counts every dropped
-// report into tally.internal.num-native-histograms-dropped.
+// Each payload is sent as a SKETCH metric. maxBuckets is not used, because the
+// accumulator that produces the payload already applies it.
 func (r *reporter) AllocateNativeHistogram(
 	name string,
 	tags map[string]string,
 	maxBuckets int,
 ) tally.CachedNativeHistogram {
-	return cachedNativeHistogram{reporter: r}
+	return cachedNativeHistogram{
+		metric:   r.newMetric(name, tags, sketchType),
+		reporter: r,
+	}
 }
 
 func (r *reporter) valueBucketString(v float64) string {
@@ -512,6 +514,8 @@ func (r *reporter) newMetric(
 	case timerType:
 		m.Value.MetricType = m3thrift.MetricType_TIMER
 		m.Value.Timer = _maxInt64
+	case sketchType:
+		m.Value.MetricType = m3thrift.MetricType_SKETCH
 	}
 
 	if len(tags) == 0 {
@@ -679,9 +683,11 @@ func (r *reporter) flush(mets []m3thrift.Metric) []m3thrift.Metric {
 
 	// n.b. In the event that we had allocated additional tag storage in
 	//      process(), clear it so that it can be reclaimed. This does not
-	//      affect allocated metrics' tags.
+	//      affect allocated metrics' tags. Sketch payloads are cleared for the
+	//      same reason.
 	for i := range mets {
 		mets[i].Tags = nil
+		mets[i].Value.Sketch = nil
 	}
 	return mets[:0]
 }
@@ -729,9 +735,9 @@ func (r *reporter) reportInternalMetrics() {
 	r.numWriteErrorsCounter.ReportCount(writeErrors)
 	r.numTagCacheCounter.ReportCount(int64(r.tagCache.Len()))
 
-	// Reported only when non-zero. Emitting it unconditionally would add a
-	// permanently-zero series to every m3 reporter in a fleet, since almost
-	// no caller uses native histograms with this reporter.
+	// Reported only when non-zero. Only a payload too large for one packet
+	// is dropped, so emitting it unconditionally would add a series that is
+	// almost always zero to every m3 reporter in a fleet.
 	if dropped := r.numNativeHistogramsDropped.Swap(0); dropped > 0 {
 		r.numNativeHistogramsDroppedCounter.ReportCount(dropped)
 	}
@@ -771,14 +777,30 @@ func (c cachedMetric) ReportTimer(interval time.Duration) {
 	c.reporter.reportCopyMetric(c.metric, c.size, "", "")
 }
 
-// cachedNativeHistogram discards native histogram payloads, which the M3
-// thrift wire format cannot represent, and counts the drops.
+// cachedNativeHistogram sends each native histogram payload as a SKETCH
+// metric.
 type cachedNativeHistogram struct {
+	metric   m3thrift.Metric
 	reporter *reporter
 }
 
+// ReportNativeHistogram computes the size of each report separately, because
+// the payload size changes from one interval to the next. A payload that does
+// not fit in one packet is dropped and counted into
+// tally.internal.num-native-histograms-dropped.
 func (c cachedNativeHistogram) ReportNativeHistogram(payload []byte, samples uint64) {
-	c.reporter.numNativeHistogramsDropped.Inc()
+	if len(payload) == 0 {
+		return
+	}
+
+	c.metric.Value.Sketch = payload
+	size := c.reporter.calculateSize(c.metric)
+	if size > c.reporter.freeBytes {
+		c.reporter.numNativeHistogramsDropped.Inc()
+		return
+	}
+
+	c.reporter.reportCopyMetric(c.metric, size, "", "")
 }
 
 type noopMetric struct{}

@@ -31,16 +31,20 @@ import (
 // default max size.
 const DefaultNativeHistogramMaxBuckets = 160
 
-// ErrNativeHistogramBackendNotConfigured is returned by MarshalBinary when a
-// scope has no ScopeOptions.NativeHistogramFactory. Values are still counted,
-// but there is no encoder to serialize them with, so nothing is reported.
+// ErrNativeHistogramBackendNotConfigured was returned by MarshalBinary when a
+// scope had no ScopeOptions.NativeHistogramFactory.
+//
+// Deprecated: A scope without a NativeHistogramFactory now uses an
+// OpenTelemetry exponential histogram, so nothing returns this error.
 var ErrNativeHistogramBackendNotConfigured = errors.New(
 	"native histogram backend not configured: " +
 		"set ScopeOptions.NativeHistogramFactory",
 )
 
-// NativeHistogramData is a mergeable accumulator backing a NativeHistogram,
-// supplied by the application through ScopeOptions.NativeHistogramFactory.
+// NativeHistogramData is a mergeable accumulator backing a NativeHistogram.
+// The default is an OpenTelemetry base-2 exponential histogram that marshals
+// to the proto3 ExponentialHistogram message. An application can supply a
+// different one through ScopeOptions.NativeHistogramFactory.
 //
 // Implementations need not be safe for concurrent use; the owning scope
 // serializes every call. MarshalBinary is expected to produce a self-describing
@@ -204,31 +208,4 @@ func (h nativeDurationHistogram) Start() Stopwatch {
 func (h nativeDurationHistogram) RecordStopwatch(stopwatchStart time.Time) {
 	d := globalNow().Sub(stopwatchStart)
 	h.RecordDuration(d)
-}
-
-// defaultNativeHistogramData counts observations but cannot serialize them.
-// It is what a scope falls back to when no NativeHistogramFactory is set, so
-// that the native histogram methods are safe to call but emit nothing.
-type defaultNativeHistogramData struct {
-	count uint64
-}
-
-func defaultNativeHistogramFactory(maxBuckets int) NativeHistogramData {
-	return &defaultNativeHistogramData{}
-}
-
-func (d *defaultNativeHistogramData) Update(value float64) {
-	d.count++
-}
-
-func (d *defaultNativeHistogramData) Count() uint64 {
-	return d.count
-}
-
-func (d *defaultNativeHistogramData) Clear() {
-	d.count = 0
-}
-
-func (d *defaultNativeHistogramData) MarshalBinary() ([]byte, error) {
-	return nil, ErrNativeHistogramBackendNotConfigured
 }

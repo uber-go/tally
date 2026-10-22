@@ -27,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	tally "github.com/uber-go/tally/v7"
+	m3thrift "github.com/uber-go/tally/v7/m3/thrift/v2"
 )
 
 var commonTags = map[string]string{"env": "test"}
@@ -111,6 +112,38 @@ func TestScopeCounter(t *testing.T) {
 	emittedMetrics := server.Service.getBatches()[0].GetMetrics()
 	require.Equal(t, internalMetrics+cardinalityMetrics+1, len(emittedMetrics))
 	require.Equal(t, "honk.foobar", emittedMetrics[cardinalityMetrics].GetName())
+}
+
+// TestScopeNativeHistogram tests that a scope with the default native
+// histogram factory sends a SKETCH metric.
+func TestScopeNativeHistogram(t *testing.T) {
+	var wg sync.WaitGroup
+	server := newFakeM3Server(t, &wg, false, Compact)
+	go server.Serve()
+	defer server.Close()
+
+	tags := map[string]string{"testTag": "TestValue", "testTag2": "TestValue2"}
+
+	_, scope, close := newTestReporterScope(t, server.Addr, "honk", tags)
+
+	// The sketch payload pushes the final report over one packet, so the
+	// test counts metrics and not batches.
+	wg.Add(internalMetrics + cardinalityMetrics + 1)
+	h := scope.NativeDurationHistogram("latency")
+	h.RecordDuration(5 * time.Millisecond)
+	h.RecordDuration(50 * time.Millisecond)
+	close()
+	wg.Wait()
+
+	var sketches []m3thrift.Metric
+	for _, m := range server.Service.getMetrics() {
+		if m.Value.MetricType == m3thrift.MetricType_SKETCH {
+			sketches = append(sketches, m)
+		}
+	}
+	require.Len(t, sketches, 1)
+	require.Equal(t, "honk.latency", sketches[0].GetName())
+	require.NotEmpty(t, sketches[0].Value.Sketch)
 }
 
 // TestScopeGauge tests that scope works as expected

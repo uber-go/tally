@@ -118,9 +118,9 @@ type ScopeOptions struct {
 	CardinalityMetricsTags map[string]string
 
 	// NativeHistogramFactory supplies the accumulator backing each native
-	// histogram created on this scope and its subscopes. Leaving it nil makes
-	// the native histogram methods safe to call, but values are merely counted and
-	// never reported.
+	// histogram created on this scope and its subscopes. If it is nil, the
+	// scope uses an OpenTelemetry exponential histogram that marshals to the
+	// proto3 ExponentialHistogram message.
 	NativeHistogramFactory func(maxBuckets int) NativeHistogramData
 
 	// DefaultNativeHistogramMaxBuckets is the bucket budget for every native
@@ -185,7 +185,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 	}
 
 	if opts.NativeHistogramFactory == nil {
-		opts.NativeHistogramFactory = defaultNativeHistogramFactory
+		opts.NativeHistogramFactory = newExpoHistogramData
 	}
 	if opts.DefaultNativeHistogramMaxBuckets < 1 {
 		opts.DefaultNativeHistogramMaxBuckets = DefaultNativeHistogramMaxBuckets

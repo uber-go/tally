@@ -3,6 +3,7 @@ enum MetricType {
     COUNTER = 1
     GAUGE = 2
     TIMER = 3
+    SKETCH = 4
 }
 
 struct MetricValue {
@@ -10,6 +11,7 @@ struct MetricValue {
     2: required i64 count
     3: required double gauge
     4: required i64 timer
+    5: optional binary sketch
 }
 
 struct MetricTag {

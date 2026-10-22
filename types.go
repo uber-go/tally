@@ -60,9 +60,7 @@ type Scope interface {
 	// Unlike Histogram, bucket boundaries are derived from the observations
 	// rather than declared up front, and the distribution is reported as a
 	// single serialized payload. The bucket budget is
-	// ScopeOptions.DefaultNativeHistogramMaxBuckets. Requires
-	// ScopeOptions.NativeHistogramFactory to be set; without it the metric
-	// accumulates but is never reported.
+	// ScopeOptions.DefaultNativeHistogramMaxBuckets.
 	NativeValueHistogram(name string) NativeValueHistogram
 
 	// NativeDurationHistogram is NativeValueHistogram for durations, which it

@@ -66,10 +66,10 @@ index f8a4434..0da14bd 100644
  		return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", p.Batch), err)
  	}
 diff --git a/m3/thrift/v2/ttypes.go b/m3/thrift/v2/ttypes.go
-index 759107c..ae8b68c 100644
+index 4f6c63c..b381934 100644
 --- a/m3/thrift/v2/ttypes.go
 +++ b/m3/thrift/v2/ttypes.go
-@@ -429,10 +429,10 @@ func (p *MetricTag) String() string {
+@@ -476,10 +476,10 @@ func (p *MetricTag) String() string {
  //  - Timestamp
  //  - Tags
  type Metric struct {
@@ -84,7 +84,7 @@ index 759107c..ae8b68c 100644
  }
  
  func NewMetric() *Metric {
-@@ -443,9 +443,9 @@ func (p *Metric) GetName() string {
+@@ -490,9 +490,9 @@ func (p *Metric) GetName() string {
  	return p.Name
  }
  
@@ -96,7 +96,7 @@ index 759107c..ae8b68c 100644
  	if !p.IsSetValue() {
  		return Metric_Value_DEFAULT
  	}
-@@ -456,13 +456,13 @@ func (p *Metric) GetTimestamp() int64 {
+@@ -503,13 +503,13 @@ func (p *Metric) GetTimestamp() int64 {
  	return p.Timestamp
  }
  
@@ -113,7 +113,7 @@ index 759107c..ae8b68c 100644
  }
  
  func (p *Metric) IsSetTags() bool {
-@@ -540,7 +540,7 @@ func (p *Metric) readField1(iprot thrift.TProtocol) error {
+@@ -587,7 +587,7 @@ func (p *Metric) readField1(iprot thrift.TProtocol) error {
  }
  
  func (p *Metric) readField2(iprot thrift.TProtocol) error {
@@ -122,7 +122,7 @@ index 759107c..ae8b68c 100644
  	if err := p.Value.Read(iprot); err != nil {
  		return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", p.Value), err)
  	}
-@@ -561,10 +561,10 @@ func (p *Metric) readField4(iprot thrift.TProtocol) error {
+@@ -608,10 +608,10 @@ func (p *Metric) readField4(iprot thrift.TProtocol) error {
  	if err != nil {
  		return thrift.PrependError("error reading list begin: ", err)
  	}
@@ -135,7 +135,7 @@ index 759107c..ae8b68c 100644
  		if err := _elem0.Read(iprot); err != nil {
  			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem0), err)
  		}
-@@ -675,22 +675,22 @@ func (p *Metric) String() string {
+@@ -722,22 +722,22 @@ func (p *Metric) String() string {
  //  - CommonTags
  //  - ClientLibraryName
  type MetricBatch struct {
@@ -164,7 +164,7 @@ index 759107c..ae8b68c 100644
  	return p.CommonTags
  }
  
-@@ -762,10 +762,10 @@ func (p *MetricBatch) readField1(iprot thrift.TProtocol) error {
+@@ -809,10 +809,10 @@ func (p *MetricBatch) readField1(iprot thrift.TProtocol) error {
  	if err != nil {
  		return thrift.PrependError("error reading list begin: ", err)
  	}
@@ -177,7 +177,7 @@ index 759107c..ae8b68c 100644
  		if err := _elem1.Read(iprot); err != nil {
  			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem1), err)
  		}
-@@ -782,10 +782,10 @@ func (p *MetricBatch) readField2(iprot thrift.TProtocol) error {
+@@ -829,10 +829,10 @@ func (p *MetricBatch) readField2(iprot thrift.TProtocol) error {
  	if err != nil {
  		return thrift.PrependError("error reading list begin: ", err)
  	}
